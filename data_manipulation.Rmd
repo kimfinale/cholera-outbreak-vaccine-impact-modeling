@@ -1,0 +1,181 @@
+---
+title: "Data modification"
+output: html_document
+date: "2024-01-25"
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Packages
+
+```{r}
+library(data.table)
+library(tidyverse)
+source("R/functions.R")
+```
+
+## Data sets
+
+```{r}
+ds <- fread("inst/extdata/outbreak_data_summary.csv")
+ds$ID_outbreak <- paste0(ds$location, "-", ds$start_date, "-", ds$end_date)
+ds$ID <- 1:nrow(ds)
+# data for the outbreaks affected by OCV
+docv <- fread("inst/extdata/ocv_long_dataset.csv")
+# exclude outbreaks that were affected by OCV campaigns using IDs 
+dat <- ds[!(ds$ID_outbreak %in% docv$ID_outbreak),]
+ts <- readRDS("inst/extdata/outbreak_data_ts.rds")
+
+fits <- fread("outputs/data_fit_eval_20240409.csv")
+good_fits <- fits[PARAM_GLOBAL == 1 & PARAM_SANITY_5pct == 1 & 
+                   FIT_SANITY == 1 & R2_adj >= 0.5]
+```
+
+Create the weekly incidence of all outbreaks by date and epidemic week
+
+```{r}
+# ts <- readRDS("inst/extdata/outbreak_data_ts.rds")
+ts <- fread("inst/extdata/outbreak_data_ts.csv")
+ts <- ts[ts$ID_outbreak %in% dat$ID_outbreak,]
+
+ids <- unique(ts$ID_outbreak)
+length(ids)
+
+dlist <- vector('list', length(ids))
+
+for (i in 1:length(ids)) {
+  cat("i = ", i, "\n")
+  # id <- ds$ID_outbreak[i]
+  id <- ids[i]
+  data_id <- ds[ds$ID_outbreak == id, ID]
+  d <- ts[ts$ID_outbreak == id, ]
+  tscale <- d$temporal_scale
+  
+  if (length(unique(tscale)) > 1) {
+    stop("Mutiple temporal scales")
+  } 
+  if (tscale[1] == "weekly") {
+    dlist[[i]] <- data.frame(country = d$country,
+                             week=1:nrow(d),
+                             id=id, 
+                             data_id=data_id, 
+                             date=d$TR, 
+                             sCh=d$sCh)  
+  }
+  else if (tscale[1] == "daily") {
+    rem <- nrow(d) %% 7
+    if(rem != 0) {
+       stop("Number of rows of an outbreak recorded daily is not multiple of 7")
+    }
+    cumcase <- cumsum(d$sCh)
+    weekly_case <- c(cumcase[7],diff(cumcase[seq(by=7,length.out=nrow(d)/7)]))
+    df <- data.frame(country = d$country[1],
+                     week=1:length(weekly_case),
+                     id=id, 
+                     data_id=data_id,
+                     date=d$TR[seq(7,by=7,length.out=nrow(d)/7)],
+                     sCh=weekly_case)
+    # cat(", num_row of df = ", nrow(df), "\n")
+    if(nrow(df) >= nrow(d)) {
+       stop("Daily converted to weekly must have a smaller number of rows.")
+    }
+    dlist[[i]] <- df
+  }
+}
+
+ts_week <- rbindlist(dlist)
+
+ts_week$good_fit <- ifelse(ts_week$data_id %in% good_fits$ID, 1, 0)
+ts_week$OCV_use <- ifelse(ts_week$id %in% docv$ID_outbreak, 1, 0)
+
+
+# fwrite(ts_week, "outputs/ts999_week.csv")
+fwrite(ts_week, paste0("outputs/ts824_week",tstamp(),".csv"))
+
+# one row by condition
+for (i in 1:length(ids)) {
+  d <- ts_week[id == ids[i],]
+  wks <- 1:nrow(d)
+  cat("i =", i, "\n")
+  for (j in 1:length(wks)) {
+    nr <- nrow(d[d$week == wks[j],])
+    if (nr != 1) {
+      stop("Number of rows must equal to 1!")
+    }
+  }
+}
+```
+
+113 outbreaks based on the `ts824_week` 
+```{r}
+dat |> 
+  filter(!is.na(total_confirmed_cases), total_confirmed_cases > 0) |> 
+  pull(ID_outbreak) -> idx_lab_confirmed
+
+ts824_wk <- as.data.frame(fread("outputs/ts824_week.csv"))
+ts824_wk |> filter(id %in% idx_lab_confirmed) -> ts113_wk
+length(unique(ts113_wk$id))
+fwrite(ts113_wk, paste0("outputs/ts113_week.csv"))
+```
+
+Combine vaccine impact 
+```{r}
+vacc_cov <- 1:9
+vacc_week <- 0:12
+vacc_impact_list <- vector('list', length(vacc_cov))
+for (i in 1:length(vacc_cov)) {
+  vc <- vacc_cov[i]
+  cols = paste0("inc_C", vc, "T", vacc_week)
+  d = read.csv(paste0("G:\\My Drive\\Projects\\VIMC\\VIMC 2.0\\CholeraOutbreakModel\\julia\\outputs\\vacc_4p_cov", vc, "_20240425.csv"))
+  # NA values are replaced with baseline incidence values when no vaccines were
+  # introduced. The decision was made because NA values were created when
+  # the vaccination was not implemented because outbreak ended earlier than
+  # the vaccination start + duration
+  for (col in cols) {
+    nas = is.na(d[, col])
+    d[nas, col] = d[nas, "inc_novacc"]
+  }
+  d |>
+    group_by(data_id) |>
+    summarise(data_id = data_id[1],
+              ID_outbreak = ID_outbreak[1],
+              across(contains("inc"), sum)) -> d2
+  
+  col_id = 1:ncol(d2)
+  id_iter <- col_id[grepl("inc_C", names(d2))]
+  d3 <- d2
+  for (k in id_iter) {
+    d3[,k] = 100 * (d2[,"inc_novacc"] - d2[,k]) / d2[,"inc_novacc"]
+  }
+  
+  d4 = data.frame(data_id = rep(d3$data_id, length(vacc_week)),
+                  ID_outbreak = rep(d3$ID_outbreak, length(vacc_week)),
+                  vacc_eff = unlist(d3[, id_iter]), 
+                  vacc_cov = vc,
+                  vacc_week = rep(vacc_week, each=nrow(d3)))
+ 
+  
+  vacc_impact_list[[i]] <- d4
+}
+
+vacc_impact <- do.call('rbind', vacc_impact_list)
+# vacc_impact_0425 based on parameters comparable to the static model
+# i.e., no waning of vaccine-induced immunity and vaccine efficacy of [30, 64]
+# fwrite(vacc_impact, paste0("outputs/dynamic_vim", tstamp(), ".csv"))
+```
+
+Life expectancy data
+```{r}
+library(readxl)
+life_exp <- readxl::read_xlsx("data/WPP2022_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx",
+                     "Estimates")
+nms <- life_exp[12,]
+life_exp <- lifeexp[-(1:12),]
+names(life_exp) <- nms
+data.table::fwrite(life_exp, "outputs/wpp_life_expectancy.csv")
+```
+

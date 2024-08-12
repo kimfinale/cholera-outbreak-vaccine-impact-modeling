@@ -1,0 +1,326 @@
+---
+title: "Parameters"
+output: html_notebook
+editor_options: 
+  chunk_output_type: console
+---
+
+#### Direct vaccine efficacy
+We assume that the one-dose efficacy is similar to two-dose efficacy in the first of vaccination
+Two-dose efficacy data is based on meta-analyses reported in Bi (2017) Lancet Infect Dis
+```{r}
+dve <- data.frame(age = c("U5", "5+"),
+                  estimates = c(0.30, 0.64),
+                  lb = c(0.15, 0.58),
+                  ub = c(0.42, 0.70))
+rn <- 0.2
+
+dve$irr_est <- 1 - dve$est
+dve$irr_lb <- 1 - dve$lb
+dve$irr_ub <- 1 - dve$ub
+# make use of that incidence rate ratio (irr) is approximately normally distributed
+dve$irr_se <- (dve$irr_lb - dve$irr_ub)/2/1.96
+
+# x = punif(x) when x ~ unif(0,1)
+1 - qnorm(0.975, mean=dve$irr_est[1], sd=dve$irr_se[1])
+1 - qnorm(0.975, mean=dve$irr_est[2], sd=dve$irr_se[2])
+
+n <- 1e5
+set.seed(12)
+irr_sample <- data.frame(U5 = rnorm(n, dve$irr_est[1], dve$irr_se[1]))
+irr_sample$five_above <- rnorm(n, dve$irr_est[2], dve$irr_se[2])
+dve_sample <- 1 - irr_sample
+
+sn <- sample.int(n, 200)
+plot(dve_sample[sn, 1], dve_sample[sn, 2])
+points(dve_sample2[sn, 1], dve_sample2[sn, 2], col="firebrick")
+colMeans(dve_sample)
+
+# consider covariance between 
+var_fac <- 0.1
+Sigma <- matrix(c(dve$irr_se[1], dve$irr_se[2]*var_fac, 
+                  dve$irr_se[2]*var_fac, dve$irr_se[2]), 2, 2) # var-covariance matrix
+irr_sample2 <- mvtnorm::rmvnorm(n, mean=dve$irr_est, sigma=Sigma)
+dve_sample2 <- 1 - irr_sample2
+colMeans(dve_sample2)
+```
+
+#### Indirect vaccine efficacy
+
+```{r}
+# Ali (2005) Matlab, Bangladesh
+# Individuals targeted for the trial, 89 596
+# this is the first year of 4,035 in surveillance and therefore
+# vaccine waning is ignored
+vc_cut <- c(0, 0.28, 0.35, 0.40, 0.50, 0.65) # vaccine coverage cutoff, Table 1
+vc_matlab <- vc_cut[1:5] + diff(vc_cut)/2
+
+# Clemens JD, Sack DA, Harris JR, et al. Field trial of oral cholera vaccines in Bangladesh. Lancet 1986; 2: 124–7.
+# Table 1
+df <- data.frame(age=c("2-5","6-10","11-15",">15"),
+                 BSWC=c(3797,5028,4159,8157),
+                 WC=c(3951,4887,4276,8023))
+
+prop_U10 <- (sum(df[(df$age =="2-5" | df$age =="6-10"),]$BSWC) +
+              sum(df[(df$age =="2-5" | df$age =="6-10"),]$WC))/
+  (sum(df$BSWC)+sum(df$WC))
+df <- data.frame(age=c("2-10",">10"),
+                 BSWC_py=c(8825,12316),
+                 BSWC_event=c(1,3),
+                 WC_py=c(8838,12299),
+                 WC_event=c(6,5),
+                 Ecoli_py=c(8936,12284),
+                 Ecoli_event=c(13,13))
+
+# we combine BSWC and WC because they are combined in the reanalysis of IVE
+dve_U10 <- with(df, 1 - ((BSWC_event[1]+WC_event[1])/(BSWC_py[1]+WC_py[1]))/
+  (Ecoli_event[1]/Ecoli_py[1]))
+dve_10up <- with(df, 1 - ((BSWC_event[2]+WC_event[2])/(BSWC_py[2]+WC_py[2]))/
+  (Ecoli_event[2]/Ecoli_py[2]))
+
+# ve_first_year <- 0.65 # the data coming from the first year of vaccination
+# vaccine waning and natural 
+eff_vc_matlab <- (dve_U10*prop_U10 + dve_10up*(1-prop_U10))*vc_matlab 
+ir <- c(7.01, 5.87, 4.72, 4.65, 1.47) # incidence rate
+# lowest vaccine coverage group has no indirect effect
+ive_matlab <- (ir[1]-ir)/ir[1]
+
+irdf_ml <- data.frame(N=c(2852,4429,5503,5801,6082),
+           cases=c(20,26,26,27,9))
+ir_ml <- irdf_ml$cases / irdf_ml$N
+irr_ml <- ir_ml[2:5]/ir_ml[1]
+
+# Poisson approximation
+est_ml <- 1 - irr_ml
+lb_ml <- 1 - exp(log(irr_ml) + 
+                   qnorm(0.975)*sqrt(1/irdf_ml$cases[2:5] + 1/irdf_ml$cases[1]))
+ub_ml <- 1 - exp(log(irr_ml) - 
+                   qnorm(0.975)*sqrt(1/irdf_ml$cases[2:5] + 1/irdf_ml$cases[1]))
+
+# lb <- 1 - irr * exp(qnorm(0.975) * sqrt(1/irdf$cases[2:5] + 1/irdf$cases[1]))
+# ub <- 1 - irr * exp(-qnorm(0.975) * sqrt(1/irdf$cases[2:5] + 1/irdf$cases[1]))
+
+
+# Ali (2013) Kolkata, India
+# 3-year follow-up.  Total protective efficacy remained high (66%)
+# therefore, effective vaccine coverage still calculated as we did for
+# Matlab, Bangladesh data
+# 0.68, which is the vaccine coverage in the OCV cluster
+# Can be derived from the study : Sur D, Lopez AL, Kanungo S, et al. Efficacy and safety of a modified killed-whole-cell oral cholera vaccine in India: an interim analysis of a cluster-randomised, double-blind, placebo-controlled trial. Lancet 2009; 374: 1694–702.
+# U5 = 0.06520105 (2082/31932) # does not include 
+vc_cut <- c(0, 0.25, 0.28, 0.31, 0.34, 0.68)
+vc_kolkata <- vc_cut[1:5] + diff(vc_cut)/2
+df <- data.frame(age=c("1-4","5-14","15+"),
+                 vacc_person_days = c(1441514,4883504,15776270),
+                 vacc_events=c(10,2,8),
+                 placebo_person_days=c(1557888,5380847,17265621),
+                 placebo_events=c(23,19,26))
+
+prop_U5 <- with(df, vacc_person_days[1]/sum(vacc_person_days))
+dve_U5 <- with(df, 1 - (vacc_events[1]/vacc_person_days[1])/
+                 (placebo_events[1]/placebo_person_days[1]))
+dve_5up <- with(df, 1 - 
+                  ((vacc_events[2]+vacc_events[3])/
+                     (vacc_person_days[2]+vacc_person_days[3]))/ 
+                  ((placebo_events[2]+placebo_events[3])/
+                     (placebo_person_days[2]+placebo_person_days[3])))
+
+# vacc_subjects <- c(2082,7023,22827)
+# prop_U5 <- vacc_subjects[1]/sum(vacc_subjects)
+# # ve_first_year <- 0.65 # the data coming from the first year of vaccination
+eff_vc_kolkata <- (dve_U5*prop_U5 + dve_5up*(1-prop_U5))*vc_kolkata
+# py <-c(1441514,1557888,4883504,15776270,5380847,17265621)
+# ev <- c(10,23,2,8,19,26)
+# dve_U5 <- 1 - (ev[1]/py[1])/(ev[2]/py[2])
+# dve_5up <- 1 - ((ev[3]+ev[4])/(py[3]+py[4]))/((ev[5]+ev[6])/(py[5]+py[6]))
+
+ir <- c(5.54, 5.64, 2.48, 2.25, 1.93)
+ive_kolkata <- (ir[1]-ir)/ir[1]
+
+irdf_kkt <- data.frame(N=c(7219,7805,6038,6662,7244),
+           cases=c(40,44,15,15,14))
+ir_kkt <- irdf_kkt$cases/irdf_kkt$N
+irr_kkt <- ir_kkt[2:5]/ir_kkt[1]
+# Poisson approximation
+est_kkt <- 1 - irr_kkt
+lb_kkt <- 1 - exp(log(irr_kkt) + qnorm(0.975) * sqrt(1/irdf_kkt$cases[2:5] +
+                                                       1/irdf_kkt$cases[1]))
+ub_kkt <- 1 - exp(log(irr_kkt) - qnorm(0.975) * sqrt(1/irdf_kkt$cases[2:5] +
+                                                       1/irdf_kkt$cases[1]))
+# ive_dat <- data.frame(eff_vacc_cov = c(eff_vc_kolkata, eff_vc_matlab), 
+#                       indirect_vacc_eff = c(ive_kolkata, ive_matlab))
+
+ive_dat <- data.frame(eff_vacc_cov = c(eff_vc_kolkata, eff_vc_matlab), 
+                      indirect_vacc_eff = c(0, est_kkt, 0, est_ml),
+                      lower = c(0, lb_kkt, 0, lb_ml),
+                      upper = c(0, ub_kkt, 0, ub_ml))
+
+ive_dat$type <- "data"
+ive_dat$location <- c(rep("Kolkata", length(eff_vc_kolkata)), rep("Matlab",length(eff_vc_matlab)))
+ive_dat$indirect_vacc_eff[ive_dat$indirect_vacc_eff < 0] <- 0
+
+# d <- data.frame(x=ive_dat$eff_vacc_cov, y=ive_dat$indirect_vacc_eff)
+# d$y[d$y<0] <- 0
+# logistic function that varies from 0 to 1 for domain of 0 to 1
+# https://math.stackexchange.com/questions/4620969/logistic-function-from-0-to-1-for-input-0-to-1
+# fm <- y ~ 1 / (1 + exp(-k*(x-x0)))
+d <- data.frame(x=ive_dat$eff_vacc_cov, y=ive_dat$indirect_vacc_eff)
+fm <- y ~ 1 / (1+((1-x)*x0/(x*(1-x0)))^k)
+fit <- nls(formula=fm, data=d, start=list(k=1, x0=0.1))
+predict_logis <- function(x) {
+  # 1 / (1 + exp(-coef(fit)[[1]]*(x-coef(fit)[[2]])))
+  k <- coef(fit)[["k"]]
+  x0 <- coef(fit)[["x0"]]
+  1 / (1+((1-x)*x0/(x*(1-x0)))^k)
+}
+
+newx <- seq(0,1,by=0.01)
+newy <- predict_logis(newx)
+
+dat <- rbind(ive_dat, data.frame(eff_vacc_cov=newx, 
+                               indirect_vacc_eff=newy,
+                               lower=NA, upper=NA, type="model", location=NA))
+
+library(ggplot2)
+p <- ggplot() +
+  geom_point(data=subset(dat, type=="data"),
+  aes(eff_vacc_cov, indirect_vacc_eff, color=location))+
+  geom_errorbar(data=subset(dat, type=="data"),
+                aes(eff_vacc_cov, indirect_vacc_eff, 
+                    ymin=pmax(lower,0), ymax=upper, color=location), width=0,
+                 position=position_dodge(.9))+
+  geom_line(data=subset(dat, type=="model"), 
+            aes(eff_vacc_cov, indirect_vacc_eff), 
+            color="forestgreen")+ 
+  labs(y="Indirect vaccine efficacy", 
+       x="Effective vaccine coverage", color="") +
+  scale_y_continuous(limits=c(0,1))+
+  theme_bw()
+p
+# ggsave(paste0("plots/indirect_vacc_efficacy", tstamp(), ".pdf"), p,
+#        width=fgw2, height=fgw2, units="mm", scale=1)
+
+# plot(d$x,d$y,xlim=c(0,1),ylim=c(0,1))
+# points(vc_kolkata, ive_kolkata, col=3)
+# newx <- seq(0,1,by=0.01)
+# lines(newx, predict_logis(newx), col=2)
+
+# logistic_squeezed <- function(x, k=2, x0=0.5) {
+#   1 / (1+((1-x)*x0/(x*(1-x0)))^k)
+# }
+# library(manipulate)
+# manipulate(plot(x, logistic_squeezed(x,k,x0), type="l"), 
+#            k=slider(0.1, 10),
+#            x0=slider(0.1,0.9))
+```
+
+`nls_fit` function to execute the codes and move to the next even if the 
+code gen
+
+```{r}
+nls_fit <- function(formula=NULL, data=NULL) {
+    tryCatch(
+      {
+        nls(formula=formula, data=data, start=list(k=1, x0=0.1))
+      },
+      error = function(cond) {
+        message("nls did not converge")
+        message(conditionMessage(cond))
+        # Choose a return value in case of error
+        return(NA)
+      },
+      warning = function(cond) {
+        # Choose a return value in case of error
+        return(NULL)
+      },
+      finally = {}
+    )
+}
+```
+
+Sensitivity analysis
+
+To explore a potential range of IVE, we fit 1e4 logistic fits to randomly
+generated dataset, given 
+We first generated a random sample of incidence rates based on the two data sets
+that we have previously described. For each sample of the data set, we fit a 
+logistic curve. 
+
+We selected random instance and used the indire
+```{r}
+set.seed(42)
+n <- 1e4
+irr_sample_ml <- sapply(1:n, function(x) rnorm(4, mean=log(irr_ml), 
+                    sd = sqrt(1/irdf_ml$cases[2:5] + 1/irdf_ml$cases[1])))
+ive_sample_ml <- 1 - exp(irr_sample_ml)
+
+irr_sample_kkt <- sapply(1:n, function(x) rnorm(4, mean=log(irr_kkt), 
+                    sd = sqrt(1/irdf_kkt$cases[2:5] + 1/irdf_kkt$cases[1])))
+ive_sample_kkt <- 1 - exp(irr_sample_kkt)
+
+d <- data.frame(x = c(eff_vc_kolkata, eff_vc_matlab))
+newx <- seq(0,1,by=0.01)
+pred <- data.frame(matrix(NA, nrow=length(newx), ncol=ncol(ive_sample_ml)+1))
+pred[,1] <- newx
+
+predict_logis <- function(fit, x) {
+  # 1 / (1 + exp(-coef(fit)[[1]]*(x-coef(fit)[[2]])))
+  k <- coef(fit)[["k"]]
+  x0 <- coef(fit)[["x0"]]
+  1 / (1+((1-x)*x0/(x*(1-x0)))^k)
+} 
+
+fit_list <- vector("list", length(ive_sample_ml))
+
+for (i in 1:ncol(ive_sample_kkt)) {
+  d$y <- c(0, ive_sample_kkt[,i], 0, ive_sample_ml[,i])
+  d$y[d$y < 0] <- 0
+  
+  fm <- y ~ 1 / (1+((1-x)*x0/(x*(1-x0)))^k)
+  
+  fit_list[[i]] <- nls_fit(formula=fm, data=d)
+  # if(!is.na(fit_list[[i]]) & !is.null(fit_list[[i]]))
+  if(length(is.na(fit_list[[i]])) > 1 && isTRUE(fit_list[[i]]$convInfo$isConv))  
+    pred[,i+1] <- predict_logis(fit_list[[i]], newx)             
+}
+# saveRDS(fit_list, paste0("outputs/ive_fits_", tstamp(), ".rds"))
+
+sum(is.na(pred[1,]))
+idx <- which(is.na(pred[1,]))
+pred <- pred[, -c(idx)]
+# data.table::fwrite(pred, paste0("outputs/ive_pred_", tstamp(), ".csv"))
+# plot(pred[,1],pred[,2],type="l", col="grey79")
+# for (i in 2:10000){
+#   lines(pred[,1], pred[,i],type="l", col="grey79")
+# }
+
+predlong <- tidyr::pivot_longer(pred, cols=-c("X1"))
+
+library(ggplot2)
+p <- ggplot() +
+  geom_line(data=predlong, 
+            aes(X1, value, group=name), 
+            color="grey80")+
+  geom_point(data=subset(dat, type=="data"),
+  aes(eff_vacc_cov, indirect_vacc_eff, color=location))+
+  geom_errorbar(data=subset(dat, type=="data"),
+                aes(eff_vacc_cov, indirect_vacc_eff, 
+                    ymin=pmax(lower,0), ymax=upper, color=location), width=0,
+                 position=position_dodge(.9))+
+  labs(y="Indirect vaccine efficacy", 
+       x="Effective vaccine coverage", color="") +
+  theme_bw()
+p
+# ggsave(paste0("plots/ive_uncertainty_", tstamp(), ".pdf"), p,
+#        width=fgw2, height=fgw2, units="mm", scale=1)
+```
+
+
+Sample parameters for simulation
+```{r}
+dat_params <- data.table::fread("data/parameters.csv")
+nruns <- 200
+params <- draw_parameter_samples(nruns=nruns, parameter_data=dat_params)
+data.table::fwrite(params, paste0("outputs/params_", tstamp(), ".csv"))
+```
+
