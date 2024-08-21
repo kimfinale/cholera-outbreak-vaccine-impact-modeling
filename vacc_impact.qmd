@@ -1,0 +1,339 @@
+---
+title: "Vaccine impact modeling"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load packages
+
+```{r}
+set.seed(42)
+# library(Cairo)
+library(data.table)
+library(tidyverse)
+library(readxl)
+source("R/functions.R") # utility functions
+# figure size
+fgw1 <- figure_size[figure_size$journal =="Lancet",]$single
+fgw2 <- figure_size[figure_size$journal =="Lancet",]$double
+```
+
+## Load outbreak datasets
+
+```{r}
+# dynamic model
+fits <- fread("outputs/data_fit_eval_20240409.csv")
+good_fits <- fits[PARAM_GLOBAL == 1 & PARAM_SANITY_5pct == 1 & 
+                   FIT_SANITY == 1 & R2_adj >= 0.5]
+
+# extract ids for the outbreaks not affected by OCV campaigns
+ds <- as.data.frame(fread("inst/extdata/outbreak_data_summary.csv"))
+ds$ID_outbreak <- paste0(ds$location, "-", ds$start_date, "-", ds$end_date)
+ds$ID <- 1:nrow(ds)
+# data for the outbreaks affected by OCV
+docv <- fread("inst/extdata/ocv_long_dataset.csv")
+# exclude outbreaks that were affected by OCV campaigns using IDs 
+dat <- ds[!(ds$ID_outbreak %in% docv$ID_outbreak),]
+ts <- readRDS("inst/extdata/outbreak_data_ts.rds")
+# see data_manipulation.qmd to understand how these data are created
+ts824_wk <- as.data.frame(fread("outputs/ts824_week_20240821.csv"))
+ts113_wk <- as.data.frame(fread("outputs/ts113_week_20240821.csv"))
+```
+
+weekly vaccine impact compuations seem to have some duplicates.
+I investigate the files one by one
+
+```{r}
+ts824_wk |>
+  group_by(id) |> 
+  summarize(n=n()) |> 
+  arrange(desc(n))
+
+ds$size_grp <- ifelse(ds$total_suspected_cases < 200, "small", "large")
+ds$dur_grp <- ifelse(ds$duration < 10, "short", "long")
+
+ds_ <- ds[, c("threshold", "attack_rate", "cfr", "population", "rural_urban", 
+              "start_date","end_date", "total_confirmed_cases","ID_outbreak",
+              "size_grp", "dur_grp")]
+
+names(ds_) <- c("threshold", "attack_rate", "cfr", "population","rural_urban", 
+              "start_date","end_date", "total_confirmed_cases","id",
+              "size_grp", "dur_grp")
+
+ts824_wk_test <- left_join(ts824_wk, ds_, by="id")
+ts824_wk_test <- ts824_wk_test |>
+  mutate(outbk_yesno = ifelse(sCh/population*1e5 > threshold, 1, 0))
+
+```
+
+### Computing the impact of vaccine
+
+Additional data sets need to compute the vaccine impact
+```{r}
+params <- as.data.frame(data.table::fread("outputs/params_20240529.csv"))
+# ive_data <- as.data.frame(data.table::fread("outputs/ive_pred_20240529.csv"))
+ive_data <- read_rds("outputs/ive_yrep_20240819.rds")
+age_dist <- as.data.frame(fread("data/wpp_africa_ageprop.csv"))
+```
+
+## Vaccine impact simulation
+
+```{r, eval=FALSE}
+vacc_cov <- seq(0.1, 0.9, by=0.1)
+vacc_week <- 1:16
+
+test_run <- run_vacc_impact_outbreak_weekly(
+  outbreak_data = ts824_wk,
+  ive_data = ive_data,
+  parameters = params,
+  age_dist = age_dist,
+  vacc_week = vacc_week,
+  vacc_cov = vacc_cov,
+  runid = 2)
+
+(nrow(test_run))
+# (nrow(test_run) == length(vacc_cov) * nrow(ts824_wk_cumsum))
+(nrow(test_run) == length(vacc_week) * length(vacc_cov) * nrow(ts824_wk))
+test_run |> group_by(week_vaccination) |> reframe(ve_wk = week_delay_to_vacc_eff[1])
+```
+
+
+### Parallel `run_vacc_impact_outbreak_weekly`
+```{r, eval=FALSE}
+tic <- Sys.time()
+
+library(doParallel)
+# UN data on country- and year-specific age distribution (< 5 yo and 5+ yo)
+age_dist <- as.data.frame(fread("data/wpp_africa_ageprop.csv"))
+vacc_cov <- seq(0.1, 0.9, by=0.1)
+vacc_week <- 1:16
+nruns <- 200 # number of simulation runs
+
+cl <- makeCluster(getOption("cl.cores", detectCores() - 1))
+registerDoParallel(cl)
+
+svim_list <- 
+  foreach(i = 1:nruns, .packages = c("data.table")) %dopar% {
+    run_vacc_impact_outbreak_weekly(
+      outbreak_data = ts824_wk,
+      ive_data = ive_data,
+      parameters = params,
+      age_dist = age_dist,
+      vacc_week = vacc_week,
+      vacc_cov = vacc_cov,
+      runid = i)
+}
+stopCluster(cl)
+
+Sys.time() - tic
+# Time difference of 36.02764 mins
+saveRDS(svim_list, paste0("outputs/svim_week_list_", tstamp(), ".rds"))
+```
+
+## Summarize vaccine impact
+
+```{r}
+svim_list <- read_rds("outputs/svim_week_list_20240813.rds")
+svim1_week <- svim_list[[1]]
+```
+
+## Compute vaccine impact summary 
+
+Weekly statistics are needed information is needed to compute the duration of the outbreak, which could be shorted because of vaccination.
+
+```{r}
+ds$size_grp <- ifelse(ds$total_suspected_cases < 200, "small", "large")
+ds$dur_grp <- ifelse(ds$duration < 10, "short", "long")
+
+ds_ <- ds[, c("threshold", "attack_rate", "total_deaths", "cfr", "population",
+              "rural_urban", "start_date","end_date", 
+              "total_confirmed_cases","ID_outbreak", "size_grp", "dur_grp")]
+names(ds_) <- c("threshold", "attack_rate", "total_deaths", "cfr", "population",
+                "rural_urban", "start_date","end_date",
+                "total_confirmed_cases","id", "size_grp", "dur_grp")
+
+svim1_week <- left_join(svim1_week, ds_, by="id")
+
+svim1_week <- svim1_week |>
+  mutate(sCh_vacc = sCh - sCh_averted,
+         outbk_yesno = ifelse(1e5 * sCh / population > threshold, 1, 0),
+         outbk_vacc_yesno = ifelse(1e5 * sCh_vacc / population > threshold, 1, 0))
+
+# summarize across weeks
+svim1 <- svim1_week |>
+  group_by(id, week_vaccination, vacc_cov) |> 
+  summarise(.groups = "drop",
+            country = country[1],
+            start_date = as.Date(start_date[1]),
+            end_date = as.Date(end_date[1]),
+            data_id = data_id[1],
+            prop_U5 = prop_U5[1],
+            population = population[1],
+            confirmed_tot = total_confirmed_cases[1],
+            death_tot = total_deaths[1],
+            sCh_averted_U5_tot = sum(sCh_averted_U5),
+            sCh_averted_5up_tot = sum(sCh_averted_5up),
+            sCh_tot = sum(sCh),
+            sCh_averted_tot = sum(sCh_averted),
+            pct_reduc_case = 100 * sCh_averted_tot / sCh_tot,
+            threshold = threshold[1],
+            outbk_dur = sum(outbk_yesno),
+            outbk_dur_vacc = sum(outbk_vacc_yesno),
+            pct_reduc_dur = 100 * (outbk_dur - outbk_dur_vacc) / outbk_dur,
+            week_vaccination = week_vaccination[1],
+            week_delay_to_vacc_eff = week_delay_to_vacc_eff[1],
+            vacc_cov = vacc_cov[1],
+            vacc_cov_eff = vacc_cov_eff[1],
+            ive = ive[1])
+```
+
+
+We first identify outbreaks that might disappear if we consider lasting immunity from prior immunization activities. `find_ghost_outbreaks` function returns ids of the outbreak that might disappear 
+
+Add vaccine and disease parameters
+```{r}
+parms <- as.data.frame(fread("data/parameters.csv"))
+pr_asymp <- parms[parms$Parameter == "Prop_Asymptomatic", "Value"]
+pr_mild <- parms[parms$Parameter == "Prop_Mild", "Value"]
+pr_moderate <- parms[parms$Parameter == "Prop_Moderate", "Value"]
+pr_severe <- parms[parms$Parameter == "Prop_Severe", "Value"]
+dur <- parms[parms$Parameter == "Duration_Illness", "Value"]
+wt_asymp <- parms[parms$Parameter == "Disability_Weight_Asymptomatic", "Value"]
+wt_mild <- parms[parms$Parameter == "Disability_Weight_Mild", "Value"]
+wt_moderate <- parms[parms$Parameter == "Disability_Weight_Moderate", "Value"]
+wt_severe <- parms[parms$Parameter == "Disability_Weight_Severe", "Value"]
+
+vacc_cost_per_dose <- parms[parms$Parameter == "Vaccine_Cost", "Value"]
+vacc_delivery_cost <- parms[parms$Parameter == "Vaccine_Delivery_Cost", "Value"]
+patient_cost_hosp <- parms[parms$Parameter == "Patient_Cost_Hosp", "Value"]
+patient_cost_outpt <-parms[parms$Parameter == "Patient_Cost_Outpt", "Value"]
+public_cost_hosp <- parms[parms$Parameter == "Public_Cost_Hosp", "Value"]
+public_cost_outpt <-parms[parms$Parameter == "Public_Cost_Outpt", "Value"] 
+patient_workday_lost <- parms[parms$Parameter == "Pt_Workdays_Lost", "Value"]
+caregiver_workday_lost <- parms[parms$Parameter == "Caregiver_Workdays_Lost", "Value"]
+mean_age_inf <- parms[parms$Parameter == "Mean_Age_Infection", "Value"]
+
+dose_regimen <- 1
+vacc_cost_per_person <- vacc_cost_per_dose * dose_regimen
+
+svim1$year <- data.table::year(as.Date(svim1$start_date))
+
+# combine life expectancy, GDP, and percent workforce data
+life_exp_data <- as.data.frame(fread("outputs/wpp2022_life_expectancy.csv"))
+names(life_exp_data)[names(life_exp_data) == "ISO3 Alpha-code"] <- "country"
+names(life_exp_data)[names(life_exp_data) == "Year"] <- "year"
+avg_age_inf <- 26
+svim1 <- left_join(svim1, 
+                   life_exp_data[, c("country", "year", as.character(avg_age_inf))], 
+                   by = c("country", "year"))
+
+
+names(svim1)[names(svim1) == as.character(avg_age_inf)] <- "life_exp"
+svim1$life_exp <- as.numeric(svim1$life_exp)
+
+gdp <- read_xls("data/GDP_WorldBank.xls")
+names(gdp)[names(gdp) == "Country Code"] <- "country"
+gdp_long <- gdp %>%
+  pivot_longer(
+    cols = `1960`:`2023`, 
+    names_to = "year",     
+    values_to = "gdp"      
+  )
+
+gdp_long$year <- as.integer(gdp_long$year)
+
+svim1 <- left_join(svim1, 
+                  gdp_long[, c("country", "year", "gdp")],
+                  by = c("country", "year"))
+
+workforce <- read_xls("data/Workforce_Worldbank.xls")
+names(workforce)[names(workforce) == "Country Code"] <- "country"
+workforce_long <- workforce %>%
+  pivot_longer(
+    cols = `1960`:`2023`,
+    names_to = "year",
+    values_to = "pct_workforce"
+  )
+workforce_long$year <- as.integer(workforce_long$year)
+
+svim1 <- left_join(svim1, 
+                   workforce_long[, c("country", "year", "pct_workforce")],
+                   by = c("country", "year"))
+
+
+# svim1$population <- sapply(1:nrow(svim1), function(i) dat[dat$ID == svim1$data_id[i], "population"])    
+```
+
+## Compute vaccine impact summary 
+
+```{r}
+# vaccine impact
+# 100% for the svim1_sub and normal weekly impact for the rest
+# cost-of-illness is based on 
+coi_per_patient <- (pr_mild * patient_cost_outpt + 
+      pr_moderate * patient_cost_outpt + pr_severe * patient_cost_hosp)
+
+svim1 |>
+  # filter(week_vaccination == 1, vacc_cov == 0.9) |> 
+  mutate(yld = compute_yld(sCh_tot, parms=parms),
+         yld_averted = compute_yld(sCh_averted_tot, parms=parms), 
+         yll = compute_yll(death_tot, life_exp, parms),
+         yll_averted = yll * (sCh_averted_tot / sCh_tot),
+         daly_averted = yld_averted + yll_averted,
+         coi_averted = sCh_averted_tot * coi_per_patient,
+         cod_averted = death_tot * (sCh_averted_tot / sCh_tot) * gdp * life_exp,
+         productivity_lost_averted = 
+           sCh_averted_tot * gdp * ((patient_workday_lost/365)*(pct_workforce/100) +
+                                 (caregiver_workday_lost/365)),
+         vacc_dose = population * dose_regimen,
+         vacc_cost = vacc_cost_per_dose * vacc_dose,
+         net_cost = vacc_cost - coi_averted - cod_averted,
+         cost_per_daly_averted = net_cost / daly_averted,
+         case_averted_per_dose = sCh_averted_tot / vacc_dose,
+         death_averted_per_dose = death_tot * (sCh_averted_tot / sCh_tot) / vacc_dose) -> res
+```
+
+
+
+### Ghost outbreaks because of the lasting immunity from the previous immunization
+
+We first identify outbreaks that might disappear if we consider lasting immunity from prior immunization activities. `find_ghost_outbreaks` function returns ids of the outbreak that might disappear 
+
+```{r}
+svim1$location <- sapply(svim1$id, function(x) strsplit(x, "-")[[1]][1])
+adms <- lapply(svim1$id, function(x) get_adm(x))
+# create admin variables to classify outbreaks accordingly
+svim1$admin0 <- sapply(adms, function(x) x[[1]][2])
+svim1$admin1 <- sapply(adms, function(x) x[[1]][3])
+svim1$admin2 <- sapply(adms, function(x) x[[1]][4])
+svim1$admin3 <- sapply(adms, function(x) x[[1]][5])
+
+lb <- 180 # days  This could be random delay to vaccine effectiveness
+ub <- 365*3
+
+vacc_camp_pop_ub <- 2e6
+
+svim1_v9w1 <- filter(svim1, vacc_cov == 0.9 & week_vaccination == 1)
+svim1_v9w1_sub <- svim1_v9w1 |> filter(!is.na(admin0) & !is.na(admin1) & !is.na(admin2))
+svim1_v9w1_sub <- svim1_v9w1_sub |> filter(population <= vacc_camp_pop_ub)
+ghost_ids <- find_ghost_outbreaks(x=svim1_v9w1_sub, lb=lb, ub=ub)
+svim1_v9w1_sub <- svim1_v9w1[!(svim1_v9w1$data_id %in% ghost_ids), ]
+sum(svim1_v9w1_sub$population > vacc_camp_pop_ub)
+svim1_v9w1_sub2 <- svim1_v9w1_sub |> filter(!is.na(admin0) & !is.na(admin1) & !is.na(admin2))
+svim1_v9w1_sub3 <- svim1_v9w1_sub |> filter(!is.na(admin0) & !is.na(admin1) & !is.na(admin2) & population < vacc_camp_pop_ub)
+```
+
+
+
+
+
+
+You can add options to executable code like this 
+
+```{r}
+#| echo: false
+2 * 2
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).

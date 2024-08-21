@@ -1,0 +1,127 @@
+---
+title: "prop_reg"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+## Quarto
+
+```{r}
+library(tidyverse)        # ggplot, dplyr, %>%, and friends
+library(brms)             # Bayesian modeling through Stan
+library(tidybayes)        # Manipulate Stan objects in a tidy way
+library(broom)            # Convert model objects to data frames
+library(broom.mixed)      # Convert brms model objects to data frames
+library(vdemdata)         # Use data from the Varieties of Democracy (V-Dem) project
+library(betareg)          # Run beta regression models
+library(extraDistr)       # Use extra distributions like dprop()
+library(ggdist)           # Special geoms for posterior distributions
+library(gghalves)         # Special half geoms
+library(ggbeeswarm)       # Special distribution-shaped point jittering
+library(ggrepel)          # Automatically position labels
+library(patchwork)        # Combine ggplot objects
+library(scales)           # Format numbers in nice ways
+library(marginaleffects)  # Calculate marginal effects for regression models
+library(modelsummary)     # Create side-by-side regression tables
+
+set.seed(1234)  # Make everything reproducible
+
+# Define the goodness-of-fit stats to include in modelsummary()
+gof_stuff <- tribble(
+  ~raw, ~clean, ~fmt,
+  "nobs", "N", 0,
+  "r.squared", "R²", 3
+)
+
+# Custom ggplot theme to make pretty plots
+# Get the font at https://fonts.google.com/specimen/Barlow+Semi+Condensed
+theme_clean <- function() {
+  theme_minimal(base_family = "Barlow Semi Condensed") +
+    theme(panel.grid.minor = element_blank(),
+          plot.title = element_text(family = "BarlowSemiCondensed-Bold"),
+          axis.title = element_text(family = "BarlowSemiCondensed-Medium"),
+          strip.text = element_text(family = "BarlowSemiCondensed-Bold",
+                                    size = rel(1), hjust = 0),
+          strip.background = element_rect(fill = "grey80", color = NA))
+}
+
+# Make labels use Barlow by default
+update_geom_defaults("label_repel", list(family = "Barlow Semi Condensed"))
+
+# Format things as percentage points
+label_pp <- label_number(accuracy = 1, scale = 100, 
+                         suffix = " pp.", style_negative = "minus")
+label_pp_tiny <- label_number(accuracy = 0.01, scale = 100, 
+                              suffix = " pp.", style_negative = "minus")
+```
+
+
+```{r}
+# Make a subset of the full V-Dem data
+vdem_clean <- vdem %>% 
+  select(country_name, country_text_id, year, region = e_regionpol_6C,
+         polyarchy = v2x_polyarchy, corruption = v2x_corr, 
+         civil_liberties = v2x_civlib, prop_fem = v2lgfemleg, v2lgqugen) %>% 
+  filter(year >= 2010, year < 2020) %>% 
+  drop_na(v2lgqugen, prop_fem) %>% 
+  mutate(quota = v2lgqugen > 0,
+         prop_fem = prop_fem / 100,
+         polyarchy = polyarchy * 100)
+
+vdem_2015 <- vdem_clean %>% 
+  filter(year == 2015) %>% 
+  # Sweden and Denmark are tied for the highest polyarchy score (91.5), and R's
+  # max() doesn't deal with ties, so we cheat a little and add a tiny random
+  # amount of noise to each polyarchy score, mark the min and max of that
+  # perturbed score, and then remove that temporary column
+  mutate(polyarchy_noise = polyarchy + rnorm(n(), 0, sd = 0.01)) %>% 
+  mutate(highlight = polyarchy_noise == max(polyarchy_noise) | 
+           polyarchy_noise == min(polyarchy_noise)) %>% 
+  select(-polyarchy_noise)
+
+vdem_2015_fake0 <- vdem_2015 %>% 
+  mutate(prop_fem = ifelse(prop_fem == 0, 0.001, prop_fem))
+```
+
+```{r}
+model_beta_bayes2 <- brm(
+  bf(prop_fem ~ quota,
+     phi ~ quota),
+  data = vdem_2015_fake0,
+  family = Beta(link="logit"),
+  chains = 4, iter = 2000, warmup = 1000,
+  cores = 4, seed = 1234, 
+  # Use the cmdstanr backend for Stan because it's faster and more modern than
+  # the default rstan You need to install the cmdstanr package first
+  # (https://mc-stan.org/cmdstanr/) and then run cmdstanr::install_cmdstan() to
+  # install cmdstan on your computer.
+  backend = "cmdstanr",
+  # file = "model_beta_bayes"  # Save this so it doesn't have to always rerun
+)
+```
+
+```{r}
+tidy(model_beta_bayes2, effects = "fixed")
+```
+
+
+```{r}
+posterior_beta <- model_beta_bayes %>% 
+  gather_draws(`b_.*`, regex = TRUE) %>% 
+  mutate(component = ifelse(str_detect(.variable, "phi_"), "Precision", "Mean"),
+         intercept = str_detect(.variable, "Intercept"))
+
+ggplot(posterior_beta, aes(x = .value, y = fct_rev(.variable), fill = component)) +
+  geom_vline(xintercept = 0) +
+  stat_halfeye(aes(slab_alpha = intercept), 
+               .width = c(0.8, 0.95), point_interval = "median_hdi") +
+  scale_fill_viridis_d(option = "viridis", end = 0.6) +
+  scale_slab_alpha_discrete(range = c(1, 0.4)) +
+  guides(fill = "none", slab_alpha = "none") +
+  labs(x = "Coefficient", y = "Variable",
+       caption = "80% and 95% credible intervals shown in black") +
+  facet_wrap(vars(component), ncol = 1, scales = "free_y") +
+  theme_clean()
+```
+

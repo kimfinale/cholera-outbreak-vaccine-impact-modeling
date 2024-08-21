@@ -1,0 +1,293 @@
+---
+title: "Parameters"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load packages
+```{r}
+source("R/functions.R")
+library(tidyverse)        # ggplot, dplyr, %>%, and friends
+library(brms)             # Bayesian regression modeling through Stan
+library(rstan)            # Run stan files
+```
+
+## Direct vaccine efficacy
+
+We assume that the one-dose efficacy is similar to two-dose efficacy in the first of vaccination. Two-dose efficacy data is based on meta-analyses reported in Bi (2017) Lancet Infect Dis
+```{r}
+dve <- data.frame(age = c("U5", "5+"),
+                  estimates = c(0.30, 0.64),
+                  lb = c(0.15, 0.58),
+                  ub = c(0.42, 0.70))
+rn <- 0.2
+
+dve$irr_est <- 1 - dve$est
+dve$irr_lb <- 1 - dve$lb
+dve$irr_ub <- 1 - dve$ub
+# make use of that incidence rate ratio (irr) is approximately normally distributed
+dve$irr_se <- (dve$irr_lb - dve$irr_ub)/2/1.96
+
+# x = punif(x) when x ~ unif(0,1)
+1 - qnorm(0.975, mean=dve$irr_est[1], sd=dve$irr_se[1])
+1 - qnorm(0.975, mean=dve$irr_est[2], sd=dve$irr_se[2])
+
+n <- 1e5
+set.seed(12)
+irr_sample <- data.frame(U5 = rnorm(n, dve$irr_est[1], dve$irr_se[1]))
+irr_sample$five_above <- rnorm(n, dve$irr_est[2], dve$irr_se[2])
+dve_sample <- 1 - irr_sample
+
+sn <- sample.int(n, 200)
+plot(dve_sample[sn, 1], dve_sample[sn, 2])
+points(dve_sample2[sn, 1], dve_sample2[sn, 2], col="firebrick")
+colMeans(dve_sample)
+
+# consider covariance between 
+var_fac <- 0.1
+Sigma <- matrix(c(dve$irr_se[1], dve$irr_se[2]*var_fac, 
+                  dve$irr_se[2]*var_fac, dve$irr_se[2]), 2, 2) # var-covariance matrix
+irr_sample2 <- mvtnorm::rmvnorm(n, mean=dve$irr_est, sigma=Sigma)
+dve_sample2 <- 1 - irr_sample2
+colMeans(dve_sample2)
+```
+
+## Indirect vaccine efficacy (IVE)
+
+### IVE data
+```{r}
+# Ali (2005) Matlab, Bangladesh
+# Individuals targeted for the trial, 89 596
+# this is the first year of 4,035 in surveillance and therefore
+# vaccine waning is ignored
+vc_cut <- c(0, 0.28, 0.35, 0.40, 0.50, 0.65) # vaccine coverage cutoff, Table 1
+vc_matlab <- vc_cut[1:5] + diff(vc_cut)/2
+
+# Clemens JD, Sack DA, Harris JR, et al. Field trial of oral cholera vaccines in Bangladesh. Lancet 1986; 2: 124–7.
+# Table 1
+df <- data.frame(age=c("2-5","6-10","11-15",">15"),
+                 BSWC=c(3797,5028,4159,8157),
+                 WC=c(3951,4887,4276,8023))
+
+prop_U10 <- (sum(df[(df$age =="2-5" | df$age =="6-10"),]$BSWC) +
+              sum(df[(df$age =="2-5" | df$age =="6-10"),]$WC))/
+  (sum(df$BSWC)+sum(df$WC))
+df <- data.frame(age=c("2-10",">10"),
+                 BSWC_py=c(8825,12316),
+                 BSWC_event=c(1,3),
+                 WC_py=c(8838,12299),
+                 WC_event=c(6,5),
+                 Ecoli_py=c(8936,12284),
+                 Ecoli_event=c(13,13))
+
+# we combine BSWC and WC because they are combined in the reanalysis of IVE
+dve_U10 <- with(df, 1 - ((BSWC_event[1]+WC_event[1])/(BSWC_py[1]+WC_py[1]))/
+  (Ecoli_event[1]/Ecoli_py[1]))
+dve_10up <- with(df, 1 - ((BSWC_event[2]+WC_event[2])/(BSWC_py[2]+WC_py[2]))/
+  (Ecoli_event[2]/Ecoli_py[2]))
+
+# ve_first_year <- 0.65 # the data coming from the first year of vaccination
+# vaccine waning and natural 
+eff_vc_matlab <- (dve_U10*prop_U10 + dve_10up*(1-prop_U10))*vc_matlab 
+ir <- c(7.01, 5.87, 4.72, 4.65, 1.47) # incidence rate
+# lowest vaccine coverage group has no indirect effect
+ive_matlab <- (ir[1]-ir)/ir[1]
+
+irdf_ml <- data.frame(N=c(2852,4429,5503,5801,6082),
+           cases=c(20,26,26,27,9))
+ir_ml <- irdf_ml$cases / irdf_ml$N
+irr_ml <- ir_ml[2:5]/ir_ml[1]
+
+# Poisson approximation
+est_ml <- 1 - irr_ml
+lb_ml <- 1 - exp(log(irr_ml) + 
+                   qnorm(0.975)*sqrt(1/irdf_ml$cases[2:5] + 1/irdf_ml$cases[1]))
+ub_ml <- 1 - exp(log(irr_ml) - 
+                   qnorm(0.975)*sqrt(1/irdf_ml$cases[2:5] + 1/irdf_ml$cases[1]))
+
+# lb <- 1 - irr * exp(qnorm(0.975) * sqrt(1/irdf$cases[2:5] + 1/irdf$cases[1]))
+# ub <- 1 - irr * exp(-qnorm(0.975) * sqrt(1/irdf$cases[2:5] + 1/irdf$cases[1]))
+
+# Ali (2013) Kolkata, India
+# 3-year follow-up.  Total protective efficacy remained high (66%)
+# therefore, effective vaccine coverage still calculated as we did for
+# Matlab, Bangladesh data
+# 0.68, which is the vaccine coverage in the OCV cluster
+# Can be derived from the study : Sur D, Lopez AL, Kanungo S, et al. Efficacy and safety of a modified killed-whole-cell oral cholera vaccine in India: an interim analysis of a cluster-randomised, double-blind, placebo-controlled trial. Lancet 2009; 374: 1694–702.
+# U5 = 0.06520105 (2082/31932) # does not include 
+vc_cut <- c(0, 0.25, 0.28, 0.31, 0.34, 0.68)
+vc_kolkata <- vc_cut[1:5] + diff(vc_cut)/2
+df <- data.frame(age=c("1-4","5-14","15+"),
+                 vacc_person_days = c(1441514,4883504,15776270),
+                 vacc_events=c(10,2,8),
+                 placebo_person_days=c(1557888,5380847,17265621),
+                 placebo_events=c(23,19,26))
+
+prop_U5 <- with(df, vacc_person_days[1]/sum(vacc_person_days))
+dve_U5 <- with(df, 1 - (vacc_events[1]/vacc_person_days[1])/
+                 (placebo_events[1]/placebo_person_days[1]))
+dve_5up <- with(df, 1 - 
+                  ((vacc_events[2]+vacc_events[3])/
+                     (vacc_person_days[2]+vacc_person_days[3]))/ 
+                  ((placebo_events[2]+placebo_events[3])/
+                     (placebo_person_days[2]+placebo_person_days[3])))
+
+# vacc_subjects <- c(2082,7023,22827)
+# prop_U5 <- vacc_subjects[1]/sum(vacc_subjects)
+# # ve_first_year <- 0.65 # the data coming from the first year of vaccination
+eff_vc_kolkata <- (dve_U5*prop_U5 + dve_5up*(1-prop_U5))*vc_kolkata
+# py <-c(1441514,1557888,4883504,15776270,5380847,17265621)
+# ev <- c(10,23,2,8,19,26)
+# dve_U5 <- 1 - (ev[1]/py[1])/(ev[2]/py[2])
+# dve_5up <- 1 - ((ev[3]+ev[4])/(py[3]+py[4]))/((ev[5]+ev[6])/(py[5]+py[6]))
+
+ir <- c(5.54, 5.64, 2.48, 2.25, 1.93)
+ive_kolkata <- (ir[1]-ir)/ir[1]
+
+irdf_kkt <- data.frame(N=c(7219,7805,6038,6662,7244),
+           cases=c(40,44,15,15,14))
+ir_kkt <- irdf_kkt$cases/irdf_kkt$N
+irr_kkt <- ir_kkt[2:5]/ir_kkt[1]
+# Poisson approximation
+est_kkt <- 1 - irr_kkt
+lb_kkt <- 1 - exp(log(irr_kkt) + qnorm(0.975) * sqrt(1/irdf_kkt$cases[2:5] +
+                                                       1/irdf_kkt$cases[1]))
+ub_kkt <- 1 - exp(log(irr_kkt) - qnorm(0.975) * sqrt(1/irdf_kkt$cases[2:5] +
+                                                       1/irdf_kkt$cases[1]))
+# ive_dat <- data.frame(eff_vacc_cov = c(eff_vc_kolkata, eff_vc_matlab), 
+#                       indirect_vacc_eff = c(ive_kolkata, ive_matlab))
+
+ive_dat <- data.frame(eff_vacc_cov = c(eff_vc_kolkata, eff_vc_matlab), 
+                      indirect_vacc_eff = c(0, est_kkt, 0, est_ml),
+                      lower = c(0, lb_kkt, 0, lb_ml),
+                      upper = c(0, ub_kkt, 0, ub_ml))
+
+ive_dat$type <- "data"
+ive_dat$location <- c(rep("Kolkata", length(eff_vc_kolkata)), rep("Matlab",length(eff_vc_matlab)))
+ive_dat$indirect_vacc_eff[ive_dat$indirect_vacc_eff < 0] <- 0
+
+yy <- log((ive_dat$indirect_vacc_eff+1e-6)/(1-(ive_dat$indirect_vacc_eff+1e-6)))
+xx <- log((ive_dat$eff_vacc_cov+1e-6)/(1-(ive_dat$eff_vacc_cov+1e-6)))
+
+ggplot(ive_dat)+
+  geom_point(aes(eff_vacc_cov, indirect_vacc_eff, color=location))
+```
+
+### Bayesian beta regression of IVE as a function of indirect vaccine effectiveness
+
+IVE was modeled using Bayesian beta regression where 
+mean, $mu$, and the variance, $phi$, is modeled as a linear function of effective vaccine coverage.  
+
+By manipulating beta and gamma parameters, we examine how the beta functions behave in response to the change in those parameters.
+```{r}
+library(manipulate)
+
+X <- cbind(1, logit(seq(1e-6,1-1e-6,length.out=50)))
+mean_rbeta <- function(beta, gamma) {
+  mu  = expit(X %*% rbind(beta[1], beta[2]));
+  phi = exp(X %*% rbind(gamma[1], gamma[2]));
+  A = mu * phi;
+  B = (1.0 - mu) * phi;
+  var <- rep(NA,nrow(X))
+  for (i in 1:nrow(X)) {
+    var[i] <- mean(rbeta(1e3, A[i], B[i]))
+  }
+  return(var)
+}
+manipulate(plot(expit(X[,2]), 
+                mean_rbeta(c(beta0, beta1), c(gamma0, gamma1)),
+                type="p"),
+           beta0 = slider(-5, 5), beta1 = slider(-5, 5),
+           gamma0 = slider(-5, 5), gamma1 = slider(-5, 5))
+```
+
+Prior predictive check
+
+```{r}
+fit_prior <- stan(file='ive_beta.stan', 
+            data = list(N=N, X=X, Z=X, y=y, K=K, J=J),
+            iter=1e3, chains=1, cores=1, seed=42,
+            algorithm="Fixed_param")
+
+# plot just like the posterior predictive values
+fit <- fit_prior
+```
+
+Fitting
+
+```{r, eval=FALSE}
+N <- nrow(ive_dat)
+X <- cbind(1, logit(ive_dat$eff_vacc_cov))
+y <- ive_dat$indirect_vacc_eff + 1e-6 # 0 or 1 cannot be handled
+K <- ncol(X)
+J <- ncol(X)
+
+fit <- stan(file = "ive_beta.stan", 
+            data = list(N=N, X=X, Z=X, y=y, K=K, J=J),
+            iter = 2e4, warmup = 1e4, cores = 4, 
+            control = list(adapt_delta=0.9))
+
+print(fit, pars=c("beta","gamma","lp__"), probs=c(0.025, 0.5, 0.975))
+# print(fit1)
+# saveRDS(fit1, paste0("outputs/fit_ive_baye_beta_", tstamp(), ".rds"))
+```
+
+### Posterior predictive check
+
+```{r, eval=FALSE}
+fit <- read_rds("outputs/fit_ive_baye_beta_20240819.rds")
+# print(fit, pars=c("beta","gamma","lp__"), probs=c(0.025, 0.5, 0.975))
+
+d <- as.data.frame(extract(fit)$yrep)
+pr <- c(0.025, 0.05, 0.25, 0.5, 0.75, 0.95, 0.975) 
+pred <- as.data.frame(t(apply(d, 2, quantile, probs=pr)))
+pred$x <- expit(extract(fit)$new_X[1,,2])
+# pred$x <- sort(unique(extract(fit1)$new_X[1,,2]))
+
+pred$`95%` <- ifelse(pred$`95%` > 1, 1, pred$`95%`)
+pred$`5%` <- ifelse(pred$`5%` < 0, 0, pred$`5%`)
+pred$`97.5%` <- ifelse(pred$`97.5%` > 1, 1, pred$`97.5%`)
+pred$`2.5%` <- ifelse(pred$`2.5%` < 0, 0, pred$`2.5%`)
+pred$`75%` <- ifelse(pred$`75%` > 1, 1, pred$`75%`)
+pred$`25%` <- ifelse(pred$`25%` < 0, 0, pred$`25%`)
+
+ggplot(data=ive_dat)+
+  geom_point(aes(eff_vacc_cov, indirect_vacc_eff, color=location)) +
+  geom_linerange(data=pred, aes(x, ymin=`5%`, ymax=`95%`), linewidth=0.4)+
+  geom_linerange(data=pred, aes(x, ymin=`25%`, ymax=`75%`), linewidth=0.8)+
+  geom_point(data=pred, aes(x, `50%`))+
+  theme_light()+
+  labs(x="Effective vaccine coverage", y="Indirect vaccine effectiveness",
+       color="Data", title="Posterior predictive values")+
+  theme(legend.position="top") -> plt
+
+plt
+# fac <- 1.4
+# ggsave("ive_baye_complete_pooling.pdf", plt, height=2.7*fac, width=3.4*fac,
+#        units="in", device=cairo_pdf)
+```
+
+## Duration of a vaccination campaign
+
+```{r}
+# Table 2 Edosa (2024) Clin Infect Dis
+camp_dates <- fread("data/campaign_dates_ethiopia.csv") 
+start_dates <- as.Date(camp_dates$`Campaign start date`, format="%m/%d/%Y")
+end_dates <- as.Date(camp_dates$`Campaign end date`, format="%m/%d/%Y")
+dur <- as.numeric(end_dates - start_dates + 1)
+dur
+mean(dur)
+sd(dur)
+bounds <- mean(dur) + qnorm(0.975) * sd(dur)/sqrt(length(dur))
+summary(dur)
+
+```
+
+## Parameter samples for simulation
+```{r}
+dat_params <- data.table::fread("data/parameters.csv")
+nruns <- 200
+params <- draw_parameter_samples(nruns=nruns, parameter_data=dat_params)
+data.table::fwrite(params, paste0("outputs/params_", tstamp(), ".csv"))
+```
