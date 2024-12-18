@@ -91,8 +91,6 @@ paste0(length(unique(ts_noocv$id_outbreak)) - length(ids_conf_noocv), " suspecte
 
 outbreak_data_all <- fread("outputs/outbreak_data_all_20241121.csv")
 outbreak_data <- fread("outputs/outbreak_data_20241121.csv")
-# outbreak_data <- outbreak_data_all[!(id_outbreak %in% docv$id_outbreak)]
-
 ```
 
 ## Identify unique outbreaks

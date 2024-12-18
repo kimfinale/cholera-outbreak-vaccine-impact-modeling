@@ -1,0 +1,517 @@
+---
+title: "Exploratory data analysis"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+## Load packages, source `utils.R`, and outbreak data sets
+
+```{r}
+library(data.table)
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(scales)
+library(viridis)
+library(sf)
+library(metR)
+library(googlesheets4)
+library(conflicted)
+library(MASS)
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+source("utils.R") # utility functions
+save_plot <- FALSE
+save_table <- FALSE
+# figure size
+fgw1 <- figure_size[figure_size$journal =="Lancet",]$single
+fgw2 <- figure_size[figure_size$journal =="Lancet",]$double
+set1 <- RColorBrewer::brewer.pal(9,"Set1") # color sets
+library(patchwork)
+# remove the space between the plot and the legend and the space around the plot
+# representative probability values for quantile 
+probs <- c(0.025,0.25,0.5,0.75,0.975)
+VW <- 9 # representative vaccination week
+VW_seq <- seq(1,15,2)
+VC <- 0.75 # representative vaccination coverage rate
+VC3 <- c(0.6,0.75,0.9) # three representative vaccination coverage rates
+
+shp <- st_read("data/shapefiles/total_shp_0427.shp")
+africa <- st_read("data/shapefiles/afr_g2014_2013_0.shp")
+```
+
+## Outbreak data and delay
+```{r}
+outbreak_data_all <- as.data.frame(fread("outputs/outbreak_data_all_20241024.csv"))
+outbreak_data <- fread("outputs/outbreak_data_20241121.csv") # for vaccine impact modeling
+
+# fwrite(ocv_use, paste0("outputs/ocv_use_GTFCC_data_", tstamp(), ".csv"))
+ocv_use <- fread("outputs/ocv_use_GTFCC_data_20241120.csv")
+delay_req_r1 <- as.integer(ocv_use$DATE_ROUND_ONE - ocv_use$DATE_REQUEST)
+# max_pop_camp <- max(ocv_use$DOSE_DELIVERED_ROUND_ONE*1000, na.rm=T)
+min_pop_camp <- min(ocv_use$DOSE_DELIVERED_ROUND_ONE*1000, na.rm=T)
+ocv_delay <- quantile(delay_req_r1, probs=c(0.25,0.5,0.75,0.9), na.rm=TRUE)
+
+# OCV use data
+docv <- clean_names(fread("data/outbreak_files_Jun2024/ocv_long_dataset.csv"))
+# consumer price index for cost adjustment (2015 to 2023)
+dis_params <- as.data.frame(data.table::fread("data/parameters.csv"))
+# IVE posterior predictive values from Bayesian beta regression (see parameters.qmd)
+ive_fit <- read_rds("outputs/ive_yrep_20241010.rds")
+ive_data <- ive_fit$yrep
+rm(ive_fit) # large file size
+
+# extract ids for the outbreaks not affected by OCV campaigns
+ds <- clean_names(as.data.frame(fread("data/outbreak_files_Oct2024/outbreak_summary.csv")))
+paste0(length(unique(ds$country)), " countries")
+# create 'id_outbreak' variables to link with the 
+ds |>
+  group_by(location, outbreak_number) |>
+  mutate(id_outbreak = paste0(location, "-", start_date, "-", end_date)) |> 
+  ungroup() -> ds
+```
+
+```{r}
+outbreak_data <- fread("outputs/outbreak_data_20241121.csv") # for vaccine impact modeling
+outbreak_data[, data_id := .GRP, by = id_outbreak]
+
+ggplot(outbreak_data)+
+  geom_line(aes(week,s_ch,group = data_id), color="grey50")+
+  theme_light()
+ggplot(outbreak_data[data_id == 5])+
+    geom_line(aes(week, s_ch, group = data_id), color="grey50")+
+    theme_light()
+
+d <- outbreak_data[data_id == 13]
+plot(d$week, d$s_ch, type="l", col="grey50", ylim=c(0,200), xlim=c(0,50))
+
+for (i in 2:length(unique(outbreak_data$data_id))) {
+  cat("i = ", i, "\n")
+  d <- outbreak_data[data_id == i]
+  lines(d$week, d$s_ch, col="grey50")
+  
+  readline(prompt="Press [enter] to continue")
+
+}
+```
+
+
+```{r}
+ds |>
+  ggplot()+
+  geom_histogram(aes(x=ar_per_10e3))+
+  scale_x_log10()
+
+quantile(ds$ar_per_10e3/10, probs=c(0.025,0.25,0.6,0.74,0.975))
+
+
+fit <- fread("julia/outputs/fit_4p_fA010_20241130T00.csv")
+fit$data_id <- 1:nrow(fit)
+fit[outbreak_data, on = 'data_id', id_outbreak := i.id_outbreak]
+fit <- left_join(fit,
+                 ds[,c("id_outbreak","ar_per_10e3","rural_urban","duration_weeks","total_s_ch")], 
+                  by="id_outbreak")
+
+# fit <- fit, on="id_outbreak"]
+# fit[ds, on = 'id_outbreak', ar_per_10e3 := i.ar_per_10e3]
+
+fwrite(fit, "julia/outputs/fit_4p_fA010_20241130T00_ds.csv")
+```
+
+
+## Outbreak summary dataset 
+
+```{r}
+# extract ids for the outbreaks not affected by OCV campaigns
+ds <- clean_names(as.data.frame(fread("data/outbreak_files_Jun2024/outbreak_data_summary.csv")))
+ds <- ds[!is.na(ds$country), ] # why NA's? 
+ds |>
+  group_by(location, outbreak_number) |>
+  mutate(id_outbreak = paste0(location, "-", start_date, "-", end_date)) |> 
+  ungroup() -> ds
+# ds |>
+#   group_by(id_outbreak) |>
+#   summarize(n=n()) |>
+#   arrange(desc(n))
+# 
+# ds |>
+#   group_by(id_outbreak) |>
+#   summarize(n=n()) |>
+#   arrange(desc(n)) -> ds_ids
+# 
+# ds_ids_2 <- ds_ids |> filter(n > 1)
+# 
+# print(ds_ids, n=30)
+# ds[ds$id_outbreak %in% ds_ids_2$id_outbreak, ]
+
+# data for the outbreaks affected by OCV
+docv <- clean_names(fread("data/outbreak_files_Jun2024/ocv_long_dataset.csv"))
+ts <- clean_names(readRDS("data/outbreak_files_Jun2024/outbreak_data_ts.rds")) # time-series data
+# fwrite(ts, "data/outbreak_files_Jun2024/outbreak_data_ts.csv") # to see in the spreadsheet
+ts |>
+  group_by(location, outbreak_number) |> # identify unique outbreaks
+  mutate(week = row_number(),
+         date = tl + 3, # pick the date for the midpoint for each week
+         start_date_outbreak = min(tl), 
+         end_date_outbreak = max(tr),
+         id_outbreak = paste0(location, "-", start_date_outbreak, "-",
+                              end_date_outbreak)) |>
+  ungroup() -> ts # time series with unique ids
+
+# plot to check the sanity of the time series
+# ids <- unique(ts$id_outbreak)
+# d1 <- ts[ts$id_outbreak == ids[1],  ]
+# plot(d1$week, d1$s_ch, type="l", xlim=c(0, 100), ylim=c(0,10000))
+# for (id in ids) {
+#   d <- ts[ts$id_outbreak == id,  ]
+#   lines(d$week, d$s_ch)
+# }
+length(unique(ts$id_outbreak))
+sum(unique(ts$id_outbreak) %in% ds$id_outbreak)
+
+ts |> 
+  group_by(id_outbreak) |> 
+  mutate(c_ch_sum = sum(c_ch)) |> 
+  filter(c_ch_sum > 0) |> 
+  pull(id_outbreak) |>
+  unique() -> ids_conf
+length(ids_conf)
+
+# data.table::fwrite(ts, 
+#                    paste0("outputs/outbreak_data_all_", tstamp(), ".csv"))
+```
+
+
+## Create subsets of outbreak data set to compute vaccine impact
+
+### 1. Population size
+```{r}
+library(googlesheets4)
+# OCV use during campaigns
+ocv_use <- read_sheet('https://docs.google.com/spreadsheets/d/1g9Ddrp0Ft14BtmAlZ-j7r8YCEAddro6H2jcmLkn7u84/edit?gid=0#gid=0', 
+                      sheet='Sheet1',
+                      col_types = "cccDDDDDDDdddddddccccc")
+
+# Infer population size by the number of vaccine doses  
+max_ocv_dose <- max(ocv_use$DOSE_ROUND_ONE*1000, na.rm=T)
+min_ocv_dose <- min(ocv_use$DOSE_ROUND_ONE*1000, na.rm=T)
+# summary(ocv_use$DOSE_REQUESTED*1000)
+# hist(ocv_use$DOSE_ROUND_ONE*1000, breaks=1000)
+
+# ts |> 
+#   mutate(admin1 = ifelse(admin1 == "", NA, admin1), 
+#          admin2 = ifelse(admin2 == "", NA, admin2),
+#          admin3 = ifelse(admin3 == "", NA, admin3),
+#          admin4 = ifelse(admin4 == "", NA, admin4),
+#          admin5 = ifelse(admin5 == "", NA, admin5),) -> ts
+length(unique(ts$id_outbreak))
+
+ts |> filter(pop <= max_ocv_dose & pop >= min_ocv_dose) -> ts_pop 
+ 
+ts_pop |> 
+  group_by(id_outbreak) |> 
+  summarize(pop = pop[1]) |> 
+  pull(pop) |> 
+  summary()
+
+length(unique(ts_pop$id_outbreak))
+
+# length(unique(ts$id_outbreak))
+# ts_adm1 <- ts |> filter(!is.na(admin1))
+# length(unique(ts_adm1$id_outbreak))
+# ts_adm12 <- ts |> filter(!is.na(admin1) & !is.na(admin2))
+# length(unique(ts_adm12$id_outbreak))
+# 
+# ts_adm1 |> 
+#   group_by(id_outbreak) |> 
+#   summarize(pop = pop[1]) |> 
+#   pull(pop) |> 
+#   summary()
+# 
+# ts_adm1 <- ts |> filter(spatial_scale == "admin1")
+# ts_adm1 |> 
+#   group_by(id_outbreak) |> 
+#   summarize(pop = pop[1]) |> 
+#   pull(pop) |> 
+#   summary()
+# 
+# ts_adm2 <- ts |> filter(spatial_scale == "admin2")
+# ts_adm2 |> 
+#   group_by(id_outbreak) |> 
+#   summarize(pop = pop[1]) |> 
+#   pull(pop) |> 
+#   summary()
+```
+
+
+### 2. Exclude outbreaks affected by OCVs
+```{r}
+# exclude outbreaks that were affected by OCV campaigns using IDs 
+# length(unique(ts_pop$id_outbreak))
+# ts_pop_ocv <- ts_pop[!(ts_pop$id_outbreak %in% docv$id_outbreak),]
+ts_pop_ocv <- ts_pop
+
+length(unique(ts_pop_ocv$id_outbreak))
+sum(unique(ts_pop_ocv$id_outbreak) %in% ids_conf)
+
+sum(!unique(ts_pop_ocv$id_outbreak) %in% ds$id_outbreak)
+```
+
+### 2.1 Exclude outbreaks with no information on deaths
+
+For vaccine impact, we conduct analyses for the outbreaks even if information
+on death is not available.
+```{r}
+length(unique(ts_pop_ocv$id_outbreak))
+ts_pop_ocv |> 
+  group_by(id_outbreak) |> 
+  mutate(total_deaths = sum(deaths)) |>
+  filter(total_deaths >= 0) -> ts_pop_ocv_death # for YLD and DALY
+
+ts_pop_ocv -> ts_pop_ocv_death
+
+length(unique(ts_pop_ocv_death$id_outbreak))
+```
+
+### 3 Set aside the culture-confirmed outbreaks
+
+```{r}
+length(unique(ts_pop_ocv$id_outbreak))
+
+ts_pop_ocv |> 
+  group_by(id_outbreak) |> 
+  mutate(total_confirmed_cases = sum(c_ch)) |>
+  filter(total_confirmed_cases > 0) |> 
+  ungroup() -> ts_pop_ocv_confirmed # for YLD and DALY 
+
+length(unique(ts_pop_ocv_confirmed$id_outbreak))
+```
+
+
+### Outbreak data for modeling
+
+Combine the time-series data with the summary data, which has information on
+attack rate, case fatality ratio, outbreak_pop, rural_urban, etc.
+
+```{r}
+# unfortunately, three outbreaks from time series don't have corresponding summary
+ts_pop_ocv <- ts
+all(ts_pop_ocv$id_outbreak %in% ds$id_outbreak)
+unique(ts_pop_ocv[!(ts_pop_ocv$id_outbreak %in% ds$id_outbreak),]$id_outbreak)
+
+ts_pop_ocv_ds <- ts_pop_ocv[(ts_pop_ocv$id_outbreak %in% ds$id_outbreak),]
+  
+  
+ds_ <- ds[, c("ar_per_10e3", "cfr_per_100percent", 
+              "outbreak_pop", "rural_urban", "id_outbreak")]
+names(ds_) <- c("attack_rate", "cfr", "population", "rural_urban", 
+                "id_outbreak")
+
+
+outbreak_data_modeling <- left_join(ts_pop_ocv_ds, ds_, by="id_outbreak")
+
+outbreak_data_modeling |> 
+  group_by(id_outbreak) |> 
+  summarize(pop = pop[1], 
+            population = population[1]) -> d
+
+# for some outbreaks, population size is not the same between ts and ds
+# in which case, we will use values from ts as ds has NA's as well.
+# outbreak_data_modeling |> 
+#  group_by(id_outbreak) |> 
+#  summarize(pop = pop, 
+#            population = population) -> d
+# summary(abs(d$pop - d$population))
+# which(abs(d$pop - d$population) > 1000)
+
+data.table::fwrite(outbreak_data_modeling,
+                   paste0("outputs/outbreak_data_", tstamp(), ".csv"))
+
+# ts_test <- ts_test |>
+#   mutate(outbk_yesno = ifelse(s_ch / population * 1e5 > threshold, 1, 0))
+
+# parameter values to explore
+vacc_covs <- seq(0.6, 0.95, by=0.05)
+vacc_weeks <- 1:20
+case_triggers <- c(5, 10, 20, 30, 50, 70, 100, 150, 250, 400, 600, 1000)
+# to save and run by batch (batch_size = parameter sample size to go through all outbreaks, vaccination weeks, and vaccination coverage rates)
+batch_size <- 4
+```
+
+
+Data of modeling the OCV use during outbreaks
+
+```{r, eval=F}
+library(googlesheets4)
+#Read google sheets data into R
+# outbreak modeling papers
+review1 <- read_sheet('https://docs.google.com/spreadsheets/d/1ZN6M4tx21-8BSRMZ692MOU3M5yDYK7bLqRbYGVOZGtQ/edit#gid=959832095', sheet="Outbreaks")
+review2 <- read_sheet('https://docs.google.com/spreadsheets/d/1ZN6M4tx21-8BSRMZ692MOU3M5yDYK7bLqRbYGVOZGtQ/edit?gid=1840356702#gid=1840356702', sheet="Outbreaks 2")
+outbks2 <- filter(review2, `Defined outbreak vs surveillance` == "Outbreak")
+
+ocv_use <- read_sheet('https://docs.google.com/spreadsheets/d/1g9Ddrp0Ft14BtmAlZ-j7r8YCEAddro6H2jcmLkn7u84/edit?gid=0#gid=0', 
+                      sheet='Sheet1',
+                      col_types = "cccDDDDDDDdddddddccccc")
+
+# Infer population size by the number of vaccine doses  
+summary(ocv_use$DOSE_ROUND_ONE*1000)
+summary(ocv_use$DOSE_REQUESTED*1000)
+hist(ocv_use$DOSE_ROUND_ONE*1000, breaks=10)
+```
+
+## Read in data sets
+```{r}
+outbreak_data_all <- fread("outputs/outbreak_data_all_20241024.csv")
+outbreak_data <- fread("outputs/outbreak_data_20241024.csv") # for vaccine impact modeling
+save_plot <- FALSE
+library(googlesheets4)
+# OCV use during campaigns
+ocv_use <- read_sheet('https://docs.google.com/spreadsheets/d/1g9Ddrp0Ft14BtmAlZ-j7r8YCEAddro6H2jcmLkn7u84/edit?gid=0#gid=0', sheet='Sheet1',
+                      col_types = "cccDDDDDDDdddddddccccc")
+delay_req_R1 <- as.integer(ocv_use$DATE_ROUND_ONE - ocv_use$DATE_REQUEST)
+# summary(delay_req_R1)
+hist(ocv_use$DOSE_DELIVERED_ROUND_ONE)
+summary(ocv_use$DOSE_DELIVERED_ROUND_ONE)
+
+cutoffs <- quantile(ocv_use$DOSE_DELIVERED_ROUND_ONE, probs=seq(0, 1, 0.1), na.rm=TRUE)
+
+grp_levels <- c(paste0(cutoffs[1],"-", number(cutoffs[2], big.mark = ",")),
+             paste0(cutoffs[2], "-", number(cutoffs[3], big.mark = ",")),
+             paste0(cutoffs[3], "-", number(cutoffs[4], big.mark = ",")),
+             paste0(cutoffs[4], "-", number(cutoffs[5], big.mark = ",")),
+             paste0(cutoffs[5], "-", number(cutoffs[6], big.mark = ",")),
+             paste0(cutoffs[6], "-", number(cutoffs[7], big.mark = ",")),
+             paste0(cutoffs[7], "-", number(cutoffs[8], big.mark = ",")),
+             paste0(cutoffs[8], "-", number(cutoffs[9], big.mark = ",")),
+             paste0(cutoffs[9], "-", number(cutoffs[10], big.mark = ",")))
+
+svim$pop_size_grp <- ifelse(svim$s_ch_tot < cutoffs[2], 
+  paste0(cutoffs[1],"-", cutoffs[2]),
+  ifelse(svim$population < cutoffs[3], 
+  paste0(cutoffs[2],"-", cutoffs[3]),
+  ifelse(svim$population < cutoffs[4], 
+  paste0(cutoffs[3],"-", cutoffs[4]),
+  ifelse(svim$population < cutoffs[5], 
+  paste0(cutoffs[4],"-", cutoffs[5]),
+  ifelse(svim$population < cutoffs[6], 
+  paste0(cutoffs[5],"-", cutoffs[6]),
+  ifelse(svim$population < cutoffs[7], 
+  paste0(cutoffs[6],"-", cutoffs[7]),
+  ifelse(svim$population < cutoffs[8], 
+  paste0(cutoffs[7],"-", cutoffs[8]),
+  ifelse(svim$population < cutoffs[9], 
+  paste0(cutoffs[8],"-", cutoffs[9]), 
+  paste0(cutoffs[9],"-", number(cutoffs[10], big.mark = ","))))))))))
+
+svim$pop_size_grp <- factor(svim$pop_size_grp, levels=grp_levels)
+```
+
+Resampling approach
+
+We sample outbreaks based on the size of the population based on the empirical 
+ditribution
+
+```{r}
+n_sample <- 1000
+obs_ocv_dose <- ocv_use$DOSE_DELIVERED_ROUND_ONE[!is.na(ocv_use$DOSE_DELIVERED_ROUND_ONE)]
+min_dose <- min(obs_ocv_dose)
+max_dose <- max(obs_ocv_dose)
+
+df <- data.frame(num_dose = obs_ocv_dose)
+linspace <- seq(min_dose, max_dose, length.out=101)
+df$grp <- NA
+# Integer Division:
+df$grp <- df$num_dose %/% 49.899 + 1 
+
+quantile(ocv_use$DOSE_DELIVERED_ROUND_ONE, probs=seq(0, 1, 0.1), na.rm=TRUE)
+
+svim$pop_size_grp <- (svim$pop/1000) %/% 49.899 + 1 
+  
+n <- length(historical_changes)
+prob_vector <- rep(1/n, n)
+resamples <- sample(x=historical_changes, size = num_samples, replace = TRUE, prob = prob_vector)
+svim |> 
+  
+names(outbreak_data)  
+svim <- left_join(svim, outbreak_data[,c("id_outbreak", "pop")], by="id_outbreak")# future stuff
+```
+
+
+### Summary statistics
+```{r, eval=FALSE}
+length(unique(outbreak_data_all$id_outbreak))
+length(unique(outbreak_data$id_outbreak))
+
+summary(outbreak_data_all$pop)
+filter(outbreak_data_all, pop > 5000000) |> pull(id_outbreak) |> unique() |> length()
+
+outbreak_data_all[outbreak_data_all$pop > 1e7,]
+outbreak_data_all |> 
+  mutate(admin1 = ifelse(admin1 == "", NA, admin1), 
+         admin2 = ifelse(admin2 == "", NA, admin2),
+         admin3 = ifelse(admin3 == "", NA, admin3),
+         admin4 = ifelse(admin4 == "", NA, admin4),
+         admin5 = ifelse(admin5 == "", NA, admin5),) -> outbreak_data_all
+
+# outbreak_data_all |> 
+#   mutate(admin1 = gsub("", NA, admin1), 
+#          admin2 = gsub("", NA, admin2),
+#          admin3 = gsub("", NA, admin3),
+#          admin4 = gsub("", NA, admin4),
+#          admin5 = gsub("", NA, admin5)) -> outbreak_data_all
+
+summary(outbreak_data_all$pop)
+summary(outbreak_data_all[!is.na(outbreak_data_all$admin1),]$pop)
+
+```
+
+
+```{r}
+# svim <- fread("outputs/mean_svim_vacc_week_20241021.csv")
+svim <- fread("outputs/svim_res_vacc_week_20241029.csv")
+str <- names(svim)
+names(svim) <- gsub("mean_", "", str)
+# for cost-associated analyses
+# bod = burden of disease
+svim_cost <- fread("outputs/svim_bod_res_vacc_week_20241029.csv")
+str <- names(svim_cost)
+names(svim_cost) <- gsub("mean_", "", str)
+# svim <- clean_names(fread("outputs/mean_svim_vacc_week_20241010.csv"))
+# svim$vacc_week <- svim$vacc_week
+# This is needed because outbreak data has been updated
+# svim <- svim[svim$id_outbreak %in% outbreak_data$id_outbreak,]
+
+svim_conf <- svim[svim$id_outbreak %in% ids_conf,]
+week_vacc_start <- round((median(delay_req_R1, na.rm=T) + 10)/7)
+svim |> filter(vacc_cov == 0.8, vacc_week == 7) -> svim_v9w4
+svim |> filter(vacc_cov == 0.8, vacc_week == 7) -> svim_v8w7
+
+library(moments)
+summary(round(svim_v9w4$s_ch_tot))
+sd(svim_v9w4$s_ch_tot)
+skewness(svim_v9w4$s_ch_tot)
+
+summary(svim_v9w4$s_ch_averted_tot)
+sd(svim_v9w4$s_ch_averted_tot)
+skewness(svim_v9w4$s_ch_averted_tot)
+
+```
+
+```{r}
+outbreak_data |> 
+  group_by(id_outbreak) |> 
+  summarize(duration = max(tr) - min(tl),
+            s_ch_tot = sum(s_ch),
+            death_tot = sum(deaths), 
+            cfr = death_tot/s_ch_tot) -> d
+
+plot(d$duration, d$cfr)
+
+fit <- lm(cfr ~ duration, data=d)
+newd <- data.frame(duration=0:1000)
+pred <- predict(fit, newdata=newd)
+
+lines(newd$duration, coef(fit)[1] + coef(fit)[2] * newd$duration, col=2)
+```
+
