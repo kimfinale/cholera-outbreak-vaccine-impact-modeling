@@ -1,5 +1,5 @@
 ---
-title: "data_manipulation"
+title: "Data derivation"
 format: html
 editor_options: 
   chunk_output_type: console
@@ -11,7 +11,7 @@ editor_options:
 ```{r}
 library(data.table)
 library(tidyverse)
-source("R/functions.R")
+source("utils.R")
 ```
 
 ## Data sets
@@ -28,8 +28,25 @@ ts <- readRDS("data/outbreak_data_ts.rds")
 
 fits <- fread("outputs/data_fit_eval_20240409.csv")
 good_fits <- fits[PARAM_GLOBAL == 1 & PARAM_SANITY_5pct == 1 & 
-                   FIT_SANITY == 1 & R2_adj >= 0.5]
+                    FIT_SANITY == 1 & R2_adj >= 0.5]
 ```
+
+## Exclude outbreaks    
+
+1. Exclude outbreaks that have already been affected by OCVs
+2. Exclude outbreaks for which mortality data are not available
+3. Exclude outbreaks for which economic variables are not available (workforce, GDP, etc.)
+4. Exclude outbreaks reported to have occurred in a population over 3M as more than 5M doses are not likely to be approved, based on the records from XX through XX. 
+
+
+```{r}
+summary(ds$population)
+summary(ds[ds$ID %in% ts824_wk$data_id, ]$population)
+ds824 <- ds[ds$ID %in% ts824_wk$data_id, ]
+summary(ds824$population)
+unique(ds824[ds824$population > 3e6,]$ID_outbreak)
+```
+   
 
 Create the weekly incidence of all outbreaks by date and epidemic week
 
@@ -151,7 +168,9 @@ length(unique(ts113_wk$id))
 
 fwrite(ts113_wk, paste0("outputs/ts113_week_",tstamp(),".csv"))
 ```
+   
 
+   
 Combine vaccine impact 
 ```{r}
 vacc_cov <- 1:9
@@ -201,24 +220,71 @@ vacc_impact <- do.call('rbind', vacc_impact_list)
 ## Life expectancy data
 ```{r}
 library(readxl)
-life_exp <- 
-  readxl::read_xlsx("data/WPP2022_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx",
+estimates <- 
+  readxl::read_xlsx("data/WPP2024_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx",
                      "Estimates")
-nms <- life_exp[12,]
-life_exp <- lifeexp[-(1:12),]
-names(life_exp) <- nms
-data.table::fwrite(life_exp, "outputs/wpp_life_expectancy.csv")
+nms <- estimates[12,]
+estimates <- estimates[-(1:12),]
+names(estimates) <- nms
+
+data.table::fwrite(estimates, paste0("outputs/wpp_life_expectancy_", tstamp(), ".csv"))
+
+# # for years 2022 and onwards
+# med_variant <- 
+#   readxl::read_xlsx("data/WPP2022_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx",
+#                      "Medium variant")
+# nms_ <- med_variant[12,]
+# med_variant <- med_variant[-(1:12),]
+# names(med_variant) <- nms_
+# 
+# life_expectancy <- rbind(estimates, med_variant)
+# data.table::fwrite(life_expectancy, 
+#                    paste0("outputs/wpp_life_expectancy_", tstamp(), ".csv"))
 ```
  
+
+## Population by age to compute the proportion of population under 5
+```{r}
+library(readxl)
+estimates <-
+  readxl::read_xlsx("data/WPP2024_POP_F01_1_POPULATION_SINGLE_AGE_BOTH_SEXES.xlsx",
+                     "Estimates")
+nms <- estimates[12,]
+estimates <- estimates[-(1:12),]
+names(estimates) <- nms
+
+data.table::fwrite(estimates, 
+                   paste0("outputs/wpp_pop_by_age_", tstamp(), ".csv"))
+
+# # for years 2022 and onwards
+# med_variant <- 
+#   readxl::read_xlsx("data/WPP2022_POP_F01_1_POPULATION_SINGLE_AGE_BOTH_SEXES.xlsx",
+#                      "Medium variant")
+# nms_ <- med_variant[12,]
+# med_variant <- med_variant[-(1:12),]
+# names(med_variant) <- nms_
+# 
+# pop_by_age <- rbind(estimates, med_variant)
+pop_by_age <- estimates
+pop_by_age$prop_u5 <- NA
+for (i in 1:nrow(pop_by_age)) {
+ pop_by_age$prop_u5[i] <- sum(as.double(pop_by_age[i, 12:16])) / 
+   sum(as.double(pop_by_age[i, 12:112]))
+}
+data.table::fwrite(pop_by_age,
+                   paste0("outputs/wpp_pop_by_age_", tstamp(), ".csv"))
+```
+ 
+  
 ## Indirect vaccine efficacy (IVE)
 
 IVE data come from a Bayesian beta regression fit
 ```{r}
-fit <- read_rds("outputs/fit_ive_baye_beta_20240819.rds")
-# print(fit, pars=c("beta","gamma","lp__"), probs=c(0.025, 0.5, 0.975))
-ive_yrep <- list(yrep = as.data.frame(extract(fit)$yrep),
-                eff_vacc_cov = expit(extract(fit)$new_X[1,,2]))
-ive_yrep$eff_vacc_cov
+fit <- read_rds("outputs/fit_ive_matlab_20241008.rds")
+# print(fit, pars=c("beta","phi","lp__"), probs=c(0.025, 0.5, 0.975))
+ive_yrep <- list(yrep = as.data.frame(rstan::extract(fit)$yrep),
+                vacc_cov = round(expit(rstan::extract(fit)$new_X[1,,2]), digits=2))
+ive_yrep$vacc_cov
 saveRDS(ive_yrep, paste0("outputs/ive_yrep_", tstamp(), ".rds"))
 
 # plot(ive_yrep$eff_vacc_cov, ive_yrep$yrep[sample(1:nrow(ive_yrep$yrep),1), ], type="l", col='grey90')
@@ -229,4 +295,11 @@ saveRDS(ive_yrep, paste0("outputs/ive_yrep_", tstamp(), ".rds"))
 # }
 ```
 
+## OCV requests, deliveries, etc.
+
+Extracts data from GTFCC OCV dashboard.
+
+```{r}
+
+```
 
