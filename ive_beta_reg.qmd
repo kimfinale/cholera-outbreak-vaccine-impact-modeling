@@ -1,0 +1,108 @@
+---
+title: "Hierarchical beta regression for the indirect vaccine effectiveness"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+
+##  IVE data
+
+Load packages and source utility functions
+
+```{r}
+library(rstan)
+library(cmdstanr)
+source("utils.R")
+```
+
+Incidence rate based on the study by Ali (2005) Matlab, Bangladesh
+```{r, eval=FALSE}
+# Individuals targeted for the trial, 89 596
+# this is the first year of 4,035 in surveillance and therefore
+# vaccine waning is ignored
+vc_cutoff <- c(0, 0.28, 0.35, 0.40, 0.50, 0.65) # vaccine coverage cutoff, Table 1
+vc_mid <- vc_cutoff[1:5] + diff(vc_cutoff)/2 # mid-point used a coverage
+ir <- c(7.01, 5.87, 4.72, 4.65, 1.47) # incidence rate
+# baseline incidence rate (i.e., incidence rate at zero vaccination rate)
+dat <- data.frame(ir = ir, vc = vc_mid, region = "Matlab")
+```
+
+Baseline incidence rate, incidence rate at vaccine coverage of 0, was adopted based on the study
+by Longini et al.(2007) PLoS Med (Fig. 3A), which is around 11.2 per 1,000 person-years. Using the following equation, we add a column on the indirect vaccine effectiveness (IVE),
+
+$$\text{VE}_{I,vc} = 1 - \left( \frac{\textrm{IR}_{vc}}{\textrm{IR}_{base}}\right)$$
+
+```{r}
+ir_baseline <- 11.2 # Longini et al.(2007) PLoS Med (Fig. 3A)
+dat$ive <- 1 - dat$ir / ir_baseline
+```
+
+Longini et al. (2007) study provides IVE from their individual-based model.
+```{r}
+ive_longini <- 
+  data.frame(vc = seq(0.1,0.9,by=0.2),
+             ive = c(0.3,0.7,0.89,0.97,0.99),
+             lb = c(-0.39,0.31,0.72,0.91,0.98),
+             ub = c(0.83,0.93,0.98,0.99,1))
+```
+
+### Fitting
+
+```{r, eval=F}
+N <- nrow(dat)
+X <- cbind(1, logit(dat$vc))
+K <- ncol(X)
+y <- dat$ive
+
+fit <- stan(file = "ir_ive_beta_matlab.stan",
+            data = list(N=N, X=X, K=K, y=y),
+            iter = 1e4, cores = 4,
+            control = list(adapt_delta=0.9))
+
+# saveRDS(fit, paste0("outputs/fit_ive_matlab_", tstamp(), ".rds"))
+print(fit, pars=c("beta","phi","lp__"), probs=c(0.025, 0.5, 0.975))
+```
+
+### Posterior predictive check
+
+```{r, eval=FALSE}
+# fit <- read_rds("outputs/fit_ive_matlab_20241008.rds")
+# print(fit, pars=c("beta","phi","lp__"), probs=c(0.025, 0.5, 0.975))
+yrep <- as.data.frame(rstan::extract(fit)$yrep)
+pr <- c(0.025, 0.05, 0.25, 0.5, 0.75, 0.95, 0.975) 
+pred <- as.data.frame(t(apply(yrep, 2, quantile, probs=pr, na.rm=T)))
+pred$x <- expit(rstan::extract(fit)$new_X[1,,2])
+# pred$x <- extract(fit)$new_X[1,,2]
+# pred$x <- sort(unique(extract(fit1)$new_X[1,,2]))
+
+# pred$`95%` <- ifelse(pred$`95%` > 1, 1, pred$`95%`)
+# pred$`5%` <- ifelse(pred$`5%` < 0, 0, pred$`5%`)
+# pred$`97.5%` <- ifelse(pred$`97.5%` > 1, 1, pred$`97.5%`)
+# pred$`2.5%` <- ifelse(pred$`2.5%` < 0, 0, pred$`2.5%`)
+# pred$`75%` <- ifelse(pred$`75%` > 1, 1, pred$`75%`)
+# pred$`25%` <- ifelse(pred$`25%` < 0, 0, pred$`25%`)
+
+ggplot(ive_longini)+
+  geom_point(aes(vc, ive, color="Dynamic model"), shape=15) +
+  geom_linerange(aes(vc, ymin=lb, ymax=ub, color="Dynamic model"))+
+  geom_point(data=dat, aes(vc, ive, color="Data"), shape=17)+
+  geom_linerange(data=pred, aes(x, ymin=`5%`, ymax=`95%`, color="Beta regression"), linewidth=0.4)+
+  geom_linerange(data=pred, aes(x, ymin=`25%`, ymax=`75%`, color="Beta regression"), linewidth=0.8)+
+  geom_point(data=pred, aes(x, `50%`, color="Beta regression"))+
+  scale_y_continuous(limits=c(0,1))+
+  scale_color_manual("", values=c("Dynamic model"="firebrick",
+                                  "Data"="steelblue",
+                                  "Beta regression"="black"))+  
+  theme_light()+
+  # labs(x="Vaccine coverage", y="Indirect vaccine effectiveness",
+  #      color="", title="Posterior predictive values")+
+    labs(x="Vaccine coverage", y="Indirect vaccine effectiveness",
+       color="")+
+  theme(legend.position="top") -> plt
+
+plt
+fac <- 1.4
+ggsave(paste0("plots/ppv_ive_matlab_", tstamp(), ".pdf"), plt, height=2.7*fac, width=3.4*fac,
+        units="in", device=cairo_pdf)
+```

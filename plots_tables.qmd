@@ -37,6 +37,7 @@ VW <- 9 # representative vaccination week
 VW_seq <- seq(1, 15, 2)
 VC <- 0.75 # representative vaccination coverage rate
 VC3 <- c(0.6, 0.75, 0.9) # three representative vaccination coverage rates
+YEAR <- as.Date("2020-12-28") # the most recent date in which the OCV campaign data is available. This value is from the `max(docv$start_date,na.rm=T)` from the `vacc_impact.qmd` file
 
 theme_set(theme_gray(base_size=14))
 
@@ -45,6 +46,7 @@ africa <- st_read("data/shapefiles/afr_g2014_2013_0.shp")
 ```
 
 ## Outbreak data and delay
+
 ```{r}
 outbreak_data_all <- as.data.frame(fread("outputs/outbreak_data_all_20241121.csv"))
 outbreak_data <- fread("outputs/outbreak_data_20241121.csv") # for vaccine impact modeling
@@ -77,29 +79,188 @@ ds |>
 outbk_data_summary <- left_join(filter(outbreak_data, week == 1), ds, by="id_outbreak")
 summary(outbk_data_summary$ar_per_10e3)
 summary(outbk_data_summary$outbreak_pop)
-
 ```
 
-## VIM results
+## Burden of cholera outbreaks
+Downloaded from Global Cholera and Acute Watery Diarrhoea (AWD) Dashboard (https://who-global-cholera-and-awd-dashboard-1-who.hub.arcgis.com/pages/data-download)
 ```{r}
-svim <- fread("outputs/svim_mean_across_runid_20241126.csv")
+c2023 <- fread("data/cholera_adm0_public_2023.csv")
+c2024 <- fread("data/cholera_adm0_public_2024.csv")
+c2023$year <- 2023
+c2024$year <- 2024
+chol <- rbind(c2023, c2024)
+
+c2023 |> 
+  group_by(year, who_region) |>
+  summarize(case_region_total = sum(case_total), 
+            death_region_total = sum(death_total)) |> 
+  mutate(case_pct = 100 * case_region_total/sum(case_region_total),
+         death_pct = 100 * death_region_total/sum(death_region_total),
+         case_tot = sum(case_region_total),
+         death_tot = sum(death_region_total))
+
+c2024 |> 
+  group_by(year, who_region) |>
+  summarize(case_region_total = sum(case_total), 
+            death_region_total = sum(death_total)) |> 
+  mutate(case_pct = 100 * case_region_total/sum(case_region_total),
+         death_pct = 100 * death_region_total/sum(death_region_total),
+         case_tot = sum(case_region_total),
+         death_tot = sum(death_region_total))
+
+chol |> 
+  group_by(who_region) |>
+  summarize(case_region_total = sum(case_total), 
+            death_region_total = sum(death_total)) |> 
+  mutate(case_pct = 100 * case_region_total/sum(case_region_total),
+         death_pct = 100 * death_region_total/sum(death_region_total),
+         case_tot = sum(case_region_total),
+         death_tot = sum(death_region_total))
+```
+
+## Vaccine impact modeling results
+
+```{r}
+# svim <- fread("outputs/svim_mean_across_runid_20241218.csv")
+# svim_cea <- fread("outputs/svim_mean_cea_across_runid_20241218.csv")
+svim_sum_cea_vc60 <- 
+  read_rds("outputs/svim_0.6_time_trigger_sum_cea_across_runid_20241222.rds")
+svim_sum_cea_vc75 <- 
+  read_rds("outputs/svim_0.75_time_trigger_sum_cea_across_runid_20241222.rds")
+svim_sum_cea_vc90 <- 
+  read_rds("outputs/svim_0.9_time_trigger_sum_cea_across_runid_20241222.rds")
+
+svim_sum_cea <- rbind(svim_sum_cea_vc60, svim_sum_cea_vc75)
+rm(svim_sum_cea_vc60)
+rm(svim_sum_cea_vc75)
+svim_sum_cea <- rbind(svim_sum_cea, svim_sum_cea_vc90)
+rm(svim_sum_cea_vc90)
+svim_sum_cea <- svim_sum_cea[start_date <= YEAR]
+# svim_sum <- fread("outputs/svim_sum_across_week_by_runid_20241218.csv")
+# svim_sum_cea <- fread("outputs/svim_sum_cea_20241218.csv")
+
 svim_ct <- fread("outputs/svim_ct_mean_across_runid_20241126.csv")
+svim_ct <- svim_ct[start_date <= YEAR]
+
+svim_ct_sum_cea_vc60 <-
+  read_rds("outputs/svim_0.6_case_trigger_sum_cea_across_runid_20241223.rds")
+svim_ct_sum_cea_vc75 <-
+  read_rds("outputs/svim_0.75_case_trigger_sum_cea_across_runid_20241223.rds")
+svim_ct_sum_cea_vc90 <-
+  read_rds("outputs/svim_0.9_case_trigger_sum_cea_across_runid_20241223.rds")
+
+svim_ct_sum_cea <- rbind(svim_ct_sum_cea_vc60, svim_ct_sum_cea_vc75)
+rm(svim_ct_sum_cea_vc60)
+rm(svim_ct_sum_cea_vc75)
+svim_ct_sum_cea <- rbind(svim_ct_sum_cea, svim_ct_sum_cea_vc90)
+rm(svim_ct_sum_cea_vc90)
+svim_ct_sum_cea <- svim_ct_sum_cea[start_date <= YEAR]
+
 svim_pe <- fread("outputs/svim_pe_mean_across_runid_20241126.csv")
 svim_pe_sum <- fread("outputs/svim_pe_sum_across_week_by_runid_20241126.csv")
 
-svim_pe2 <- fread("outputs/svim_pe_mean_across_runid_20241217.csv")
-svim_pe_sum2 <- fread("outputs/svim_pe_sum_across_week_by_runid_20241217.csv")
+# svim_pe2 <- fread("outputs/svim_pe_mean_across_runid_20241217.csv")
+# svim_pe_sum2 <- fread("outputs/svim_pe_sum_across_week_by_runid_20241217.csv")
 
-svim_cea <- fread("outputs/svim_mean_cea_across_runid_20241126.csv")
 svim_ct_cea <- fread("outputs/svim_ct_mean_cea_across_runid_20241126.csv")
 
 subset_random <- fread("outputs/svim_mean_random_subset_ids_20241126.csv")
 subset_attack_rate <- fread("outputs/svim_mean_attack_rate_subset_ids_20241126.csv")
 subset_cases <- fread("outputs/svim_mean_cases_subset_ids_20241126.csv")
 subset_duration <- fread("outputs/svim_mean_duration_subset_ids_20241126.csv")
+
+# svim_subsets <- fread("outputs/svim_outbreak_subsets_20241224.csv")
+# unique(svim_subsets$subset_method)
+
+svim_all <- fread("outputs/svim_all_outbreaks_cea_across_runid_20241127.csv")
+svim_all <- svim_all[start_date <= YEAR]
 ```
 
-## Figure 2 Outbreak description
+
+## Figure 1. Study flowchart
+
+![Study flowchart](plots/fig1_data_method.png)
+
+## Figure S1. Indirect vaccine efficacy across vaccine coverage
+
+Incidence rate based on the study by Ali (2005) Matlab, Bangladesh
+```{r, eval=FALSE}
+# Individuals targeted for the trial, 89 596
+# this is the first year of 4,035 in surveillance and therefore
+# vaccine waning is ignored
+vc_cutoff <- c(0, 0.28, 0.35, 0.40, 0.50, 0.65) # vaccine coverage cutoff, Table 1
+vc_mid <- vc_cutoff[1:5] + diff(vc_cutoff)/2 # mid-point used a coverage
+ir <- c(7.01, 5.87, 4.72, 4.65, 1.47) # incidence rate
+# baseline incidence rate (i.e., incidence rate at zero vaccination rate)
+dat <- data.frame(ir = ir, vc = vc_mid, region = "Matlab")
+```
+
+Longini et al. (2007) study provides IVE from their individual-based model.
+```{r}
+ive_longini <- 
+  data.frame(vc = seq(0.1,0.9,by=0.2),
+             ive = c(0.3,0.7,0.89,0.97,0.99),
+             lb = c(-0.39,0.31,0.72,0.91,0.98),
+             ub = c(0.83,0.93,0.98,0.99,1))
+```
+
+```{r}
+ir_baseline <- 11.2 # Longini et al.(2007) PLoS Med (Fig. 3A)
+dat$ive <- 1 - dat$ir / ir_baseline
+```
+
+```{r, eval=FALSE}
+fit <- read_rds("outputs/fit_ive_matlab_20241008.rds")
+yrep <- as.data.frame(rstan::extract(fit)$yrep)
+pr <- c(0.025, 0.05, 0.25, 0.5, 0.75, 0.95, 0.975) 
+pred <- as.data.frame(t(apply(yrep, 2, quantile, probs=pr, na.rm=T)))
+pred$x <- expit(rstan::extract(fit)$new_X[1,,2])
+
+ggplot(ive_longini)+
+  geom_point(aes(vc, ive, color="Dynamic model"), shape=15) +
+  geom_linerange(aes(vc, ymin=lb, ymax=ub, color="Dynamic model"))+
+  geom_point(data=dat, aes(vc, ive, color="Data"), shape=17)+
+  geom_linerange(data=pred, aes(x, ymin=`5%`, ymax=`95%`, color="Beta regression"), linewidth=0.4)+
+  geom_linerange(data=pred, aes(x, ymin=`25%`, ymax=`75%`, color="Beta regression"), linewidth=0.8)+
+  geom_point(data=pred, aes(x, `50%`, color="Beta regression"))+
+  scale_y_continuous(limits=c(0,1))+
+  scale_color_manual("", values=c("Dynamic model"="firebrick",
+                                  "Data"="steelblue",
+                                  "Beta regression"="black"))+  
+  theme_light()+
+  labs(x="Vaccine coverage", y="Indirect vaccine effectiveness", color="")+
+  theme(legend.position="top") 
+```
+
+
+## Figure S2 Compartmental flow
+
+![Compartmental flow](plots/compartment_diagram.png)
+
+## Figure S3. Comparison of weekly incidence between the dynamic model and the data
+ 
+```{r}
+d <- fread("outputs/incidence_comparison_20241231T15.csv")
+d |> group_by(id_outbreak) |> 
+  mutate(num_id_outbreak = cur_group_id(),
+         week = row_number()) -> d
+# plots under "julia/plots/4pfA010" were reviewed and four plots selected
+# good: 1, 23
+# bad: 3, 40
+d <- d |> filter(num_id_outbreak %in% c(1,3,23,40))
+
+ggplot(d)+
+  geom_point(aes(week, inc_data))+
+  geom_line(aes(week, inc_model), color="firebrick")+
+  facet_wrap(~num_id_outbreak, scales="free")+
+  theme_light()+
+  labs(x="Week", y="Suspected cholera") -> plt
+
+ggsave(paste0("plots/fit_examples_", tstamp(), ".pdf"), plt,
+         device = cairo_pdf, width=fgw2, height=fgw2, units="mm")
+```
+
+## Figure 2, Outbreak description
 
 ### (A) Outbreak time series by group
 ```{r, eval=FALSE}
@@ -287,7 +448,7 @@ if (save_plot) {
 }
 ```
 
-## Figure 3 Percent case reduction
+## Figure 3. Percentage case reduction
 
 ### Example outbreak time series (no vaccine and vaccine) and vaccine impact
 
@@ -398,9 +559,7 @@ if (save_plot) {
 }
 ```
 
-###  Impact across VW at three different VCs
-
-Impact from preemptive vaccination
+### Impact from preemptive vaccination
 ```{r}
 svim_pe_sum |> 
   filter(vacc_cov %in% VC3) |> 
@@ -416,52 +575,254 @@ paste0("maximum percent case reduction from the pre-emptive vaccination are ",
        format_num(svim_pe_summary$max_pct_reduc_case[1], digits=1), "%, ", 
        format_num(svim_pe_summary$max_pct_reduc_case[2], digits=1), "%, and ",  
        format_num(svim_pe_summary$max_pct_reduc_case[3], digits=1), "% for vaccine coverage rate of  60%, 75%, and 90%, respectively.")
-
-# lower vaccine coverage levels to compare with Longini (2007) et al. results
-svim_pe_sum2 |> 
-  group_by(vacc_cov) |> 
-  summarize(mean_pct_reduc_case = mean(pct_reduc_case),
-            q500_pct_reduc_case = quantile(pct_reduc_case, probs=c(0.5)),
-            q025_pct_reduc_case = quantile(pct_reduc_case, probs=c(0.025)),
-            q975_pct_reduc_case = quantile(pct_reduc_case, probs=c(0.975)),
-            max_pct_reduc_case = max(pct_reduc_case),
-            min_pct_reduc_case = min(pct_reduc_case)) 
 ```
 
-Figure 3
+### Exponential model fit
+```{r}
+cts_sel <- c(1,seq(40,280,40)) # case triggers selected
+
+svim_sum_cea |>
+  filter(vacc_cov %in% VC, vacc_week <= max(VW_seq)) |>
+  group_by(vacc_week) |>
+  summarize(vacc_cov = vacc_cov[1],
+          count = n(),
+          median_prc = quantile(pct_reduc_case, probs=c(0.5))) -> svim_tt_med
+
+f <- function(t, Asym=0, lrc, y0) {
+    Asym + (y0 - Asym) * exp(-exp(lrc) * t)
+}
+
+fit <- nls(median_prc ~ f(t=vacc_week, Asym=0, lrc, y0),  
+           data = svim_tt_med, start = list(lrc = 0.1, y0=100))
+fit
+# weekly reduction rate
+exp(as.numeric(coef(fit)["lrc"]))
+# half-life (weeks)
+log(2)/abs(exp(as.numeric(coef(fit)["lrc"])))
+
+svim_tt_med$fitted <- fitted(fit)
+
+# case-triggered
+svim_ct_sum_cea |>
+  filter(vacc_cov %in% VC, case_trigger <= max(cts_sel)) |>
+  group_by(case_trigger) |>
+  summarize(vacc_cov = vacc_cov[1],
+          count = n(),
+          median_prc = quantile(pct_reduc_case, probs=c(0.5))) -> svim_ct_med
+
+# res_ct$t <- res$case_trigger
+f <- function(t, Asym=0, lrc, y0) {
+    Asym + (y0 - Asym) * exp(-exp(lrc) * t)
+}
+fit_ct <- nls(median_prc ~ f(t=case_trigger, Asym=0, lrc, y0),
+           data = svim_ct_med, start = list(lrc=log(0.01), y0=100))
+fit_ct
+# reduction rate by unit (week or a single case)
+(a <- exp(as.numeric(coef(fit_ct)["lrc"])))
+# half-life (weeks)
+(b <- log(2)/abs(exp(as.numeric(coef(fit_ct)["lrc"]))))
+paste0("Medican case reduction (%) decreases with increasing number of cumulative cases with ", format_num(a*100, digits=1) , "% by one case increase, and decreasing by half every ",  format_num(b, digits=1), " additional cases.")
+
+svim_ct_med$fitted <- fitted(fit_ct)
+```
+
+### Percent case reduction for two triggers for outbreak size group
 ```{r}
 # time-triggered
-svim |>
-  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) |>  
+# exponential model fit results
+svim_tt_med |> filter(vacc_week %in% VW_seq) -> svim_tt_med_vw
+
+svim_sum_cea |>
+  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) |>
   ggplot(aes(x=as.factor(vacc_week), y=pct_reduc_case,
              color=as.factor(vacc_cov)))+
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
   geom_hline(data=svim_pe_summary, aes(yintercept=max_pct_reduc_case, 
                  color=as.factor(vacc_cov)), linetype="dashed")+
+  geom_line(data=svim_tt_med_vw, aes(x=1:8, y=fitted),
+             color="black", linewidth=1)+
   scale_y_continuous(labels = scales::percent_format(scale=1))+
-  scale_color_manual(name="",
+  scale_color_manual(name="Vaccine coverage",
                      values=my_discrete_colors[1:3],
                      labels=c(paste0(format_num(VC3*100,1),"%")))+
-  # labs(x="Vaccination week since the outbreak began", 
-  #      y="Case reduction")+ 
-  labs(x="", 
-       y="Case reduction")+ 
+  # labs(x="Vaccination week since the outbreak began",
+  #      y="Case reduction")+
+  labs(x="", y="Case reduction")+
   theme_light()+
   theme_tight_legend()+
   theme(axis.text.x = element_blank(),
         axis.ticks.x = element_blank(),
         axis.title.x = element_blank())+
-  theme(legend.position = "bottom") -> plt1a
+  theme(legend.position = "top") -> plt3a
+
+# case-triggered 
+# cts <- unique(svim_ct_sum_cea$case_trigger)
+# cts_old <- unique(svim_ct$case_trigger)
+# # 5,seq(40,280, by=40)
+# cts_ids <- c(21,25,29,2,6,10,14,18)
 
 
+svim_ct_med |> filter(case_trigger %in% cts_sel) -> svim_ct_med_c
+
+svim_ct_sum_cea |>
+ filter(vacc_cov %in% VC3, case_trigger %in% cts_sel) -> d
+
+d$case_trigger <- factor(d$case_trigger, levels=cts_sel)
+d$vacc_cov <- factor(d$vacc_cov, levels=c(0.6,0.75,0.9))
+
+d |>
+  ggplot()+
+  geom_boxplot(aes(x=case_trigger, y=pct_reduc_case,
+             group=interaction(case_trigger, vacc_cov),
+             color=vacc_cov),
+             width=0.6, position=position_dodge(width=0.7),
+             outlier.size=0.6) +
+  geom_hline(data=svim_pe_summary, aes(yintercept= max_pct_reduc_case, 
+                 color=as.factor(vacc_cov)), linetype="dashed")+
+  geom_line(data=svim_ct_med_c, aes(x=1:8, y=fitted),
+             color="black", linewidth=1)+
+  # scale_y_continuous(labels = scales::percent_format(scale=1))+
+  scale_y_continuous(labels = NULL)+
+  scale_color_manual(name="Vaccine coverage",
+                     values=my_discrete_colors[1:3],
+                     labels=c("60%","75%","90%"))+ 
+  # labs(x="Cumulative cases at vaccination", 
+  #      y="Case reduction")+ 
+  labs(x="", y="")+ 
+  theme_light()+
+  theme_tight_legend()+
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank())+
+  theme(legend.position = "top") -> plt3b
+
+## Groups of outbreak size
+probs <- seq(0, 1, by=0.1)
+# extract only one set of outbreak data
+unq_data <- filter(svim_sum_cea, runid == 1 & vacc_cov == 0.75 & vacc_week == 1)
+size_grp_cutoff <- quantile(unq_data$s_ch_tot, probs=probs)
+
+d <- svim_sum_cea |>
+  group_by(vacc_week, vacc_cov, id_outbreak) |> 
+  summarize(s_ch_tot = s_ch_tot[1],
+            pct_reduc_case = median(pct_reduc_case)) # median across runid's
+
+d$size_grp <- sapply(d$s_ch_tot, function(x) get_group_id(x, size_grp_cutoff))
+
+lst <- vector("list", length(size_grp_cutoff)-1)
+d <- setDT(d)
+for(i in 1:length(lst)){
+  lst[[i]] <- d[size_grp >=i]
+}
+
+res_list <- vector('list', length(size_grp_cutoff)-1)
+for (i in 1:length(lst)) {
+  d <- lst[[i]]
+  res_list[[i]] <- d[, .(
+    size_grp = min(size_grp),
+    pct_reduc_case = median(pct_reduc_case, na.rm=T)),
+    by = .(vacc_week, vacc_cov)]
+}
+res_rbind <- rbindlist(res_list)
+
+res_rbind |>
+  filter(vacc_cov %in% VC, vacc_week %in% VW_seq) |>
+  ggplot(aes(x=vacc_week, y=size_grp))+
+  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
+  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
+                      , linetype="dotted")+
+  scale_fill_viridis_c("Median case reduction", limits=c(0,100),
+                       breaks=seq(0,100,50),
+                       labels = scales::percent_format(scale=1))+
+  labs(x="Vaccination week since the outbreak began", 
+       y="Total case percentile")+
+  # scale_x_continuous(breaks=seq(1,19,2), labels=NULL)+
+  scale_x_continuous(breaks=VW_seq)+
+  scale_y_continuous(breaks=c(1,4,7,10),
+                     labels=c(expression(">="*P[0*"%"]),
+                              expression(">="*P[30*"%"]),
+                              expression(">="*P[60*"%"]),
+                              expression(">="*P[90*"%"])))+
+  theme_light()+
+  theme_tight()+
+  theme(legend.position="bottom") -> plt3c
+
+# case_triggered
+# shorten the data set to reduce the computing time
+d <- svim_ct_sum_cea |> 
+  group_by(case_trigger, vacc_cov, id_outbreak) |> 
+  summarize(s_ch_tot = s_ch_tot[1],
+            pct_reduc_case = median(pct_reduc_case)) # median across runid's
+
+d$size_grp <- sapply(d$s_ch_tot, function(x) get_group_id(x, size_grp_cutoff))
+
+lst <- vector("list", length(size_grp_cutoff)-1)
+d <- setDT(d)
+for(i in 1:length(lst)){
+  lst[[i]] <- d[size_grp >=i]
+}
+
+res_list <- vector('list', length(size_grp_cutoff)-1)
+for (i in 1:length(lst)) {
+  d <- lst[[i]]
+  res_list[[i]] <- d[, .(
+    size_grp = min(size_grp),
+    pct_reduc_case = median(pct_reduc_case, na.rm=T)),
+    by = .(case_trigger, vacc_cov)]
+}
+res_rbind <- rbindlist(res_list)
+
+res_rbind |>
+  filter(vacc_cov %in% VC, case_trigger %in% cts_sel) |>
+  ggplot(aes(x=case_trigger, y=size_grp))+
+  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
+  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
+                      , linetype="dotted")+
+  scale_fill_viridis_c("Median case reduction", limits=c(0,100),
+                       breaks=seq(0,100,50),
+                       labels=scales::percent_format(scale=1))+
+  # labs(x="Cumulative cases at vaccination", 
+  #      y="Total case percentile")+
+  labs(x="Cumulative cases at vaccination", y="")+
+  # scale_x_continuous(breaks=seq(200,1000,200), labels=NULL) +
+  scale_x_continuous(breaks=cts_sel) +
+  scale_y_continuous(breaks=c(1,4,7,10), labels=NULL)+
+  theme_light()+
+  theme_tight()+
+  theme(legend.position="bottom") -> plt3d
+
+
+plt3 <- (plt3a + plt3b + plt3c + plt3d) +
+  plot_annotation(tag_levels = 'A') +
+  plot_layout(ncol=2,
+              # axis_titles="collect",
+              guides="collect", heights=c(1,1)) &
+  theme(plot.tag.position  = c(0,0.9),
+        plot.tag = element_text(size=13)) &
+  theme(legend.position = "top")
+
+  # theme(plot.margin = margin(0,0,0,0.1))
+
+for (i in c(1,2)) {
+  plt3[[i]] <- plt3[[i]] + theme(plot.tag.position = c(0,0.86))
+}
+
+fac <- 1.3
+ggsave(paste0("plots/fig3_pcr_outbk_size_", tstamp(hour=T), ".pdf"),
+       plt3,
+       device = cairo_pdf, width=fgw2*fac, height=fgw2*1.15*fac, units="mm")
+```
+
+## Figure S4 Missed outbreaks and weekly incidence trends 
+```{r}
 # Add a proportion of outbreaks that are missed by ORI 
+svim_df <- readRDS("outputs/svim_0.75_time_trigger_sum_across_week_by_runid_20250124.rds")
 
-svim_df <- fread("outputs/svim_sum_across_week_by_runid_20241122.csv")
 svim_df |>
   filter(vacc_cov == VC, vacc_week %in% VW_seq) |>
   select(runid, id_outbreak, vacc_week, outbk_dur, week_delay_to_vacc_effect) |> 
-  group_by(vacc_week, runid) |> 
+  group_by(vacc_week, runid) |>
   summarize(
     n_outbk = sum(outbk_dur > 0),
     n_outbk_missed = sum(outbk_dur < vacc_week),
@@ -487,21 +848,21 @@ outbk_missed_vacc_agg$vacc_week <-
   as.factor(outbk_missed_vacc_agg$vacc_week)
 
 ggplot(outbk_missed_vacc) +
-  geom_step(aes(vacc_week, 
-                prop_outbk_missed, group=runid, color="By campaign"), 
+  geom_step(aes(vacc_week,
+                prop_outbk_missed, group=runid, color="By campaign"),
                 alpha=0.1)+
-  geom_step(data=outbk_missed_vacc_agg, 
+  geom_step(data=outbk_missed_vacc_agg,
             aes(vacc_week, prop_outbk_missed, group=1,
-                color="By campaign"), 
+                color="By campaign"),
             linewidth=0.6)+
   geom_step(aes(vacc_week, prop_outbk_missed_vacc_effect, group=runid,
                 color="By vaccine effect"), alpha=0.1)+
-  geom_step(data=outbk_missed_vacc_agg, 
-            aes(vacc_week, prop_outbk_missed_vacc_effect, 
+  geom_step(data=outbk_missed_vacc_agg,
+            aes(vacc_week, prop_outbk_missed_vacc_effect,
                 group=1,
                 color="By vaccine effect"), linewidth=0.6)+
-  scale_color_manual("", values=c("By campaign"= my_discrete_colors[4], 
-                                  "By vaccine effect" = my_discrete_colors[5]))+
+  scale_color_manual("", values=c("By campaign"= "firebrick",
+                                  "By vaccine effect" = "steelblue"))+
   scale_y_continuous("Outbreaks missed",
                      labels = scales::percent_format(scale=100),
                      breaks=seq(0,1,by=0.25),
@@ -513,7 +874,7 @@ ggplot(outbk_missed_vacc) +
         axis.ticks.x = element_blank(),
         axis.title.x = element_blank()) -> plt1c
 
-# outbreak 
+# outbreak
 outbreak_data |>
   group_by(week) |>
   summarize(s_ch_tot = sum(s_ch)) -> data_tot 
@@ -527,11 +888,6 @@ outbreak_data |>
   filter(week %in% VW_seq) |> 
   ggplot(aes(x=s_ch+1, y=as.factor(week))) +
   geom_density_ridges(fill="steelblue", alpha=0.5, scale=0.5) +
-  # geom_point(data=filter(data_tot, week %in% VW_seq), 
-  #            aes(cumsum(s_ch_tot), as.factor(week)), shape=15) +
-  # geom_line(data=filter(data_tot, week %in% VW_seq), 
-  #           aes(cumsum(s_ch_tot), as.factor(week)),
-  #           linetype="solid", linewidth=0.7, group=1)+
   scale_x_log10() +
   coord_flip() +
   geom_line(data=filter(data_tot, week %in% VW_seq), 
@@ -545,62 +901,28 @@ outbreak_data |>
        x="Suspected cases") -> plt1e
 
 
-# case-triggered 
-cts <- unique(svim_ct$case_trigger)
-cts_ids <- c(21,25,29,2,6,10,14,18)
-svim_ct |>
- filter(vacc_cov %in% VC3, case_trigger %in% cts[cts_ids]) -> dd
-
-dd$case_trigger <- factor(dd$case_trigger, levels=c(5,seq(40,280,40)))
-dd$vacc_cov <- factor(dd$vacc_cov, levels=c(0.6,0.75,0.9))
-
-dd |>
-  ggplot()+
-  geom_boxplot(aes(x=case_trigger, y=pct_reduc_case,
-             group=interaction(case_trigger, vacc_cov),
-             color=vacc_cov),
-             width=0.6, position=position_dodge(width=0.7),
-             outlier.size=0.6) +
-  geom_hline(data=svim_pe_summary, aes(yintercept= max_pct_reduc_case, 
-                 color=as.factor(vacc_cov)), linetype="dashed")+
-  scale_y_continuous(labels = scales::percent_format(scale=1))+
-  # scale_y_continuous(labels = NULL)+
-  scale_color_manual(name="",
-                     values=my_discrete_colors[1:3],
-                     labels=c("60%","75%","90%"))+ 
-  labs(x="Cumulative cases at vaccination", 
-       y="Case reduction")+ 
-  theme_light()+
-  theme_tight_legend()+
-  theme(axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.x = element_blank())+
-  theme(legend.position = "bottom") -> plt1b
-
-
 # Add a proportion of outbreaks that are missed by ORI 
-svim_df <- fread("outputs/svim_ct_sum_across_week_by_runid_20241123.csv")
-# case_trigger <= cts[19] just to make consistent with boxplots of pct_reduc_case
+svim_df <- readRDS("outputs/svim_0.75_case_trigger_sum_across_week_by_runid_20250124.rds")
 svim_df |>
-  # filter(week_vaccination > 10) |> # this is simply due to the limit of object size in R
-  filter(vacc_cov == VC, case_trigger %in% cts[cts_ids]) |>
-  select(runid, id_outbreak, case_trigger, vacc_week, outbk_dur, week_delay_to_vacc_effect) |> 
+  filter(vacc_cov == VC, case_trigger %in% cts_sel) |>
+  select(runid, id_outbreak, s_ch_tot, case_trigger, outbk_dur, week_delay_to_vacc_effect) |>
   group_by(case_trigger, runid) |> 
   summarize(
     n_outbk = sum(outbk_dur > 0),
-    n_outbk_missed = sum(outbk_dur < vacc_week),
+    # n_outbk_missed = sum(outbk_dur < vacc_week),
+    n_outbk_missed = sum(s_ch_tot < case_trigger),
     prop_outbk_missed = n_outbk_missed / n_outbk,
     n_outbk_missed_vacc_effect = sum(outbk_dur < week_delay_to_vacc_effect),
     prop_outbk_missed_vacc_effect = n_outbk_missed_vacc_effect / n_outbk) ->
   outbk_missed_vacc 
 
 svim_df |>
-  filter(vacc_cov == VC, case_trigger %in% cts[cts_ids]) |>
-  select(id_outbreak, vacc_week, case_trigger, outbk_dur, week_delay_to_vacc_effect) |> 
-  group_by(case_trigger) |> 
+  filter(vacc_cov == VC, case_trigger %in% cts_sel) |>
+  select(id_outbreak, s_ch_tot, case_trigger, outbk_dur, week_delay_to_vacc_effect) |> 
+  group_by(case_trigger) |>
   summarize(
     n_outbk = sum(outbk_dur > 0),
-    n_outbk_missed = sum(outbk_dur < vacc_week),
+    n_outbk_missed = sum(s_ch_tot < case_trigger),
     prop_outbk_missed = n_outbk_missed / n_outbk,
     n_outbk_missed_vacc_effect = sum(outbk_dur < week_delay_to_vacc_effect),
     prop_outbk_missed_vacc_effect = n_outbk_missed_vacc_effect / n_outbk) ->
@@ -622,8 +944,8 @@ ggplot(outbk_missed_vacc) +
   geom_step(data=outbk_missed_vacc_agg, 
             aes(case_trigger, prop_outbk_missed_vacc_effect,
                 group=1, color="By vaccine effect"), linewidth=0.6)+
-  scale_color_manual("", values=c("By campaign"= my_discrete_colors[4], 
-                                  "By vaccine effect" = my_discrete_colors[5]))+
+  scale_color_manual("", values=c("By campaign"= "firebrick", 
+                                  "By vaccine effect" = "steelblue"))+
   scale_y_continuous("Outbreaks missed",
                      labels = scales::percent_format(scale=100),
                      breaks=seq(0,1,by=0.25),
@@ -635,7 +957,8 @@ ggplot(outbk_missed_vacc) +
         axis.title.x = element_blank()) -> plt1d # the margin around each legend)
 
 
-target_case <- cts[cts_ids]
+# target_case <- cts[cts_ids]
+target_case <- cts_sel
 lst <- vector('list', length(target_case))
 outbreak_data[, cum_s_ch := cumsum(s_ch), by=id_outbreak]
 
@@ -665,447 +988,130 @@ df |>
   labs(y="Cumulative cases at vaccination", x="Weeks to reach the cumulative case")+
   theme_light()+
   theme_tight_legend()+
-  theme()-> plt1f
+  theme() -> plt1f
 
-# combine plot        
-# plt1cd <- plt1d / plt1c + plot_layout(ncol = 1, heights = c(0.3,1))  
-# plt1 <- plt1ab + plt1cd + plot_layout(ncol=2, axis_titles = "collect")  
+# combine plots
 
-# plt1 <- (plt1b + plt1d + plt1a + plt1c) +
-#   plot_annotation(tag_levels = 'A') +
-#   plot_layout(ncol=2,
-#               axis_titles="collect",
-#               guides="collect", heights=c(0.4,1)) &
-#     theme(plot.tag.position  = c(0.98,0.96),
-#         plot.tag = element_text(size=13)) &
-#   theme(legend.position = "top")
-# # 
-# for (i in c(1,2)) {
-#   plt1[[i]] <- plt1[[i]] + theme(plot.tag.position = c(0.98,0.68))
-# }
-
-
-# plt1 <- (plt1b + plt1d + plt1e + plt1f + plt1a + plt1c) +
-#   plot_annotation(tag_levels = 'A') +
-#   plot_layout(ncol=2,
-#               # axis_titles="collect",
-#               guides="collect", heights=c(0.4,1,1)) &
-#   theme(plot.tag.position  = c(0.1,0.8),
-#         plot.tag = element_text(size=13)) &
-#   theme(legend.position = "top")
-
-plt1 <- (plt1a + plt1b + plt1c + plt1d + plt1e + plt1f) +
+plt1 <- (plt1c + plt1d + plt1e + plt1f) +
   plot_annotation(tag_levels = 'A') +
   plot_layout(ncol=2,
               # axis_titles="collect",
-              guides="collect", heights=c(1,0.4,1)) &
-  theme(plot.tag.position  = c(0.1,0.8),
+              guides="collect", heights=c(1,1)) &
+  theme(plot.tag.position  = c(0.1,0.9),
         plot.tag = element_text(size=13)) &
   theme(legend.position = "top")
-  # theme(plot.margin = margin(0,0,0,0.1))
 
-# 
-for (i in c(1,2)) {
-  plt1[[i]] <- plt1[[i]] + theme(plot.tag.position = c(0.97,0.86))
-}
-for (i in c(3,4)) {
-  plt1[[i]] <- plt1[[i]] + theme(plot.tag.position = c(0.97,0.93))
-}
-for (i in c(5,6)) {
-  plt1[[i]] <- plt1[[i]] + theme(plot.tag.position = c(0.97,0.97))
-}
+# plt1
 
 fac <- 1.3
-  ggsave(paste0("plots/fig3_pcr_outbreaks_missed_", tstamp(hour=T), ".pdf"), 
+  ggsave(paste0("plots/figS3_outbreaks_missed_", tstamp(hour=T), ".pdf"),
          plt1,
          device = cairo_pdf, width=fgw2*fac, height=fgw2*1.15*fac, units="mm")
-  
-if (save_plot) {
-  ggsave(paste0("plots/fig3_pcr_outbreaks_missed_", tstamp(hour=T), ".pdf"), 
-         plt1,
-         device = cairo_pdf, width=fgw2*fac, height=fgw2*1.15*fac, units="mm")
-}
-```
-
-### Exponential model fit
-```{r}
-svim |>
-  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1:19)) |>
-  group_by(vacc_week) |>
-  summarize(vacc_cov = vacc_cov[1],
-          count = n(),
-          mean_prc = mean(pct_reduc_case),
-          sd_prc = sd(pct_reduc_case), 
-          median_prc = quantile(pct_reduc_case, probs=c(0.5)),
-          q1_prc = quantile(pct_reduc_case, probs=c(0.25)),
-          q3_prc = quantile(pct_reduc_case, probs=c(0.75)),
-          min_prc = min(pct_reduc_case),
-          max_prc = max(pct_reduc_case)) -> res 
-
-res$t <- 1:19
-f <- function(t, Asym=0, lrc, y0) {
-    Asym + (y0 - Asym) * exp(-exp(lrc) * t)
-}
-
-fit <- nls(median_prc ~ f(t=t, Asym=0, lrc, y0),  
-           data = res, start = list(lrc = -1, y0=86))
-fit
-# weekly reduction rate
-exp(as.numeric(coef(fit)["lrc"]))
-# half-life (weeks)
-log(2)/abs(exp(as.numeric(coef(fit)["lrc"])))
-
-ggplot(res)+
-  geom_point(aes(x=t, y=median_prc, color="Data")) +
-  geom_line(aes(x=t, y=fitted(fit), color="Fitted")) +
-  labs(y="Median case averted", x="Vaccinatino week since the outbreak start")+
-  theme_light()+
-  scale_color_manual("",values=c("Data"="steelblue","Fitted"="firebrick"))+
-  theme_tight() -> plt
-
-fac <- 1.5
-if (save_plot)
-  ggsave(paste0("plots/median_ca_exp_decay_", tstamp(), ".pdf"), plt,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
-
-# case-triggered vaccination
-svim_ct |>
-  filter(vacc_cov %in% c(0.75)) |>
-  group_by(case_trigger) |>
-  summarize(vacc_cov = vacc_cov[1],
-          count = n(),
-          mean_prc = mean(pct_reduc_case),
-          sd_prc = sd(pct_reduc_case), 
-          median_prc = quantile(pct_reduc_case, probs=c(0.5)),
-          q1_prc = quantile(pct_reduc_case, probs=c(0.25)),
-          q3_prc = quantile(pct_reduc_case, probs=c(0.75)),
-          min_prc = min(pct_reduc_case),
-          max_prc = max(pct_reduc_case)) -> res 
-
-res$t <- res$case_trigger
-f <- function(t, Asym=0, lrc, y0) {
-    Asym + (y0 - Asym) * exp(-exp(lrc) * t)
-}
-res_sub <- filter(res, res$case_trigger <= 200)
-fit <- nls(median_prc ~ f(t=t, Asym=0, lrc, y0),
-           data = res_sub, start = list(lrc=log(0.01), y0=100))
-fit
-# reduction rate by unit (week or a single case)
-a <- exp(as.numeric(coef(fit)["lrc"]))
-# half-life (weeks)
-b <- log(2)/abs(exp(as.numeric(coef(fit)["lrc"])))
-paste0("Medican case reduction (%) decreases with increasing number of cumulative cases with ", format_num(a*100, digits=1) , "% by one case increase, and decreasing by half every ",  format_num(b, digits=1), " additional cases.")
-
-ggplot(res_sub)+
-  geom_point(aes(x=t, y=median_prc, color="Data")) +
-  geom_line(aes(x=t, y=fitted(fit), color="Fitted")) +
-  labs(y="Median case averted", x="Cumulative cases at vaccination")+
-  theme_light()+
-  scale_color_manual("",values=c("Data"="steelblue","Fitted"="firebrick"))+
-  theme_tight() -> plt
-
-if (save_plot)
-  ggsave(paste0("plots/ct_median_ca_exp_decay_", tstamp(), ".pdf"), plt,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
-```
-
-
-## Figure 4 Outbreak size, duration, and attack rate groups
-
-```{r}
-# ensure that the svim has size_grp by running the relevant function in the 
-# vacc_impact.qmd
-lst <- vector("list", 10)
-for(i in 1:length(lst)){
-  lst[[i]] <- svim[size_grp >=i]
-}
-
-res_list <- vector('list', 10)
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    size_grp = min(size_grp),
-    pct_reduc_case = median(pct_reduc_case, na.rm=T),
-    pct_reduc_dur = median(pct_reduc_dur, na.rm=T)),
-    by = .(vacc_week, vacc_cov)]
-}
-res <- rbindlist(res_list)
-
-res |>
-  filter(vacc_cov %in% VC, vacc_week %in% seq(1,19,2)) |>
-  ggplot(aes(x=vacc_week, y=size_grp))+
-  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
-  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
-                      , linetype="dotted")+
-  scale_fill_viridis_c("Case reduction", limits=c(0,100),
-                       breaks=seq(0,100,50),
-                       labels = scales::percent_format(scale=1))+
-  labs(x="Vaccination week since the outbreak began", 
-       y="Total cases")+
-  scale_x_continuous(breaks=seq(1,19,2), labels=NULL) +
-  scale_y_continuous(breaks=c(1,4,7,10),
-                     labels=c(expression(">="*P[0*"%"]),
-                              expression(">="*P[30*"%"]),
-                              expression(">="*P[60*"%"]),
-                              expression(">="*P[90*"%"])))+
-  theme_light()+
-  theme_tight()+
-  theme(legend.position="top") -> plt4a
-
-# case_triggered
-
-lst <- vector("list", 10)
-for(i in 1:length(lst)){
-  lst[[i]] <- svim_ct[size_grp >=i]
-}
-
-res_list <- vector('list', 10)
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    size_grp = min(size_grp),
-    pct_reduc_case = median(pct_reduc_case, na.rm=T),
-    pct_reduc_dur = median(pct_reduc_dur, na.rm=T)),
-    by = .(case_trigger, vacc_cov)]
-}
-res <- rbindlist(res_list)
-
-cts <- unique(svim_ct$case_trigger)
-cts_ids <- c(21,25,29,2,6,10,14,18)
-
-res |>
-  # filter(vacc_cov %in% c(0.75), case_trigger %in% cts[cts_ids]) |>
-  filter(vacc_cov %in% c(0.75)) |>
-  ggplot(aes(x=case_trigger, y=size_grp))+
-  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
-  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
-                      , linetype="dotted")+
-  scale_fill_viridis_c("Case reduction", limits=c(0,100),
-                       breaks=seq(0,100,50),
-                       labels=scales::percent_format(scale=1))+
-  labs(x="Cumulative cases at vaccination", 
-       y="Total cases")+
-  scale_x_continuous(breaks=seq(200,1000,200), 
-                     labels=NULL) +
-  scale_y_continuous(breaks=c(1,4,7,10), labels=NULL)+
-  theme_light()+
-  theme_tight()+
-  theme(legend.position="top") -> plt4b
-
-fac <- 1.4
-
-# Outbreak duration groups
-
-lst <- vector("list", 10)
-
-for(i in 1:length(lst)){
-  lst[[i]] <- svim[dur_grp >=i]
-}
-
-res_list <- vector('list', 10)
-
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    dur_grp = min(dur_grp),
-    pct_reduc_case = median(pct_reduc_case, na.rm=T),
-    pct_reduc_dur = median(pct_reduc_dur, na.rm=T)),
-    by = .(vacc_week, vacc_cov)]
-}
-res <- rbindlist(res_list)
-
-res |>
-  filter(vacc_cov %in% VC, vacc_week %in% c(1:19)) |>
-  ggplot(aes(x=vacc_week, y=dur_grp))+
-  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
-  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
-                      , linetype="dotted")+
-  scale_fill_viridis_c("Case reduction", limits=c(0,100),
-                       breaks=seq(0,100,50),
-                       labels = scales::percent_format(scale=1))+
-  labs(x="Vaccination week since the outbreak began", 
-       y="Outbreak duration")+
-  scale_x_continuous(breaks=seq(1,19,2), labels=NULL) +
-  scale_y_continuous(breaks=c(1,4,7,10),
-                     labels=c(expression(">="*P[0*"%"]),
-                              expression(">="*P[30*"%"]),
-                              expression(">="*P[60*"%"]),
-                              expression(">="*P[90*"%"])))+
-  theme_light()+
-  theme_tight()+
-  theme(legend.position="top") -> plt4c
-
-
-# case trigger
-lst <- vector("list", 10)
-for(i in 1:length(lst)){
-  lst[[i]] <- svim_ct[dur_grp >=i]
-}
-
-res_list <- vector('list', 10)
-
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    dur_grp = min(dur_grp),
-    pct_reduc_case = median(pct_reduc_case, na.rm=T),
-    pct_reduc_dur = median(pct_reduc_dur, na.rm=T)),
-    by = .(case_trigger, vacc_cov)]
-}
-res <- rbindlist(res_list)
-tgs <- unique(svim_ct$case_trigger)
-
-res |>
-  filter(vacc_cov %in% VC) |>
-  ggplot(aes(x=case_trigger, y=dur_grp))+
-  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
-  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
-                      , linetype="dotted")+
-  scale_fill_viridis_c("Case reduction", limits=c(0,100),
-                       breaks=seq(0,100,50),
-                       labels = scales::percent_format(scale=1))+
-  labs(x="Cumulative cases at vaccination", 
-       y="Outbreak duration")+
-  scale_x_continuous(breaks=seq(200,1000,200), 
-                     labels=NULL) +
-  scale_y_continuous(breaks=c(1,4,7,10), labels=NULL)+
-  theme_light()+
-  theme_tight()+
-  theme(legend.position="top") -> plt4d
-
-# Outbreak attack rate groups
-
-lst <- vector("list", 10)
-for (i in 1:length(lst)) {
-  lst[[i]] <- svim[ar_grp >=i]
-}
-res_list <- vector('list', 10)
-
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    ar_grp = min(ar_grp),
-    pct_reduc_case = median(pct_reduc_case, na.rm=T),
-    pct_reduc_dur = median(pct_reduc_dur, na.rm=T)),
-    by = .(vacc_week, vacc_cov)]
-}
-res <- rbindlist(res_list)
-
-res |>
-  filter(vacc_cov %in% VC, vacc_week %in% c(1:19)) |>
-  ggplot(aes(vacc_week, ar_grp))+
-  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
-  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
-                      , linetype="dotted")+
-  scale_fill_viridis_c("Case reduction", , limits=c(0,100),
-                       breaks=seq(0,100,50),
-                       labels = scales::percent_format(scale=1))+
-  labs(x="Vaccination week since the outbreak began", 
-       y="Outbreak attack rate")+
-  scale_x_continuous(breaks=seq(1,19,2), labels=seq(1,19,2)) +
-  scale_y_continuous(breaks=c(1,4,7,10),
-                     labels=c(expression(">="*P[0*"%"]),
-                              expression(">="*P[30*"%"]),
-                              expression(">="*P[60*"%"]),
-                              expression(">="*P[90*"%"])))+
-  theme_light()+
-  theme_tight()+
-  theme(legend.position="top") -> plt4e
-
-
-# case-triggered vaccination
-lst <- vector("list", 10)
-for(i in 1:length(lst)){
-  lst[[i]] <- svim_ct[ar_grp >=i]
-}
-
-res_list <- vector('list', 10)
-
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    ar_grp = min(ar_grp),
-    pct_reduc_case = median(pct_reduc_case, na.rm=T),
-    pct_reduc_dur = median(pct_reduc_dur, na.rm=T)),
-    by = .(case_trigger, vacc_cov)]
-}
-
-res <- rbindlist(res_list)
-res |>
-  filter(vacc_cov %in% VC) |>
-  ggplot(aes(x=case_trigger, y=ar_grp))+
-  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
-  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
-                      , linetype="dotted")+
-  scale_fill_viridis_c("Case reduction", limits=c(0,100),
-                       breaks=seq(0,100,50),
-                       labels = scales::percent_format(scale=1))+
-  labs(x="Cumulative cases at vaccination", 
-       y="Outbreak attack rate")+
-  scale_x_continuous(breaks=seq(200,1000,200), 
-                     labels=seq(200,1000,200)) +
-  scale_y_continuous(breaks=c(1,4,7,10), labels=NULL)+
-  theme_light()+
-  theme_tight()+
-  theme(legend.position="top") -> plt4f
-
-plt4 <- (plt4a + plt4b + plt4c + plt4d + plt4e + plt4f) +
-  plot_annotation(tag_levels = 'A') + 
-  plot_layout(byrow=T, ncol=2, axis_titles="collect", guides="collect") &
-  theme(plot.tag.position  = c(.98, .96),
-        plot.tag = element_text(size=13)) &
-  theme(legend.position = "bottom")
-
-fac <- 1.3
-
-if (save_plot) {
-  ggsave(paste0("plots/fig4_pcr_subgroups_contour_", 
-                tstamp(hour=T,minute=T), ".pdf"), plt4,
-         device = cairo_pdf, width=fgw2*fac, height=fgw2*fac, units="mm")
-}
-```
-
-## Probability that the OCVs are delivered after the outbreak ended
-```{r}
-# just extract one set of outbreaks
-svim_cea |> filter(vacc_cov == VC, vacc_week == VW) -> d
-dur <- 9 # arbitrary delay to test
-sum(d$duration_weeks > 9) / nrow(d)
-D <- round(delay_req_r1[!is.na(delay_req_r1)]/7) # delay in weeks
-X <- rep(NA, length(D))
-for (i in 1:length(D)) {
-  X[i] <- sum(d$duration_weeks > D[i]) /nrow(d)
-}
-# this assumes that OCVs are requested for all outbreaks regardless of duration and size
-sum(X)/length(X)
-
-svim_cea |> 
-  filter(vacc_cov == VC & vacc_week == VW & 
-         duration_weeks >= round((26+ocv_delay[[4]])/7) & 
-         outbreak_pop >= min_pop_camp) -> dat
-
-prob_outbreaks_longer <- function(outbreaks, delays){
-  # prob for outbreaks longer than the given delay 
-  X <- rep(NA, length(delays))
-  for (i in 1:length(delays)) {
-    X[i] <- sum(outbreaks$duration_weeks > delays[i]) / nrow(outbreaks)
-  }
-  return(X)
-}
-
-svim_cea |> 
-  filter(vacc_cov == VC & vacc_week == VW & 
-         duration_weeks >= round((26+ocv_delay[[4]])/7) & 
-         outbreak_pop >= min_pop_camp) -> dat
-
-pr <- prob_outbreaks_longer(dat, D)
-paste0("At given delays, ", format_num(sum(pr)/length(pr)*100, 1), "% of the outbreaks in this data set last longer the time required for OCVs to be delivered to the site.")
 ```
 
 
 ## Table 3. Cases/deaths/DALYs averted, costs, and cost-effectiveness analysis 
 
 ```{r, eval=F}
+# time-triggered vaccination scenario
+tab <- data.frame()
+wks <- c(1, 5, 9, 13)
+for (wk in wks) {
+  d <- svim_sum_cea[(vacc_cov == VC & vacc_week == wk)]
+  tab <- rbind(tab, impact_summary(d))
+}  
+tab$week <- wks
+
+if (save_table) {
+  fwrite(tab, paste0("outputs/svim_time_trigger_tab_", tstamp(), ".csv"))
+}
+
+## case-triggered strategy
+tab_ct <- data.frame()
+ctgs <- c(1,  50,  100, 300)
+for (ctg in ctgs) {
+  d <- svim_ct_sum_cea[(vacc_cov == VC & case_trigger == ctg)]
+  tab_ct <- rbind(tab_ct, impact_summary(d))
+}  
+tab_ct$case_trigger <- ctgs
+if (save_table) {
+  fwrite(tab_ct, paste0("outputs/svim_case_trigger_tab_", tstamp(), ".csv"))
+}
+```
+
+## Table S1. Cases/deaths/DALYs averted, costs, and cost-effectiveness analysis
+for time-triggered vaccination scenario
+
+```{r, eval=F}
+tab <- data.frame()
+wks <- c(1, 5, 9, 13, 17)
+vcs <- c(0.6, 0.75, 0.9)
+vcw <- expand.grid(vacc_week = wks, vacc_cov = vcs)
+
+for (i in 1:nrow(vcw)) {
+  d <- svim_sum_cea[(vacc_cov == vcw$vacc_cov[i] & vacc_week == vcw$vacc_week[i])]
+  tab <- rbind(tab, impact_summary(d))
+}
+
+tab <- cbind(vcw, tab)
+
+if (save_table) {
+  fwrite(tab, paste0("outputs/svim_time_trigger_tab_full_", tstamp(), ".csv"))
+}
+
+# create another table for reference with more detailed information 
+tab <- data.frame()
+wks <- c(1, 3, 5, 7, 9, 11, 13, 15, 17)
+vcs <- c(0.6, 0.75, 0.9)
+vcw <- expand.grid(vacc_week = wks, vacc_cov = vcs)
+
+for (i in 1:nrow(vcw)) {
+  d <- svim_sum_cea[(vacc_cov == vcw$vacc_cov[i] & vacc_week == vcw$vacc_week[i])]
+  tab <- rbind(tab, impact_summary(d))
+}
+
+tab <- cbind(vcw, tab)
+
+if (save_table) {
+  fwrite(tab, paste0("outputs/svim_time_trigger_tab_full_detail_", tstamp(), ".csv"))
+}
+```
+
+
+## Table S2. Cases/Deaths/DALYs averted for the case-triggered scenarios for all suspected outbreaks. 
+
+```{r}
+tab_ct <- data.frame()
+ctgs <- c(1, 50, 100, 500, 1000)
+vct <- expand.grid(case_trigger = ctgs, vacc_cov = vcs)
+for (i in 1:nrow(vct)) {
+  d <- svim_ct_sum_cea[(vacc_cov == vct$vacc_cov[i] & case_trigger == vct$case_trigger[i])]
+  tab_ct <- rbind(tab_ct, impact_summary(d))
+}  
+tab_ct <- cbind(vct, tab_ct)
+
+if (save_table) {
+  fwrite(tab_ct, paste0("outputs/svim_case_trigger_tab_full_", tstamp(), ".csv"))
+}
+
+## create another table for reference with more detailed information 
+tab_ct <- data.frame()
+ctgs <- c(1, 50, 100, 150, 200, 250, 300, 500, 1000)
+vct <- expand.grid(case_trigger = ctgs, vacc_cov = vcs)
+for (i in 1:nrow(vct)) {
+  d <- svim_ct_sum_cea[(vacc_cov == vct$vacc_cov[i] & case_trigger == vct$case_trigger[i])]
+  tab_ct <- rbind(tab_ct, impact_summary(d))
+}  
+tab_ct <- cbind(vct, tab_ct)
+
+if (save_table) {
+  fwrite(tab_ct, paste0("outputs/svim_case_trigger_tab_full_detail_", tstamp(), ".csv"))
+}
+```
+
+## Table 4. Subsets
+
+```{r}
 # In emergency situations, the median time from the event (i.e.
 # first laboratory confirmation of cholera or occurrence of humanitarian emergency) to the receipt of the official OCV request was 26 days (range 12–206 days). 
 
@@ -1115,416 +1121,125 @@ paste0("At given delays, ", format_num(sum(pr)/length(pr)*100, 1), "% of the out
 # delay_median <- (26+45)/7 
 # delay_lower <- (12+45)/7 
 # delay_upper <- (206+45)/7
-tab <- data.frame()
-wks <- c(1, 5, 9, 13, 17)
+d0 <- svim_all[(vacc_cov == VC & vacc_week == VW)]
+d1 <- subset_random[(vacc_cov == VC & vacc_week == VW)]
+d2 <- subset_attack_rate[(vacc_cov == VC & vacc_week == VW)]
+d3 <- subset_cases[(vacc_cov == VC & vacc_week == VW)]
+d4 <- subset_duration[(vacc_cov == VC & vacc_week == VW)]
 
-d <- svim_cea |> filter(vacc_cov == VC, vacc_week == VW)
-# tab <- create_impact_table(d)
-for (wk in wks) {
-  d <- svim_cea[(vacc_cov == VC & vacc_week == wk)]
-  tab <- rbind(tab, impact_summary(d))
-}  
-tab$week <- wks
+tab0 <- impact_summary(d0)
+tab1 <- impact_summary(d1)
+tab2 <- impact_summary(d2)
+tab3 <- impact_summary(d3)
+tab4 <- impact_summary(d4)
+
+tab <- rbind(tab0, tab1, tab2, tab3, tab4)
+
+tab$subset_method <- c("all", "random","attack_rate","cases","duration")
 
 if (save_table) {
-  fwrite(tab, paste0("outputs/svim_time_trigger_tab_", tstamp(), ".csv"))
-}
-
-tab_ct <- data.frame()
-ctgs <- c(5,  40,  100, 300, 500, 1000)
-# tab <- create_impact_table(d)
-for (ctg in ctgs) {
-  d <- svim_ct_cea[(vacc_cov == VC & case_trigger == ctg)]
-  tab_ct <- rbind(tab_ct, impact_summary(d))
-}  
-tab_ct$case_trigger <- ctgs
-if (save_table) {
-  fwrite(tab_ct, paste0("outputs/svim_case_trigger_tab_", tstamp(), ".csv"))
+  fwrite(tab, paste0("outputs/svim_subset_tab_", tstamp(), ".csv"))
 }
 ```
 
-## Table S1. Cases/deaths/DALYs averted, costs, and cost-effectiveness analysis 
+## Table S3. Summary statistics of the subsets
 
-```{r, eval=F}
+```{r}
+df <- fread("outputs/svim_outbreak_subsets_20241224.csv")
+unique(df$subset_method)
+
+df |> # across outbreaks in a given data subset with subset_id
+  filter(vacc_cov == VC & vacc_week == VW) |> 
+  group_by(subset_method, subset_id) |> # across outbreak ids
+  summarize(sum_pop = sum(population),
+            sum_case = sum(s_ch_tot),
+            overall_ar = 1000 * sum_case / sum_pop,
+            sum_dur = sum(duration_weeks)) |> 
+  group_by(subset_method) |> # across subset_id 
+  summarize(median_pop = quantile(sum_pop, probs=c(0.5)), 
+            median_case = quantile(sum_case, probs=c(0.5)),
+            median_ar = quantile(overall_ar, probs=c(0.5)),
+            median_dur = quantile(sum_dur, probs=c(0.5)),
+            lower_pop = quantile(sum_pop, probs=c(0.025)), 
+            lower_case = quantile(sum_case, probs=c(0.025)),
+            lower_ar = quantile(overall_ar, probs=c(0.025)),
+            lower_dur = quantile(sum_dur, probs=c(0.025)),
+            upper_pop = quantile(sum_pop, probs=c(0.975)), 
+            upper_case = quantile(sum_case, probs=c(0.975)),
+            upper_ar = quantile(overall_ar, probs=c(0.975)),
+            upper_dur = quantile(sum_dur, probs=c(0.975))) -> dfs
+            
+tab <- data.frame(subset=dfs$subset_method,
+                  population=rep(NA,4), cases=rep(NA,4), 
+                  duration=rep(NA,4), attack_rate=rep(NA,4))
+for (i in 1:4) {
+  
+  tab$population[i] <- format_median_with_95(c(dfs$median_pop[i],
+                                          dfs$lower_pop[i],
+                                          dfs$upper_pop[i]), digit=0)
+  tab$cases[i] <- format_median_with_95(c(dfs$median_case[i],
+                                          dfs$lower_case[i],
+                                          dfs$upper_case[i]), digit=0)
+  tab$duration[i] <- format_median_with_95(c(dfs$median_dur[i],
+                                          dfs$lower_dur[i],
+                                          dfs$upper_dur[i]), digit=0)
+  tab$attack_rate[i] <- format_median_with_95(c(dfs$median_ar[i],
+                                          dfs$lower_ar[i],
+                                          dfs$upper_ar[i]), digit=2)
+}
+tab
+
+if (save_csv) {
+  fwrite(tab, paste0("outputs/subset_summary_stat_", tstamp(), ".csv"))
+}
+```
+
+
+
+
+### Only outbreaks that were infludenced by ORIs 
+```{r}
+# time-triggered strategies
 tab <- data.frame()
-wks <- c(1, 5, 9, 13, 17)
+wks <- c(1, 3, 5, 7, 9, 11, 13, 15, 17)
 vcs <- c(0.6, 0.75, 0.9)
 vcw <- expand.grid(vacc_week = wks, vacc_cov = vcs)
+
+svim_sum_cea_ori_true <- svim_sum_cea[ori_occurred == TRUE]
+
 for (i in 1:nrow(vcw)) {
-  d <- svim_cea[(vacc_cov == vcw$vacc_cov[i] & vacc_week == vcw$vacc_week[i])]
+  d <- svim_sum_cea_ori_true[(vacc_cov == vcw$vacc_cov[i] & vacc_week == vcw$vacc_week[i])]
   tab <- rbind(tab, impact_summary(d))
 }
+
 tab <- cbind(vcw, tab)
 
-# tat$vacc_cov
-# tab$week <- wks
-
 if (save_table) {
-  fwrite(tab, paste0("outputs/svim_time_trigger_tab_full_", tstamp(), ".csv"))
+  fwrite(tab, paste0("outputs/svim_ori_true_time_trigger_tab_full_detail_", tstamp(), ".csv"))
 }
 
+# case-triggered strategy
+
 tab_ct <- data.frame()
-ctgs <- c(5,  40,  100, 300, 500, 1000)
+ctgs <- c(1, 50, 100, 150, 200, 250, 300, 500, 1000)
 vct <- expand.grid(case_trigger = ctgs, vacc_cov = vcs)
-# tab <- create_impact_table(d)
+
+svim_ct_sum_cea_ori_true <- svim_ct_sum_cea[ori_occurred == TRUE]
+
 for (i in 1:nrow(vct)) {
-  d <- svim_ct_cea[(vacc_cov == vct$vacc_cov[i] & case_trigger == vct$case_trigger[i])]
+  d <- svim_ct_sum_cea_ori_true[(vacc_cov == vct$vacc_cov[i] & case_trigger == vct$case_trigger[i])]
   tab_ct <- rbind(tab_ct, impact_summary(d))
 }  
-
 tab_ct <- cbind(vct, tab_ct)
 
 if (save_table) {
-  fwrite(tab_ct, paste0("outputs/svim_case_trigger_tab_full_", tstamp(), ".csv"))
+  fwrite(tab_ct, paste0("outputs/svim_ori_true_case_trigger_tab_full_detail_", tstamp(), ".csv"))
 }
 ```
 
 
-## Confirmed outbreaks
 
-```{r}
-length(unique(svim_cea$id_outbreak))
-svim_cea |> 
-  group_by(id_outbreak) |> 
-  filter(c_ch_tot > 0) |> 
-  ungroup() -> d
-
-d <- filter(d, vacc_cov == VC, vacc_week == VW)
-length(unique(d$id_outbreak))
-
-tab <- create_impact_table(d)
-
-if (save_table) {
-  fwrite(tab, paste0("outputs/svim_confirmed_tab_", tstamp(), ".csv"))
-}
-```
-
-## Figure 4. Overall percentage case reduction and case and deaths averted 
-by year across campaign timing
-
-```{r}
-svim_preemptive$vacc_dose <- svim_preemptive$vacc_cov * svim_preemptive$population 
-svim_preemptive$death_tot_averted <- svim_preemptive$death_tot * svim_preemptive$pct_reduc_case / 100
-
-svim_preemptive |> 
-  filter(vacc_cov %in% VC3) |> 
-  group_by(vacc_cov) |> 
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose, na.rm=T),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs  = 1000 * sum_DA / sum_vacc) -> cada_pe
-
-svim_cea |>
-  filter(vacc_cov %in% VC3) |> 
-  group_by(vacc_cov, vacc_week) |>
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs = 1000 * sum_DA / sum_vacc) -> cada
-
-cada
-cada_by_year_wide <- 
-  pivot_wider(ca_da_by_year,  names_from = vacc_week, 
-              names_sep = ".", 
-              values_from = -c(year, vacc_week, vacc_cov, sum_case, sum_death))
-
-ggplot(cada)+
-  geom_point(aes(vacc_week, pct_reduc_case, color=as.factor(vacc_cov), 
-                 group=as.factor(vacc_cov)))+
-  geom_line(aes(vacc_week, pct_reduc_case, color=as.factor(vacc_cov), 
-                 group=as.factor(vacc_cov)))+
-  # geom_hline(data=cada_pe, aes(yintercept=pct_reduc_case, 
-  #                color=as.factor(vacc_cov)), linetype="dashed")+
-  
-  annotate("rect", xmin=6, xmax=14, ymin=0, ymax = 1, 
-           alpha=0.1, fill="firebrick")+
-  scale_y_continuous(labels = scales::percent_format(scale=100))+
-  scale_color_manual(name="",
-                     values=my_discrete_colors[1:3],
-                     labels=c(paste0(format_num(VC3*100,1),"%")))+
-  labs(x="Vaccination week since the outbreak start", 
-       y="Case reduction")+ 
-  theme_light()+
-  theme_tight() -> plt1
-
-ggplot(svim_all_outbreaks)+
-  geom_point(aes(vacc_week, q500_PCR/100, color=as.factor(vacc_cov), 
-                 group=as.factor(vacc_cov)), position=position_dodge(width=0.5))+  
-  geom_errorbar(aes(vacc_week, ymin=q025_PCR/100, ymax=q975_PCR/100,
-                    color=as.factor(vacc_cov), group=as.factor(vacc_cov)),
-                width=0, position=position_dodge(width=0.5))+
-  geom_line(aes(vacc_week, q500_PCR/100, color=as.factor(vacc_cov), 
-                 group=as.factor(vacc_cov)), position=position_dodge(width=0.5))+
-  geom_hline(data=svim_pe_summary_across_runid, aes(yintercept=q975_PCR/100, 
-                 color=as.factor(vacc_cov)), linetype="dashed")+
-  annotate("rect", xmin=6, xmax=14, ymin=0, ymax = 1, 
-           alpha=0.1, fill="firebrick")+
-  scale_y_continuous(labels = scales::percent_format(scale=100))+
-  scale_color_manual(name="",
-                     values=my_discrete_colors[1:3],
-                     labels=c(paste0(format_num(VC3*100,1),"%")))+
-  labs(x="Vaccination week since the outbreak start", 
-       y="Case reduction")+ 
-  theme_light()+
-  theme_tight() -> plt1
-plt1
-
-fac <- 1.4
-if (save_plot) {
-  ggsave(paste0("plots/fig4_overall_pcr_", tstamp(), ".pdf"), 
-         plt1,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
-}
-
-res <- cada_75 <- filter(cada, vacc_cov == VC)
-
-f <- function(t, Asym=0, lrc, y0) {
-    Asym + (y0 - Asym) * exp(-exp(lrc) * t)
-}
-# fit <- nls(median_ca ~ SSasymp(t, yf, y0, log_alpha), data=res2)
-fit <- nls(pct_reduc_case* ~ f(t=vacc_week, Asym=0, lrc, y0),  
-           data=res, start=list(lrc=-1, y0=0.86))
-fit
-# weekly reduction rate
-a <- exp(as.numeric(coef(fit)["lrc"]))
-# half-life (weeks)
-b <- log(2)/abs(exp(as.numeric(coef(fit)["lrc"])))
-
-paste0("Percentage case reduction (%) decreases with delay in vaccination with ", format_num(a*100, digits=1) , "% by week of delay in campaign vaccination, and decreasing by half every ", format_num(b, digits=1), " weeks.")
-
-svim_ct_cea |>
-  filter(vacc_cov %in% VC3) |> 
-  group_by(vacc_cov, case_trigger) |>
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs = 1000 * sum_DA / sum_vacc) -> cada_ct
-
-cts <- unique(cada_ct$case_trigger)
- 
-cada_ct |>
-  filter(vacc_cov %in% VC3, case_trigger %in% cts[seq(1,19,2)]) |>
-  ggplot()+
-  geom_point(aes(x=case_trigger, y=pct_reduc_case, group=vacc_cov, 
-             color=as.factor(vacc_cov)))+
-  geom_line(aes(x=case_trigger, y=pct_reduc_case, group=vacc_cov,
-             color=as.factor(vacc_cov)))+
-  geom_hline(data=cada_pe, aes(yintercept=pct_reduc_case, 
-                 color=as.factor(vacc_cov)), linetype="dashed")+
-  scale_y_continuous(labels = scales::percent_format(scale=100))+
-  scale_color_manual(name="",
-                     values=my_discrete_colors[1:3],
-                     labels=c("60%","75%","90%"))+ 
-  labs(x="Cumulative cases at vaccination", 
-       y="Case reduction")+ 
-  theme_light()+
-  theme_tight() -> plt2
-
-plt2
-
-fac <- 1.4
-if (save_plot) { 
-  ggsave(paste0("plots/fig4_ct_overall_pcr_", tstamp(), 
-                ".pdf"), plt2,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
-}
-
-res <- filter(cada_ct, vacc_cov == VC)
-
-f <- function(t, Asym=0, lrc, y0) {
-    Asym + (y0 - Asym) * exp(-exp(lrc) * t)
-}
-# fit <- nls(median_ca ~ SSasymp(t, yf, y0, log_alpha), data=res2)
-fit <- nls(pct_reduc_case ~ f(t=case_trigger, Asym=0, lrc, y0),  
-           data=res[], start=list(lrc=-1, y0=0.86))
-fit
-# reduction rate by one additional case
-a <- exp(as.numeric(coef(fit)["lrc"]))
-# half-life (in terms of cumulative cases)
-b <- log(2)/abs(exp(as.numeric(coef(fit)["lrc"])))
-
-paste0("Percentage case reduction (%) decreases with delay in vaccination with ", format_num(a*100, digits=3) , "% by one additional case in campaign vaccination, and decreasing by half every ", format_num(b, digits=1), " cases")
-
-# case averted by year
-delay_outbk_request <- 26
-delay_request_r1 <- quantile(delay_req_r1, probs=probs, na.rm=TRUE)
-
-med_delay <- round((delay_outbk_request + delay_request_r1[3])/7)
-ub_delay <- round((delay_outbk_request + delay_request_r1[4])/7)
-lb_delay <- round((delay_outbk_request + delay_request_r1[2])/7)
-
-svim_cea |>
-  filter(vacc_week %in% c(med_delay, lb_delay, ub_delay)) |> 
-  group_by(year, vacc_cov, vacc_week) |>
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs  = 1000 * sum_DA / sum_vacc) -> cada_by_year
-
-svim_gtfcc |>
-  filter(vacc_week %in% c(med_delay, lb_delay, ub_delay)) |> 
-  group_by(year, vacc_cov, vacc_week) |>
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs = 1000 * sum_DA / sum_vacc) -> gtfcc_cada_by_year
-
-
-cada_by_year_wide <- 
-  pivot_wider(cada_by_year,  names_from = vacc_week, 
-              names_sep = ".", 
-              values_from = -c(year, vacc_week, vacc_cov, sum_case, sum_death))
-
-gftcc_cada_by_year_wide <-
-  pivot_wider(gtfcc_cada_by_year,
-              names_from = vacc_week,
-              names_sep = ".",
-              values_from = -c(year, vacc_week, vacc_cov, sum_case, sum_death))
-
-df <- filter(cada_by_year_wide, vacc_cov == VC, year <= 2022)
-df_gtfcc <- filter(gftcc_cada_by_year_wide, vacc_cov == VC, year <= 2022)
-
-ggplot(data=df)+
-  geom_point(aes(year, sum_case, color="No vaccination"))+
-  geom_line(aes(year, sum_case, color="No vaccination"))+
-  geom_point(aes(year, sum_remaining_case.10, color="Vaccination"))+
-  geom_line(aes(year, sum_remaining_case.10, color="Vaccination"))+
-  geom_errorbar(aes(year, ymin=sum_remaining_case.8, 
-                    ymax=sum_remaining_case.14), width=0, color="firebrick")+
-  geom_ribbon(aes(x=year, ymin=pmax(sum_remaining_case.10,0),
-                  ymax=sum_case), fill="firebrick", 
-              col="firebrick", alpha=0.5)+
-  scale_color_manual("", values=c("black","firebrick"))+
-  scale_x_continuous(breaks=seq(2010,2022,by=2),
-                     labels = seq(2010,2022,by=2))+
-  labs(x="Year", 
-       y="Cases from outbreaks by year")+ 
-  theme_light()+
-  theme_tight() -> plt_ca
-
-plt_ca
-fac <- 1.4
-if (save_plot) {
-  ggsave(paste0("plots/fig4_cases_averted_year_", tstamp(), ".pdf"), 
-         plt_ca,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
-}
-
-# deaths
-ggplot(data=df)+
-  geom_point(aes(year, sum_death, color="No vaccination"))+
-  geom_line(aes(year, sum_death, color="No vaccination"))+
-  geom_point(aes(x=year, y=sum_remaining_death.10, color="Vaccination"))+
-  geom_line(aes(x=year, y=sum_remaining_death.10, color="Vaccination"))+
-  geom_errorbar(aes(x=year, ymin=sum_remaining_death.8, 
-                    ymax=sum_remaining_death.14), width=0, color="steelblue")+
-  geom_ribbon(aes(x=year, ymin=pmax(sum_remaining_death.10,0),
-                  ymax=sum_death), fill="steelblue", 
-              col="steelblue", alpha=0.5)+
-  scale_color_manual("", values=c("black","steelblue"))+
-  # scale_color_manual("", values = c("No vaccination" = "black",
-  #                                   "Vaccination" = "steelblue"),
-  #                    breaks = c("Vaccination"))+
-  scale_x_continuous(breaks=seq(2010,2022,by=2),
-                     labels = seq(2010,2022,by=2))+
-  labs(x="Year", 
-       y="Deaths from outbreaks by year")+ 
-  # scale_color_manual("", values=my_discrete_colors[1:13])+
-  
-  theme_light()+
-  theme_tight() -> plt_da
-
-plt_da
-if (save_plot) {
-  ggsave(paste0("plots/fig4_deaths_averted_year_", tstamp(), ".pdf"), 
-         plt_da,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
-}
-
-plt_ca_da <- plt_ca + plt_da + 
-  plot_annotation(tag_levels = "A") + 
-  plot_layout(axis_titles = "collect_x") + 
-  plot_layout(guides = "collect") & theme(legend.position = 'bottom')
-
-fac <- 1.8
-if (save_plot) {
-  ggsave(paste0("plots/fig4ab_cases_deaths_averted_af_year_",
-                tstamp(), ".pdf"), plt_ca_da,
-         device=cairo_pdf, width=fgw2*fac/1.2, height=fgw1*fac, units="mm")
-}
-
-
-paste0("Overall case reduction ", round(sum(df$sum_CA.10)), "[IQR: ", round(sum(df$sum_CA.14)), " - ",  round(sum(df$sum_CA.8)),"]", " of ", round(sum(df$sum_case)))
-
-paste0("Overall percentage case reduction ", sum(df$sum_CA.10)/sum(df$sum_case)
-, "[IQR: ", sum(df$sum_CA.14)/sum(df$sum_case), " - ",  sum(df$sum_CA.8)/sum(df$sum_case),"]")
-
-paste0("Overall percentage death reduction ", sum(df$sum_DA.10)/sum(df$sum_death)
-, "[IQR: ", sum(df$sum_DA.14)/sum(df$sum_death), " - ",  sum(df$sum_DA.8)/sum(df$sum_death),"]")
-
-paste0("Overall case averted per 1,000 OCVs are ",  format_num(1000*sum(df$sum_CA.8)/sum(df$sum_vacc.8), digits=3), ", ",   format_num(1000*sum(df$sum_CA.10)/sum(df$sum_vacc.10), digits=3), ", and ",  format_num(1000*sum(df$sum_CA.14)/sum(df$sum_vacc.14), digits=3), " for 25th, 50th, and 75th percentiles of delays.")
-
-pcr <- summary(df$pct_reduc_case.10[1:13])
-paste0("Percentage case reduction vary from ", pcr[1], " to ", 
-       pcr[6], " with a mean of ", pcr[4])
-
-pdr <- summary(df$pct_reduc_death.10[1:13])
-paste0("Percentage case reduction vary from ", pdr[1], " to ", 
-       pdr[6], " with a mean of ", pdr[4])
-df$pct_reduc_death.10[1:13]
-
-paste0("Overall percentage case reduction ", sum(df_gtfcc$sum_CA.10)/sum(df_gtfcc$sum_case)
-, "[IQR: ", sum(df_gtfcc$sum_CA.14)/sum(df_gtfcc$sum_case), " - ",  sum(df_gtfcc$sum_CA.8)/sum(df_gtfcc$sum_case),"]")
-
-paste0("Overall percentage death reduction ", sum(df_gtfcc$sum_DA.10)/sum(df_gtfcc$sum_death)
-, "[IQR: ", sum(df_gtfcc$sum_DA.14)/sum(df_gtfcc$sum_death), " - ",  sum(df_gtfcc$sum_DA.8)/sum(df_gtfcc$sum_death),"]")
-
-pcr_gtfcc <- summary(df_gtfcc$pct_reduc_case.10[1:13])
-paste0("For GTFCC subsets, percentage case reduction vary from ", 
-       pcr_gtfcc[1], " to ", pcr_gtfcc[6], " with a mean of ", pcr_gtfcc[4])
-
-pdr_gtfcc <- summary(df_gtfcc$pct_reduc_death.10[1:13])
-paste0("Percentage case reduction vary from ", pdr_gtfcc[1], " to ", 
-       pdr_gtfcc[6], " with a mean of ", pdr_gtfcc[4])
-```
-
-## Figure 4. Subsets overall percentage case reduction and case and deaths averted 
-by year across campaign timing
+## Figure S5. Percentage case reduction in aggregated outbreaks of subsets
 
 ```{r}
 rand <- subset_random[vacc_cov == VC & vacc_week %in% seq(1,20,by=2)]
@@ -1538,23 +1253,9 @@ duration$subset_method <- "duration"
 
 subsets <- rbind(rand, ar, cases, duration)
   
-svim_pe$vacc_dose <- svim_pe$vacc_cov * svim_pe$population 
-svim_pe$death_tot_averted <- svim_pe$death_tot * svim_pe$pct_reduc_case / 100
-
-svim_pe |> 
-  filter(vacc_cov %in% VC3) |> 
-  group_by(vacc_cov) |> 
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose, na.rm=T),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs  = 1000 * sum_DA / sum_vacc) -> cada_pe
+# # number of rows
+# length(unique(subsets$subset_id))*length(unique(subsets$vacc_cov))*
+#   length(unique(subsets$vacc_week))*length(unique(subsets$subset_method))
 
 subsets |>
   group_by(subset_method, vacc_cov, vacc_week) |>
@@ -1584,9 +1285,7 @@ subsets |>
             q975_DAPD = quantile(death_averted_per_1000_OCV, prob=0.975)) -> 
   subsets_q
 
-wd <- 0.8   
-# svim_subsets_sum_q |>
-#   filter(vacc_cov == VC, vacc_week %in% seq(1,20,by=2)) -> dp
+wd <- 1.1   # position dodge width
 
 theme_4_panels <- function() { 
   theme(plot.margin = unit(c(0,0.3,0.15,0), "cm"))
@@ -1600,16 +1299,13 @@ ggplot(subsets_q)+
   geom_errorbar(aes(vacc_week, ymin=q025_PCR, ymax=q975_PCR,
                     color=subset_method), width=0,
              position=position_dodge(width=wd))+
-  # geom_hline(data=cada_pe, aes(yintercept=pct_reduc_case, 
-  #                color=as.factor(vacc_cov)), linetype="dashed")+
-  
   annotate("rect", xmin=6, xmax=14, ymin=0, ymax=max(subsets_q$q975_PCR), 
            alpha=0.1, fill="firebrick")+
   scale_y_continuous(labels = scales::percent_format(scale=1))+
   scale_color_manual(name="",
                      values=my_discrete_colors[1:4],
                      labels=c("Attack rate", "Cases", "Duration", "Random"))+
-  labs(x="Vaccination week since the outbreak start", 
+  labs(x="", 
        y="Case reduction")+ 
   theme_light()+
   theme_tight()+
@@ -1624,23 +1320,16 @@ ggplot(subsets_q)+
   geom_errorbar(aes(vacc_week, ymin=q025_PDR, ymax=q975_PDR,
                     color=subset_method), width=0,
              position=position_dodge(width=wd))+
-  # geom_hline(data=cada_pe, aes(yintercept=pct_reduc_case, 
-  #                color=as.factor(vacc_cov)), linetype="dashed")+
-  
   annotate("rect", xmin=6, xmax=14, ymin=0, ymax=max(subsets_q$q975_PDR), 
            alpha=0.1, fill="firebrick")+
   scale_y_continuous(labels = scales::percent_format(scale=1))+
   scale_color_manual(name="",
                      values=my_discrete_colors[1:4],
                      labels=c("Attack rate", "Cases", "Duration", "Random"))+
-  labs(x="Vaccination week since the outbreak start", 
+  labs(x="", 
        y="Death reduction")+ 
   theme_light()+
   theme_tight() -> plt2
-
-# plt <- plt1 + plt2 + 
-#   plot_layout(guides = "collect", axis_titles = "collect") & theme(legend.position="top") 
-  
 
 ggplot(subsets_q)+
   geom_point(aes(vacc_week, q500_CAPD, color=subset_method), 
@@ -1650,15 +1339,13 @@ ggplot(subsets_q)+
   geom_errorbar(aes(vacc_week, ymin=q025_CAPD, ymax=q975_CAPD,
                     color=subset_method), width=0,
              position=position_dodge(width=wd))+
-  # geom_hline(data=cada_pe, aes(yintercept=pct_reduc_case, 
-  #                color=as.factor(vacc_cov)), linetype="dashed")+
   annotate("rect", xmin=6, xmax=14, ymin=0, 
            ymax=max(filter(subsets_q, vacc_cov == VC)$q975_CAPD),
            alpha=0.1, fill="firebrick")+
   scale_color_manual(name="",
                      values=my_discrete_colors[1:4],
                      labels=c("Attack rate", "Cases", "Duration", "Random"))+
-  labs(x="Vaccination week since the outbreak start", 
+  labs(x="Vaccination week since the outbreak began", 
        y="Case averted per 1,000 OCVs")+ 
   theme_light()+
   theme_tight() -> plt3
@@ -1671,38 +1358,37 @@ ggplot(subsets_q)+
   geom_errorbar(aes(vacc_week, ymin=q025_DAPD, ymax=q975_DAPD,
                     color=subset_method), width=0,
              position=position_dodge(width=wd))+
-  # geom_hline(data=cada_pe, aes(yintercept=pct_reduc_case, 
-  #                color=as.factor(vacc_cov)), linetype="dashed")+
   annotate("rect", xmin=6, xmax=14, ymin=0, 
            ymax=max(filter(subsets_q, vacc_cov == VC)$q975_DAPD),
            alpha=0.1, fill="firebrick")+
   scale_color_manual(name="",
                      values=my_discrete_colors[1:4],
                      labels=c("Attack rate", "Cases", "Duration", "Random"))+
-  labs(x="Vaccination week since the outbreak start", 
+  labs(x="Vaccination week since the outbreak began", 
        y="Death averted per 1,000 OCVs")+ 
   theme_light()+
   theme_tight() -> plt4
 
 plt <- plt1 + plt2 + plt3 + plt4 + 
-  # plot_annotation(tag_levels = "A") + 
-  plot_layout(ncol=2, byrow=T, guides="collect", axis_titles="collect") &
+  plot_layout(ncol=2, byrow=T, guides="collect", 
+              axis_titles="collect") &
   theme(legend.position="top")
 
 fac <- 2
 if (save_plot) {
-  ggsave(paste0("plots/fig4_subsets_pcdr_cada_", tstamp(), ".pdf"), 
+  ggsave(paste0("plots/figS5_subsets_pcr_capd_", tstamp(), ".pdf"), 
          plt,
          device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
 }
 
+# fitting exponential decay
 res <- cada_75 <- filter(cada, vacc_cov == VC)
 
 f <- function(t, Asym=0, lrc, y0) {
     Asym + (y0 - Asym) * exp(-exp(lrc) * t)
 }
-# fit <- nls(median_ca ~ SSasymp(t, yf, y0, log_alpha), data=res2)
-fit <- nls(pct_reduc_case* ~ f(t=vacc_week, Asym=0, lrc, y0),  
+
+fit <- nls(pct_reduc_case ~ f(t=vacc_week, Asym=0, lrc, y0),  
            data=res, start=list(lrc=-1, y0=0.86))
 fit
 # weekly reduction rate
@@ -1711,259 +1397,731 @@ a <- exp(as.numeric(coef(fit)["lrc"]))
 b <- log(2)/abs(exp(as.numeric(coef(fit)["lrc"])))
 
 paste0("Percentage case reduction (%) decreases with delay in vaccination with ", format_num(a*100, digits=1) , "% by week of delay in campaign vaccination, and decreasing by half every ", format_num(b, digits=1), " weeks.")
+```
 
-svim_ct_cea |>
-  filter(vacc_cov %in% VC3) |> 
-  group_by(vacc_cov, case_trigger) |>
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs = 1000 * sum_DA / sum_vacc) -> cada_ct
+## Figure S6. Outbreak size, duration, and attack rate groups
 
-cts <- unique(cada_ct$case_trigger)
- 
-cada_ct |>
-  filter(vacc_cov %in% VC3, case_trigger %in% cts[seq(1,19,2)]) |>
-  ggplot()+
-  geom_point(aes(x=case_trigger, y=pct_reduc_case, group=vacc_cov, 
-             color=as.factor(vacc_cov)))+
-  geom_line(aes(x=case_trigger, y=pct_reduc_case, group=vacc_cov,
-             color=as.factor(vacc_cov)))+
-  geom_hline(data=cada_pe, aes(yintercept=pct_reduc_case, 
-                 color=as.factor(vacc_cov)), linetype="dashed")+
-  scale_y_continuous(labels = scales::percent_format(scale=100))+
-  scale_color_manual(name="",
-                     values=my_discrete_colors[1:3],
-                     labels=c("60%","75%","90%"))+ 
-  labs(x="Cumulative cases at vaccination", 
-       y="Case reduction")+ 
-  theme_light()+
-  theme_tight() -> plt2
+```{r}
+cts_sel <- c(1,seq(40,280,40)) # case triggers selected
+## Groups of outbreak size
+probs <- seq(0, 1, by=0.1)
+# extract only one set of outbreak data
+unq_data <- filter(svim_sum_cea, runid == 1 & vacc_cov == 0.75 & vacc_week == 1)
+size_grp_cutoff <- quantile(unq_data$s_ch_tot, probs=probs)
+dur_grp_cutoff <- quantile(outbk_data_summary$duration_weeks, probs=probs)
+ar_grp_cutoff <- quantile(outbk_data_summary$ar_per_10e3, probs=probs)
 
-plt2
+svim_med <- svim_sum_cea |>
+  group_by(vacc_week, vacc_cov, id_outbreak) |> 
+  summarize(s_ch_tot = s_ch_tot[1],
+            pct_reduc_case = median(pct_reduc_case)) # median across runid's
+svim_med <- 
+  left_join(svim_med,
+            outbk_data_summary[,c("id_outbreak","duration_weeks","ar_per_10e3")],
+            by="id_outbreak")
 
-fac <- 1.4
-if (save_plot) { 
-  ggsave(paste0("plots/fig4_ct_overall_pcr_", tstamp(), 
-                ".pdf"), plt2,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
+svim_med$dur_grp <- sapply(svim_med$duration_weeks, function(x) get_group_id(x, dur_grp_cutoff))
+svim_med$ar_grp <- sapply(svim_med$ar_per_10e3, function(x) get_group_id(x, ar_grp_cutoff))
+
+svim_med <- setDT(svim_med)
+
+
+svim_ct_med <- svim_ct_sum_cea |>
+  filter(case_trigger %in% cts_sel) |>
+  group_by(case_trigger, vacc_cov, id_outbreak) |> 
+  summarize(s_ch_tot = s_ch_tot[1],
+            pct_reduc_case = median(pct_reduc_case)) # median across runid's
+svim_ct_med <- 
+  left_join(svim_ct_med,
+            outbk_data_summary[,c("id_outbreak","duration_weeks","ar_per_10e3")],
+            by="id_outbreak")
+
+svim_ct_med$dur_grp <- sapply(svim_ct_med$duration_weeks, function(x) get_group_id(x, dur_grp_cutoff))
+svim_ct_med$ar_grp <- sapply(svim_ct_med$ar_per_10e3, function(x) get_group_id(x, ar_grp_cutoff))
+
+svim_ct_med <- setDT(svim_ct_med)
+
+# Percent case reduction across size group is in Figure 3 of the manuscript 
+# svim_med$size_grp <- sapply(svim_med$s_ch_tot, function(x) get_group_id(x, size_grp_cutoff))
+# 
+# lst <- vector("list", length(size_grp_cutoff)-1)
+# svim_med <- setDT(svim_med)
+# for(i in 1:length(lst)){
+#   lst[[i]] <- svim_med[size_grp >=i]
+# }
+# res_list <- vector('list', length(lst))
+# for (i in 1:length(lst)) {
+#   d <- lst[[i]]
+#   res_list[[i]] <- d[, .(
+#     size_grp = min(size_grp),
+#     pct_reduc_case = median(pct_reduc_case, na.rm=T)),
+#     by = .(vacc_week, vacc_cov)]
+# }
+# res <- rbindlist(res_list)
+# 
+# res |>
+#   filter(vacc_cov %in% VC, vacc_week %in% seq(1,19,2)) |>
+#   ggplot(aes(x=vacc_week, y=size_grp))+
+#   metR::geom_contour_fill(aes(z=pct_reduc_case)) +
+#   metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
+#                       , linetype="dotted")+
+#   scale_fill_viridis_c("Case reduction", limits=c(0,100),
+#                        breaks=seq(0,100,50),
+#                        labels = scales::percent_format(scale=1))+
+#   labs(x="Vaccination week since the outbreak began", 
+#        y="Total cases")+
+#   scale_x_continuous(breaks=seq(1,19,2), labels=NULL) +
+#   scale_y_continuous(breaks=c(1,4,7,10),
+#                      labels=c(expression(">="*P[0*"%"]),
+#                               expression(">="*P[30*"%"]),
+#                               expression(">="*P[60*"%"]),
+#                               expression(">="*P[90*"%"])))+
+#   theme_light()+
+#   theme_tight()+
+#   theme(legend.position="top") -> plt4a
+# 
+# # case_triggered
+# 
+# lst <- vector("list", 10)
+# for(i in 1:length(lst)){
+#   lst[[i]] <- svim_ct[size_grp >=i]
+# }
+# 
+# res_list <- vector('list', 10)
+# for (i in 1:length(lst)) {
+#   d <- lst[[i]]
+#   res_list[[i]] <- d[, .(
+#     size_grp = min(size_grp),
+#     pct_reduc_case = median(pct_reduc_case, na.rm=T),
+#     pct_reduc_dur = median(pct_reduc_dur, na.rm=T)),
+#     by = .(case_trigger, vacc_cov)]
+# }
+# res <- rbindlist(res_list)
+# 
+# cts <- unique(svim_ct$case_trigger)
+# cts_ids <- c(21,25,29,2,6,10,14,18)
+# 
+# res |>
+#   # filter(vacc_cov %in% c(0.75), case_trigger %in% cts[cts_ids]) |>
+#   filter(vacc_cov %in% c(0.75)) |>
+#   ggplot(aes(x=case_trigger, y=size_grp))+
+#   metR::geom_contour_fill(aes(z=pct_reduc_case)) +
+#   metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
+#                       , linetype="dotted")+
+#   scale_fill_viridis_c("Case reduction", limits=c(0,100),
+#                        breaks=seq(0,100,50),
+#                        labels=scales::percent_format(scale=1))+
+#   labs(x="Cumulative cases at vaccination", 
+#        y="Total cases")+
+#   scale_x_continuous(breaks=seq(200,1000,200), 
+#                      labels=NULL) +
+#   scale_y_continuous(breaks=c(1,4,7,10), labels=NULL)+
+#   theme_light()+
+#   theme_tight()+
+#   theme(legend.position="top") -> plt4b
+# 
+# fac <- 1.4
+
+# Outbreak duration groups
+lst <- vector("list", length(dur_grp_cutoff)-1)
+for(i in 1:length(lst)){
+  lst[[i]] <- svim_med[dur_grp >=i]
 }
 
-res <- filter(cada_ct, vacc_cov == VC)
+res_list <- vector('list', length(lst))
+
+for (i in 1:length(lst)) {
+  d <- lst[[i]]
+  res_list[[i]] <- d[, .(
+    dur_grp = min(dur_grp),
+    pct_reduc_case = median(pct_reduc_case, na.rm=T)),
+    by = .(vacc_week, vacc_cov)]
+}
+res <- rbindlist(res_list)
+
+res |>
+  filter(vacc_cov %in% VC, vacc_week %in% c(1:19)) |>
+  ggplot(aes(x=vacc_week, y=dur_grp))+
+  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
+  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
+                      , linetype="dotted")+
+  scale_fill_viridis_c("Case reduction", limits=c(0,100),
+                       breaks=seq(0,100,50),
+                       labels = scales::percent_format(scale=1))+
+  labs(x="Vaccination week since the outbreak began", 
+       y="Outbreak duration")+
+  scale_x_continuous(breaks=seq(1,19,2), labels=NULL) +
+  scale_y_continuous(breaks=c(1,4,7,10),
+                     labels=c(expression(">="*P[0*"%"]),
+                              expression(">="*P[30*"%"]),
+                              expression(">="*P[60*"%"]),
+                              expression(">="*P[90*"%"])))+
+  theme_light()+
+  theme_tight()+
+  theme(legend.position="top") -> plt4a
+
+
+# case trigger
+lst <- vector("list", length(dur_grp_cutoff)-1)
+for(i in 1:length(lst)){
+  lst[[i]] <- svim_ct_med[dur_grp >= i]
+}
+
+res_list <- vector('list', length(lst))
+
+for (i in 1:length(lst)) {
+  d <- lst[[i]]
+  res_list[[i]] <- d[, .(
+    dur_grp = min(dur_grp),
+    pct_reduc_case = median(pct_reduc_case, na.rm=T)),
+    by = .(case_trigger, vacc_cov)]
+}
+res <- rbindlist(res_list)
+tgs <- unique(svim_ct$case_trigger)
+
+res |>
+  filter(vacc_cov %in% VC) |>
+  ggplot(aes(x=case_trigger, y=dur_grp))+
+  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
+  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
+                      , linetype="dotted")+
+  scale_fill_viridis_c("Case reduction", limits=c(0,100),
+                       breaks=seq(0,100,50),
+                       labels = scales::percent_format(scale=1))+
+  labs(x="Cumulative cases at vaccination", 
+       y="Outbreak duration")+
+  scale_x_continuous(breaks=cts_sel,labels=NULL) +
+  scale_y_continuous(breaks=c(1,4,7,10), labels=NULL)+
+  theme_light()+
+  theme_tight()+
+  theme(legend.position="top") -> plt4b
+
+# Outbreak attack rate groups
+
+lst <- vector("list", length(ar_grp_cutoff)-1)
+for (i in 1:length(lst)) {
+  lst[[i]] <- svim_med[ar_grp >=i]
+}
+res_list <- vector('list', length(lst))
+
+for (i in 1:length(lst)) {
+  d <- lst[[i]]
+  res_list[[i]] <- d[, .(
+    ar_grp = min(ar_grp),
+    pct_reduc_case = median(pct_reduc_case, na.rm=T)),
+    by = .(vacc_week, vacc_cov)]
+}
+res <- rbindlist(res_list)
+
+res |>
+  filter(vacc_cov %in% VC, vacc_week %in% c(1:19)) |>
+  ggplot(aes(vacc_week, ar_grp))+
+  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
+  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
+                      , linetype="dotted")+
+  scale_fill_viridis_c("Case reduction", , limits=c(0,100),
+                       breaks=seq(0,100,50),
+                       labels = scales::percent_format(scale=1))+
+  labs(x="Vaccination week since the outbreak began", 
+       y="Outbreak attack rate")+
+  scale_x_continuous(breaks=seq(1,19,2), labels=seq(1,19,2)) +
+  scale_y_continuous(breaks=c(1,4,7,10),
+                     labels=c(expression(">="*P[0*"%"]),
+                              expression(">="*P[30*"%"]),
+                              expression(">="*P[60*"%"]),
+                              expression(">="*P[90*"%"])))+
+  theme_light()+
+  theme_tight()+
+  theme(legend.position="top") -> plt4c
+
+
+# case-triggered vaccination
+lst <- vector("list", length(ar_grp_cutoff)-1)
+for(i in 1:length(lst)){
+  lst[[i]] <- svim_ct_med[ar_grp >=i]
+}
+
+res_list <- vector('list', length(lst))
+
+for (i in 1:length(lst)) {
+  d <- lst[[i]]
+  res_list[[i]] <- d[, .(
+    ar_grp = min(ar_grp),
+    pct_reduc_case = median(pct_reduc_case, na.rm=T)),
+    by = .(case_trigger, vacc_cov)]
+}
+
+res <- rbindlist(res_list)
+res |>
+  filter(vacc_cov %in% VC) |>
+  ggplot(aes(x=case_trigger, y=ar_grp))+
+  metR::geom_contour_fill(aes(z=pct_reduc_case)) +
+  metR::geom_contour2(aes(z=pct_reduc_case, label = stat(level)),
+                      , linetype="dotted")+
+  scale_fill_viridis_c("Case reduction", limits=c(0,100),
+                       breaks=seq(0,100,50),
+                       labels = scales::percent_format(scale=1))+
+  labs(x="Cumulative cases at vaccination", 
+       y="Outbreak attack rate")+
+  scale_x_continuous(breaks=cts_sel) +
+  scale_y_continuous(breaks=c(1,4,7,10), labels=NULL)+
+  theme_light()+
+  theme_tight()+
+  theme(legend.position="top") -> plt4d
+
+plt4 <- (plt4a + plt4b + plt4c + plt4d) +
+  plot_annotation(tag_levels = 'A') + 
+  plot_layout(byrow=T, ncol=2, axis_titles="collect", guides="collect") &
+  theme(plot.tag.position  = c(.98, .96),
+        plot.tag = element_text(size=13)) &
+  theme(legend.position = "bottom")
+
+fac <- 1.3
+
+if (save_plot) {
+  ggsave(paste0("plots/figS6_pcr_subgroups_contour_", 
+                tstamp(hour=T,minute=T), ".pdf"), plt4,
+         device = cairo_pdf, width=fgw2*fac, height=fgw2*fac, units="mm")
+}
+```
+
+## Figure S7. Outbreak size vs. duration by type (data vs. peer reviewed journals) 
+```{r, eval=F}
+library(readxl)
+dat <- read_xlsx("data/Cholera_outbreaks_lit_review.xlsx")
+dat <- janitor::clean_names(dat)
+unq_data$s_ch_tot
+
+df1 <- data.frame(source="Model", suspected_cases = unq_data$s_ch_tot, 
+                  outbreak_duration = unq_data$outbk_dur)
+df2 <- data.frame(source="Review", suspected_cases = dat$suspected_cases, 
+                  outbreak_duration = round(dat$outbreak_duration_days/7))
+
+df <- rbind(df1, df2)
+df$suspected_cases <- as.numeric(df$suspected_cases)
+df |>
+  ggplot(aes(x=as.factor(source), y=suspected_cases))+
+  geom_boxplot()+
+  scale_y_log10()+
+  labs(x="", y="Suspected cases")+
+  theme_light() +
+  theme_tight() -> plt_a
+
+df |>
+  ggplot(aes(x=as.factor(source), y=outbreak_duration))+
+  geom_boxplot()+
+  scale_y_log10()+
+  labs(x="", y="Outbreak duration (weeks)")+
+  theme_light()+
+  theme_tight()-> plt_b
+
+df |>
+  ggplot(aes(x=suspected_cases, y=outbreak_duration, color=source))+
+  geom_point()+
+  scale_x_log10()+
+  scale_y_log10()+
+  labs(x="Suspected cases", y="Outbreak duration (weeks)")+
+  scale_color_manual("", values=c("steelblue","firebrick"))+
+  theme_light()+
+  theme_tight() -> plt_c
+
+plt <- ((plt_a + plt_b) / plt_c) +
+  plot_annotation(tag_levels = 'A')  &
+  theme(plot.tag.position  = c(.98, .96),
+        plot.tag = element_text(size=13)) &
+  theme(legend.position = "bottom")
+
+fac <- 1.3
+ggsave(paste0("plots/figS7_outbk_dur_size_data_model_", tstamp(), ".pdf"), plt,
+       device = cairo_pdf, width=fgw2*fac, height=fgw2*fac, units="mm")
+```
+
+
+## Figure S8. Vaccine effectiveness (VE) for  the static and the dynamic model
+
+### Comparison with the dynamic model
+
+Identify outbreaks (`id_outbreak`) that led to poor fits
+
+1. Parameter values are too close to the bound 
+2. The number of data points are fewer than 8, two times the number of parameters to be estimated (i.e., 4)
+3. Modeled trajectories didn't capture the dynamics of outbreaks
+```{r}
+# dynamic model fits
+fit <- fread("outputs/fit_4p_fA010_20241203T18.csv")
+# fit results
+fit_ndata <- fread("outputs/fit_params_ndata_20241206T08.csv")
+fit_vis <- read_xlsx("outputs/vacc_fit_params_20241203T2122.xlsx")
+
+get_ids_extreme_est <- function(x, er=0.05) {
+  # susceptible pop is too close to 1 or 0
+  # R0 is too close to a upper bound 30
+  ids <- ifelse(x$s0 < 1*er | x$s0 > 1*(1-er) | x$R0 > 30*(1-er), TRUE, FALSE) 
+  x$id_outbreak[ids]
+}
+
+get_ids_low_ndata <- function(x, threshold=8) {
+  # susceptible pop is too close to 1 or 0
+  # R0 is too close to a upper bound 30
+  ids <- ifelse(x$ndata < threshold, TRUE, FALSE)
+  x$id_outbreak[ids]
+}
+
+get_ids_poor_fit <- function(x) {
+  # only poor fits, when visually assessed, were marked as 1
+  # because of NA's, assessing is.na provides a safer way
+  ids <- ifelse(is.na(fit_vis$Good_Fit_Visual), FALSE, TRUE)
+  x$id_outbreak[ids]
+}
+
+# ids_robust <- unique(c(ids1 %in%, ids2))
+ids1 <- get_ids_extreme_est(fit, er=0.05)
+ids2 <- get_ids_low_ndata(fit_ndata, threshold=8)
+ids3 <- get_ids_poor_fit(fit_vis)
+
+ids_poor_fit <- unique(c(ids1, ids2, ids3))
+ids_robust <- setdiff(fit$id_outbreak, ids_poor_fit)
+```
+
+###  Direct, indirect, total, and overall VE calculation
+
+```{r}
+# static model
+# effectiveness computations are based on the definition
+# DVE, IVE: parameter values
+# TVE = 1 - (1-DVE)(1-IVE)
+# OVE = 1 - (vc*(1-DVE)(1-IVE) + (1-vc)*(1-IVE))
+setDT(outbreak_data)
+pop_by_age_wpp <- as.data.frame(fread("outputs/wpp_pop_by_age_20241022.csv"))
+age_dist <- pop_by_age_wpp
+# extract outbreak data, can be done by including only the first rwo
+od <- outbreak_data[week == 1]
+od$prop_u5 <- NA
+for (i in 1:nrow(od)) {
+  od$prop_u5[i] <- 
+    age_dist[(age_dist$`ISO3 Alpha-code` == od$country[i] &
+                as.character(age_dist$Year) == as.character(od$year[i])), "prop_u5"]
+}
+
+params <- as.data.frame(fread("outputs/params_20241017.csv"))
+vacc_par <- params[,c("vacc_effect_direct_u5", "vacc_effect_direct_5p", "vacc_effect_indirect_id")]
+increment <- 0.02 # increment used in posterior predictive values
+# vacc_par$ive <- as.numeric(ive_data[vacc_par$vacc_effect_indirect_id, (round(vc/increment)+1)])
+
+lst <- vector('list', nrow(od))
+vacc_eff_static <- data.frame()
+vcs <- c(0.6, 0.75, 0.9)
+nsample <- 200
+for (vc in vcs) {
+  for (i in 1:nrow(od)) {
+    d <- od[i, ]
+    d <- rbindlist(lapply(1:100, function(x) rbind(d,d)))
+    d$runid <- NA
+    d$vacc_cov <- vc
+    d$ve_u5 <- NA
+    d$ve_5p <- NA
+    d$dve <- NA
+    d$ive <- NA
+    d$tve <- NA
+    d$ove <- NA
+    
+    for (j in 1:nsample) {
+      d$runid[j] <- j
+      d$ve_u5[j] <- vacc_par$vacc_effect_direct_u5[j]
+      d$ve_5p[j] <- vacc_par$vacc_effect_direct_5p[j]
+      d$dve[j] <- d$prop_u5[j]*d$ve_u5[j] + (1-d$prop_u5[j])*d$ve_5p[j]
+      # d$ive[j] <- vacc_par$ive[j]
+      d$ive[j] <- as.numeric(ive_data[vacc_par$vacc_effect_indirect_id[j], (round(vc/increment)+1)])
+      d$tve[j] <- 1 - (1-d$dve[j])*(1-d$ive[j])
+      d$ove[j] <- 1 - (vc*(1-d$dve[j])*(1-d$ive[j]) + (1-vc)*(1-d$ive[j]))
+    }
+    lst[[i]] <- d
+  }
+  vacc_eff_static <- rbindlist(list(vacc_eff_static, rbindlist(lst)))
+}
+
+# vacc_eff_static
+
+# dynamic model
+# effectiveness computations are based on the modeled incidence 
+# d <- fread("julia/outputs/vacc_fit_params_by_vacc_state_20241204T15.csv")
+# d <- fread("julia/outputs/vacc_fit_params_by_vacc_state_20241205T15.csv")
+# d$dve_vc60_ <- 1 - (d$CI_VC60_vacc/vc)/(d$CI_VC60_novacc/(1-vc))
+# d$ive_vc60_ <- 1 - (d$CI_VC60_novacc/(1-vc)) /(d$CI_novacc)
+# d$tve_vc60_ <- 1 - (d$CI_VC60_vacc/vc) /(d$CI_novacc)
+# d$ove_vc60_ <- 1 - (d$CI_VC60_vacc + d$CI_VC60_novacc)/(d$CI_novacc)
+
+# Vaccine impact simulation results for the dynamic models
+d <- fread("outputs/vacc_fit_params_by_vacc_state_20241206T08.csv")
+# d <- fread("julia/outputs/vacc_fit_params_by_vacc_state_20241205T17.csv")
+vcs <- c(0.6, 0.75, 0.9)
+
+lst <- vector('list', length(vcs))
+for (i in 1:length(vcs)) {
+  vc <- vcs[i]
+  df <- d[, c("runid","data_id","id_outbreak")]
+  v <- round(100*vc, digits=0)
+  df$vacc_cov <- vc
+  df$dve <- 1 - (d[[paste0("CI_VC", v, "_vacc")]]/vc)/(d[[paste0("CI_VC", v, "_novacc")]]/(1-vc))
+  df$ive <- 1 - (d[[paste0("CI_VC", v, "_novacc")]]/(1-vc))/d[[paste0("CI_novacc")]]
+  df$tve <- 1 - (d[[paste0("CI_VC", v, "_vacc")]]/vc)/d[[paste0("CI_novacc")]]
+  df$ove <- 1 - (d[[paste0("CI_VC", v, "_vacc")]] + d[[paste0("CI_VC", v, "_novacc")]])/d[[paste0("CI_novacc")]]
+  
+  lst[[i]] <- df
+}
+vacc_eff_dynamic <- rbindlist(lst)
+
+# nrow(vacc_eff_dynamic)/3/200
+# [1] 1406
+# nrow(vacc_eff_static)/3/200
+# [1] 1406
+```
+
+
+```{r}
+dve_cutoff <- 0.4
+d1 <- vacc_eff_dynamic[,c("runid","id_outbreak","vacc_cov","dve","ive","tve","ove")]
+d1$model <- "Dynamic"
+d1 <- d1 |> filter(d1$id_outbreak %in% ids_robust)
+
+length(unique(d1$id_outbreak))
+d2 <- vacc_eff_static[,c("runid","id_outbreak","vacc_cov","dve","ive","tve","ove")]
+d2$model <- "Static"
+d2 <- d2 |> filter(d2$id_outbreak %in% ids_robust)
+d <- rbind(d1,d2) 
+
+dlong <- pivot_longer(d, cols=c("dve","ive","tve","ove"), 
+                      names_to = "vacc_eff")
+dlong$vacc_eff <- as.factor(dlong$vacc_eff)
+
+levels(dlong$vacc_eff) <- 
+  c("Direct VE", "Indirect VE", "Overall VE", "Total VE")
+dlong$value <- dlong$value * 100
+
+vc <- 0.75
+ids_all <- unique(fit$id_outbreak)
+dlong |> 
+  filter(vacc_cov == vc) |>
+  # filter(runid == 1) |>
+  filter(id_outbreak %in% ids_robust) |> 
+  ggplot()+
+  geom_boxplot(aes(x=model, y=value))+
+  stat_summary(aes(x=model, y=value), 
+               fun=mean, colour="firebrick", geom="point", 
+               shape=18, size=3, show.legend=FALSE)+
+  facet_wrap(~vacc_eff)+
+  theme_light()+
+  theme_tight()+
+  labs(x="", y="Vaccine effectiveness") -> plt
+
+# ggsave(paste0("plots/figS8_vacc_eff_4_types_", tstamp(), ".pdf"), plt,
+#          device = cairo_pdf, width=fgw2, height=fgw2, units="mm")
+```
+
+## Table S4. Time-triggered scenarios for the 169 confirmed outbreaks
+
+```{r}
+svim_sum_cea_conf <- svim_sum_cea[c_ch_tot > 0] 
+  
+tab <- data.frame()
+wks <- c(1, 5, 9, 13, 17)
+vcs <- c(0.6, 0.75, 0.9)
+vcw <- expand.grid(vacc_week = wks, vacc_cov = vcs)
+
+for (i in 1:nrow(vcw)) {
+  d <- svim_sum_cea_conf[(vacc_cov == vcw$vacc_cov[i] & vacc_week == vcw$vacc_week[i])]
+  tab <- rbind(tab, impact_summary(d))
+}
+
+tab <- cbind(vcw, tab)
+
+if (save_table) {
+  fwrite(tab, paste0("outputs/svim_confirmed_time_trigger_tab_full", tstamp(), ".csv"))
+}
+```
+
+## Table S5. Case-triggered scenarios for the 169 confirmed outbreaks
+
+```{r}
+# case-trigger
+svim_ct_sum_cea_conf <- svim_ct_sum_cea[c_ch_tot > 0] 
+
+tab_ct <- data.frame()
+ctgs <- c(1, 50, 100, 500, 1000)
+vct <- expand.grid(case_trigger = ctgs, vacc_cov = vcs)
+for (i in 1:nrow(vct)) {
+  d <- svim_ct_sum_cea_conf[(vacc_cov == vct$vacc_cov[i] & case_trigger == vct$case_trigger[i])]
+  tab_ct <- rbind(tab_ct, impact_summary(d))
+}  
+tab_ct <- cbind(vct, tab_ct)
+
+if (save_table) {
+  fwrite(tab_ct, paste0("outputs/svim_confirmed_case_trigger_tab_full_", tstamp(), ".csv"))
+}
+```
+
+## Figure S9 Percentage case reduction for longer outbreaks
+### Exponential model fit
+```{r}
+cts_sel <- c(1,seq(40,280,40)) # case triggers selected
+dur_threshold <- 7 # weeks
+svim_sum_cea |>
+  filter(outbk_dur >= dur_threshold) |> 
+  filter(vacc_cov %in% VC, vacc_week <= max(VW_seq)) |>
+  group_by(vacc_week) |>
+  summarize(vacc_cov = vacc_cov[1],
+          count = n(),
+          median_prc = quantile(pct_reduc_case, probs=c(0.5))) -> svim_tt_med
 
 f <- function(t, Asym=0, lrc, y0) {
     Asym + (y0 - Asym) * exp(-exp(lrc) * t)
 }
-# fit <- nls(median_ca ~ SSasymp(t, yf, y0, log_alpha), data=res2)
-fit <- nls(pct_reduc_case ~ f(t=case_trigger, Asym=0, lrc, y0),  
-           data=res[], start=list(lrc=-1, y0=0.86))
+
+fit <- nls(median_prc ~ f(t=vacc_week, Asym=0, lrc, y0),  
+           data = svim_tt_med, start = list(lrc = 0.1, y0=100))
 fit
-# reduction rate by one additional case
-a <- exp(as.numeric(coef(fit)["lrc"]))
-# half-life (in terms of cumulative cases)
-b <- log(2)/abs(exp(as.numeric(coef(fit)["lrc"])))
+# weekly reduction rate
+exp(as.numeric(coef(fit)["lrc"]))
+# half-life (weeks)
+log(2)/abs(exp(as.numeric(coef(fit)["lrc"])))
+svim_tt_med$fitted <- fitted(fit)
 
-paste0("Percentage case reduction (%) decreases with delay in vaccination with ", format_num(a*100, digits=3) , "% by one additional case in campaign vaccination, and decreasing by half every ", format_num(b, digits=1), " cases")
+# case-triggered
+svim_ct_sum_cea |>
+  filter(outbk_dur >= dur_threshold) |>
+  filter(vacc_cov %in% VC, case_trigger <= max(cts_sel)) |>
+  group_by(case_trigger) |>
+  summarize(vacc_cov = vacc_cov[1],
+          count = n(),
+          median_prc = quantile(pct_reduc_case, probs=c(0.5))) -> svim_ct_med
 
-# case averted by year
-delay_outbk_request <- 26
-delay_request_r1 <- quantile(delay_req_r1, probs=probs, na.rm=TRUE)
+# res_ct$t <- res$case_trigger
+f <- function(t, Asym=0, lrc, y0) {
+    Asym + (y0 - Asym) * exp(-exp(lrc) * t)
+}
+fit_ct <- nls(median_prc ~ f(t=case_trigger, Asym=0, lrc, y0),
+           data = svim_ct_med, start = list(lrc=log(0.01), y0=100))
+fit_ct
+# reduction rate by unit (week or a single case)
+(a <- exp(as.numeric(coef(fit_ct)["lrc"])))
+# half-life (weeks)
+(b <- log(2)/abs(exp(as.numeric(coef(fit_ct)["lrc"]))))
 
-med_delay <- round((delay_outbk_request + delay_request_r1[3])/7)
-ub_delay <- round((delay_outbk_request + delay_request_r1[4])/7)
-lb_delay <- round((delay_outbk_request + delay_request_r1[2])/7)
+paste0("Medican case reduction (%) decreases with increasing number of cumulative cases with ", format_num(a*100, digits=1) , "% by one case increase, and decreasing by half every ", format_num(b, digits=1), " additional cases.")
 
-svim_cea |>
-  filter(vacc_week %in% c(med_delay, lb_delay, ub_delay)) |> 
-  group_by(year, vacc_cov, vacc_week) |>
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs  = 1000 * sum_DA / sum_vacc) -> cada_by_year
+svim_ct_med$fitted <- fitted(fit_ct)
+```
 
-svim_gtfcc |>
-  filter(vacc_week %in% c(med_delay, lb_delay, ub_delay)) |> 
-  group_by(year, vacc_cov, vacc_week) |>
-  summarize(sum_case = sum(s_ch_tot),
-            sum_death = sum(death_tot, na.rm=T),
-            sum_vacc = sum(vacc_dose),
-            sum_CA = sum(s_ch_averted_tot),
-            sum_DA = sum(death_tot_averted, na.rm=T),
-            sum_remaining_case = sum_case - sum_CA,
-            sum_remaining_death = sum_death - sum_DA,
-            pct_reduc_case = sum_CA / sum_case,
-            pct_reduc_death = sum_DA / sum_death,
-            case_averted_per_1000_OCVs = 1000 * sum_CA / sum_vacc,
-            death_verted_per_1000_OCVs = 1000 * sum_DA / sum_vacc) -> gtfcc_cada_by_year
+### Percent case reduction for two triggers for outbreak size group
+```{r}
+# time-triggered
+# exponential model fit results
+svim_tt_med |> filter(vacc_week %in% VW_seq) -> svim_tt_med_vw
 
-
-cada_by_year_wide <- 
-  pivot_wider(cada_by_year,  names_from = vacc_week, 
-              names_sep = ".", 
-              values_from = -c(year, vacc_week, vacc_cov, sum_case, sum_death))
-
-gftcc_cada_by_year_wide <-
-  pivot_wider(gtfcc_cada_by_year,
-              names_from = vacc_week,
-              names_sep = ".",
-              values_from = -c(year, vacc_week, vacc_cov, sum_case, sum_death))
-
-df <- filter(cada_by_year_wide, vacc_cov == VC, year <= 2022)
-df_gtfcc <- filter(gftcc_cada_by_year_wide, vacc_cov == VC, year <= 2022)
-
-ggplot(data=df)+
-  geom_point(aes(year, sum_case, color="No vaccination"))+
-  geom_line(aes(year, sum_case, color="No vaccination"))+
-  geom_point(aes(year, sum_remaining_case.10, color="Vaccination"))+
-  geom_line(aes(year, sum_remaining_case.10, color="Vaccination"))+
-  geom_errorbar(aes(year, ymin=sum_remaining_case.8, 
-                    ymax=sum_remaining_case.14), width=0, color="firebrick")+
-  geom_ribbon(aes(x=year, ymin=pmax(sum_remaining_case.10,0),
-                  ymax=sum_case), fill="firebrick", 
-              col="firebrick", alpha=0.5)+
-  scale_color_manual("", values=c("black","firebrick"))+
-  scale_x_continuous(breaks=seq(2010,2022,by=2),
-                     labels = seq(2010,2022,by=2))+
-  labs(x="Year", 
-       y="Cases from outbreaks by year")+ 
+svim_sum_cea |>
+  filter(outbk_dur >= 7) |>
+  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) |>
+  ggplot(aes(x=as.factor(vacc_week), y=pct_reduc_case,
+             color=as.factor(vacc_cov)))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  geom_line(data=svim_tt_med_vw, aes(x=1:8, y=fitted),
+             color="black", linewidth=1)+
+  scale_y_continuous(labels = scales::percent_format(scale=1))+
+  scale_color_manual(name="Vaccine coverage",
+                     values=my_discrete_colors[1:3],
+                     labels=c(paste0(format_num(VC3*100,1),"%")))+
+  labs(x="Vaccination week since the outbreak began",y="Case reduction")+
   theme_light()+
-  theme_tight() -> plt_ca
+  theme_tight()+
+  theme(legend.position = "top") -> pltS9a
 
-plt_ca
-fac <- 1.4
-if (save_plot) {
-  ggsave(paste0("plots/fig4_cases_averted_year_", tstamp(), ".pdf"), 
-         plt_ca,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
-}
+# case-triggered 
+svim_ct_med |> filter(case_trigger %in% cts_sel) -> svim_ct_med_c
 
-# deaths
-ggplot(data=df)+
-  geom_point(aes(year, sum_death, color="No vaccination"))+
-  geom_line(aes(year, sum_death, color="No vaccination"))+
-  geom_point(aes(x=year, y=sum_remaining_death.10, color="Vaccination"))+
-  geom_line(aes(x=year, y=sum_remaining_death.10, color="Vaccination"))+
-  geom_errorbar(aes(x=year, ymin=sum_remaining_death.8, 
-                    ymax=sum_remaining_death.14), width=0, color="steelblue")+
-  geom_ribbon(aes(x=year, ymin=pmax(sum_remaining_death.10,0),
-                  ymax=sum_death), fill="steelblue", 
-              col="steelblue", alpha=0.5)+
-  scale_color_manual("", values=c("black","steelblue"))+
-  # scale_color_manual("", values = c("No vaccination" = "black",
-  #                                   "Vaccination" = "steelblue"),
-  #                    breaks = c("Vaccination"))+
-  scale_x_continuous(breaks=seq(2010,2022,by=2),
-                     labels = seq(2010,2022,by=2))+
-  labs(x="Year", 
-       y="Deaths from outbreaks by year")+ 
-  # scale_color_manual("", values=my_discrete_colors[1:13])+
-  
+svim_ct_sum_cea |>
+ filter(outbk_dur >= 7) |>
+ filter(vacc_cov %in% VC3, case_trigger %in% cts_sel) -> d
+
+d$case_trigger <- factor(d$case_trigger, levels=cts_sel)
+d$vacc_cov <- factor(d$vacc_cov, levels=c(0.6,0.75,0.9))
+
+d |>
+  ggplot()+
+  geom_boxplot(aes(x=case_trigger, y=pct_reduc_case,
+             group=interaction(case_trigger, vacc_cov),
+             color=vacc_cov),
+             width=0.6, position=position_dodge(width=0.7),
+             outlier.size=0.6) +
+  geom_line(data=svim_ct_med_c, aes(x=1:8, y=fitted),
+             color="black", linewidth=1)+
+  scale_y_continuous(labels = NULL)+
+  scale_color_manual(name="Vaccine coverage",
+                     values=my_discrete_colors[1:3],
+                     labels=c("60%","75%","90%"))+ 
+  labs(x="Cumulative cases at vaccination", y="")+ 
   theme_light()+
-  theme_tight() -> plt_da
+  theme_tight()+
+  theme(legend.position = "top") -> pltS9b
 
-plt_da
-if (save_plot) {
-  ggsave(paste0("plots/fig4_deaths_averted_year_", tstamp(), ".pdf"), 
-         plt_da,
-         device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
+pltS9 <- (pltS9a + pltS9b) +
+  plot_annotation(tag_levels = 'A') +
+  plot_layout(ncol=2,
+              guides="collect") &
+  theme(plot.tag.position  = c(0,0.9),
+        plot.tag = element_text(size=13)) &
+  theme(legend.position = "top")
+
+for (i in c(1,2)) {
+  pltS9[[i]] <- pltS9[[i]] + theme(plot.tag.position = c(0,0.86))
 }
 
-plt_ca_da <- plt_ca + plt_da + 
-  plot_annotation(tag_levels = "A") + 
-  plot_layout(axis_titles = "collect_x") + 
-  plot_layout(guides = "collect") & theme(legend.position = 'bottom')
-
-fac <- 1.8
-if (save_plot) {
-  ggsave(paste0("plots/fig4ab_cases_deaths_averted_af_year_",
-                tstamp(), ".pdf"), plt_ca_da,
-         device=cairo_pdf, width=fgw2*fac/1.2, height=fgw1*fac, units="mm")
-}
-
-
-paste0("Overall case reduction ", round(sum(df$sum_CA.10)), "[IQR: ", round(sum(df$sum_CA.14)), " - ",  round(sum(df$sum_CA.8)),"]", " of ", round(sum(df$sum_case)))
-
-paste0("Overall percentage case reduction ", sum(df$sum_CA.10)/sum(df$sum_case)
-, "[IQR: ", sum(df$sum_CA.14)/sum(df$sum_case), " - ",  sum(df$sum_CA.8)/sum(df$sum_case),"]")
-
-paste0("Overall percentage death reduction ", sum(df$sum_DA.10)/sum(df$sum_death)
-, "[IQR: ", sum(df$sum_DA.14)/sum(df$sum_death), " - ",  sum(df$sum_DA.8)/sum(df$sum_death),"]")
-
-paste0("Overall case averted per 1,000 OCVs are ",  format_num(1000*sum(df$sum_CA.8)/sum(df$sum_vacc.8), digits=3), ", ",   format_num(1000*sum(df$sum_CA.10)/sum(df$sum_vacc.10), digits=3), ", and ",  format_num(1000*sum(df$sum_CA.14)/sum(df$sum_vacc.14), digits=3), " for 25th, 50th, and 75th percentiles of delays.")
-
-pcr <- summary(df$pct_reduc_case.10[1:13])
-paste0("Percentage case reduction vary from ", pcr[1], " to ", 
-       pcr[6], " with a mean of ", pcr[4])
-
-pdr <- summary(df$pct_reduc_death.10[1:13])
-paste0("Percentage case reduction vary from ", pdr[1], " to ", 
-       pdr[6], " with a mean of ", pdr[4])
-df$pct_reduc_death.10[1:13]
-
-paste0("Overall percentage case reduction ", sum(df_gtfcc$sum_CA.10)/sum(df_gtfcc$sum_case)
-, "[IQR: ", sum(df_gtfcc$sum_CA.14)/sum(df_gtfcc$sum_case), " - ",  sum(df_gtfcc$sum_CA.8)/sum(df_gtfcc$sum_case),"]")
-
-paste0("Overall percentage death reduction ", sum(df_gtfcc$sum_DA.10)/sum(df_gtfcc$sum_death)
-, "[IQR: ", sum(df_gtfcc$sum_DA.14)/sum(df_gtfcc$sum_death), " - ",  sum(df_gtfcc$sum_DA.8)/sum(df_gtfcc$sum_death),"]")
-
-pcr_gtfcc <- summary(df_gtfcc$pct_reduc_case.10[1:13])
-paste0("For GTFCC subsets, percentage case reduction vary from ", 
-       pcr_gtfcc[1], " to ", pcr_gtfcc[6], " with a mean of ", pcr_gtfcc[4])
-
-pdr_gtfcc <- summary(df_gtfcc$pct_reduc_death.10[1:13])
-paste0("Percentage case reduction vary from ", pdr_gtfcc[1], " to ", 
-       pdr_gtfcc[6], " with a mean of ", pdr_gtfcc[4])
-
+fac <- 1.3
+ggsave(paste0("plots/figS9_pcr_outbk_", tstamp(hour=T), ".pdf"),
+       pltS9,
+       device=cairo_pdf, width=fgw2*fac, height=fgw1*1.15*fac, units="mm")
 ```
 
 
-## Table 4 Subsets
+## Table S6. Time-triggered scenarios for the outbreaks longer than 7 weeks. 
 
 ```{r}
-# In emergency situations, the median time from the event (i.e.
-# first laboratory confirmation of cholera or occurrence of humanitarian emergency) to the receipt of the official OCV request was 26 days (range 12–206 days). 
+dat <- svim_sum_cea[outbk_dur >= 7] 
+  
+tab <- data.frame()
+wks <- c(1, 5, 9, 13, 17)
+vcs <- c(0.6, 0.75, 0.9)
+vcw <- expand.grid(vacc_week = wks, vacc_cov = vcs)
 
-# 26 days
-# request to round 1 Median (IQR)	45 (25, 66)
-# delay from the start to round 1
-# delay_median <- (26+45)/7 
-# delay_lower <- (12+45)/7 
-# delay_upper <- (206+45)/7
-svim_subsets_sum |>
-  filter(vacc_cov == VC, vacc_week == VW, subset_method == "random") -> d1 
-svim_subsets_sum |>
-  filter(vacc_cov == VC, vacc_week == VW, subset_method == "attack_rate") -> d2 
-svim_subsets_sum |>
-  filter(vacc_cov == VC, vacc_week == VW, subset_method == "cases") -> d3 
-svim_subsets_sum |>
-  filter(vacc_cov == VC, vacc_week == VW, subset_method == "duration") -> d4 
-
-tab1 <- create_impact_table2(d1)
-tab2 <- create_impact_table2(d2)
-tab3 <- create_impact_table2(d3)
-tab4 <- create_impact_table2(d4)
-tab <- rbind(tab1, tab2, tab3, tab4)
-tab$subset_method <- c("random","attack_rate","cases","duration")
-
-if (save_table) {
-  fwrite(tab, paste0("outputs/svim_subset_tab_", tstamp(), ".csv"))
+for (i in 1:nrow(vcw)) {
+  d <- dat[(vacc_cov == vcw$vacc_cov[i] & vacc_week == vcw$vacc_week[i])]
+  tab <- rbind(tab, impact_summary(d))
 }
 
-tab_all <- create_impact_table2(svim)
+tab <- cbind(vcw, tab)
+
+if (save_table) {
+  fwrite(tab, paste0("outputs/svim_over_7wks_time_trigger_tab_full", tstamp(), ".csv"))
+}
 ```
 
+## Table S7. Case-triggered scenarios for the 169 confirmed outbreaks
+
+```{r}
+# case-trigger
+dat <- svim_ct_sum_cea[outbk_dur >= 7]  
+
+tab_ct <- data.frame()
+ctgs <- c(1, 50, 100, 500, 1000)
+vct <- expand.grid(case_trigger = ctgs, vacc_cov = vcs)
+for (i in 1:nrow(vct)) {
+  d <- dat[(vacc_cov == vct$vacc_cov[i] & case_trigger == vct$case_trigger[i])]
+  tab_ct <- rbind(tab_ct, impact_summary(d))
+}  
+tab_ct <- cbind(vct, tab_ct)
+
+if (save_table) {
+  fwrite(tab_ct, paste0("outputs/svim_over_7wks_case_trigger_tab_full_", tstamp(), ".csv"))
+}
+```
 

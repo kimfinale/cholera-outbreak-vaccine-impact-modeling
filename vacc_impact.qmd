@@ -2,6 +2,7 @@
 title: "Vaccine impact modeling"
 format: html
 editor_options: 
+  code_folding: hide
   chunk_output_type: console
 ---
 
@@ -14,27 +15,46 @@ library(janitor)
 source("utils.R") # utility functions
 library(conflicted)
 conflict_prefer("filter", "dplyr")
+# global parameters
 VC3 <- c(0.6, 0.75, 0.9) # representative vaccine coverage rates
-VC <- VC3[2]
-VW <- 9 # representative vaccination week
+VC <- VC3[2] # most representative
+VW <- 9 # median vaccination week from the GTFCC dashboard
 VW_seq <- seq(1,19,2)
 PROBS <- c(0.025,0.25,0.5,0.75,0.975)
 save_csv <- FALSE
+save_rds <- FALSE
 ```
 
+
 ## Load outbreak datasets
+
 ```{r}
-# extract ids for the outbreaks not affected by OCV campaigns
+# Outbreak summary
 ds <- clean_names(as.data.frame(fread("data/outbreak_files_Oct2024/outbreak_summary.csv")))
 paste0(length(unique(ds$country)), " countries")
-# create 'id_outbreak' variables to link with the 
+# create 'id_outbreak' variables to link with the other dataset
 ds |>
   group_by(location, outbreak_number) |>
   mutate(id_outbreak = paste0(location, "-", start_date, "-", end_date)) |> 
   ungroup() -> ds
 
-# data for the outbreaks affected by OCV
+# OCV campaign records
 docv <- clean_names(fread("data/outbreak_files_Oct2024/ocv_long_dataset.csv"))
+ocv_before <- clean_names(fread("data/outbreak_files_Oct2024/ocv_before_outbreak_list.csv"))
+ocv_during <- clean_names(fread("data/outbreak_files_Oct2024/ocv_during_outbreak_list.csv"))
+ocv_during$start_date_old <- ocv_during$start_date
+ocv_during$start_date <- format(as.Date(ocv_during$start_date, format="%m/%d/%y"), "%Y-%m-%d")
+sum(docv$ocv_during, na.rm = T) == nrow(ocv_during) 
+
+# the most recent year in which OCV campaign information is available  
+YEAR <- max(docv$start_date,na.rm=T)
+
+docv |> 
+  pivot_longer(cols=ocv_before_1:ocv_after_1, names_to="ocv_timing") |>
+  filter(value == T) |> 
+  group_by(ocv_timing) |> 
+  count()
+
 # time-series data
 ts <- clean_names(readRDS("data/outbreak_files_Oct2024/time_series_outbreak_extraction.rds")) 
 ts |>
@@ -89,86 +109,14 @@ ts_noocv |>
 paste0(length(ids_conf_noocv), " confirmed outbreaks out of ", length(unique(ts_noocv$id_outbreak)), " outbreaks unaffected by OCVs")
 paste0(length(unique(ts_noocv$id_outbreak)) - length(ids_conf_noocv), " suspected outbreaks")
 
-outbreak_data_all <- fread("outputs/outbreak_data_all_20241121.csv")
-outbreak_data <- fread("outputs/outbreak_data_20241121.csv")
+outbreak_data <- as.data.frame(fread("outputs/outbreak_data_20241121.csv"))
+outbreak_data_all <- as.data.frame(fread("outputs/outbreak_data_all_20241121.csv"))
 ```
 
-## Identify unique outbreaks
-Primary analyses were 
-1. overlapping outbreaks 
-Find the lowest admin unit
-Check if any duplicate outbreaks that reported in the same admin unit
+## Parameter sets
 ```{r}
-unique(outbreak_data$spatial_scale)
-outbreak_data |> 
-  group_by(spatial_scale) |> 
-  summarize()
-
-d <- outbreak_data[week == 1]
-d[, .N, by="spatial_scale"]
-
-d |> 
-  filter(spatial_scale == "admin2") |> 
-  pull(admin2) |> 
-  unique() -> adm2
-
-d_country <- d[spatial_scale == "country"]
-d_adm1 <- d[spatial_scale == "admin1"]
-d_adm2 <- d[spatial_scale == "admin2"] 
-d_adm3 <- d[spatial_scale == "admin3"] 
-
-# ids <- c()
-# for (i in 1:nrow(d_adm2)) {
-#   d2 <- d_adm2[i, ]
-#   d3 <- d_adm3[admin2 == d2$admin2] # same admin2 
-#   if (nrow(d3) > 0) {
-#     min_tl <- min(d3$tl)
-#     max_tr <- max(d3$tr)  
-#     if (d2$tl >= min_tl & d2$tr <= max_tr) { # d_Adm3 includes d_adm2 in terms of dates
-#       cat(sprintf("id: %d, nrow: %d\n", i, nrow(d3)))
-#       ids <- c(ids, i)
-#     }
-#   }
-# }
-# d_adm2_dup <- d_adm2[ids,]
-# 
-# ids_adm1
-
-get_duplicated_outbreaks <- function(d_upper, d_lower, string=NULL){
-  indices <- c()
-  for (i in 1:nrow(d_upper)) {
-    dup <- d_upper[i, ]
-    idx <- d_lower[[string]] == dup[[string]]
-    dlow <- d_lower[idx,]
-    if (nrow(dlow) > 0) {
-      if (dup$tl >= min(dlow$tl) & dup$tr <= max(dlow$tr)) {
-        # cat(sprintf("id: %d, nrow: %d\n", i, nrow(d3)))
-        indices <- c(indices, i)
-      }
-    }
-  }
-  return(d_upper[indices,])
-}
-
-adm2_dup <- get_duplicated_outbreaks(d_upper=d_adm2, d_lower=d_adm3, string="admin2")
-adm1_dup <- get_duplicated_outbreaks(d_upper=d_adm1, d_lower=d_adm3, string="admin1")
-adm0_dup <- get_duplicated_outbreaks(d_upper=d_country, d_lower=d_adm3, string="country")
-adm1_dup2 <- get_duplicated_outbreaks(d_upper=d_adm1, d_lower=d_adm2, string="admin1")
-adm0_dup2 <- get_duplicated_outbreaks(d_upper=d_country, d_lower=d_adm2, string="country")
-adm0_dup3 <- get_duplicated_outbreaks(d_upper=d_country, d_lower=d_adm1, string="country")
-
-dup <- rbind(adm2_dup, adm1_dup, adm1_dup2, adm0_dup, adm0_dup2, adm0_dup3)
-dup <- dup[!duplicated(dup),]
-
-d <- outbreak_data[!(id_outbreak %in% dup$id_outbreak)]
-table(outbreak_data[week == 1, "spatial_scale"])
-table(d[week == 1, "spatial_scale"])
-```
-
-
-## Parameter sets need to compute the vaccine impact
-```{r}
-params <- as.data.frame(data.table::fread("outputs/params_20241017.csv"))
+## simulation parameters
+params <- as.data.frame(fread("outputs/params_20241017.csv"))
 # IVE posterior predictive values from Bayesian beta regression (see parameters.qmd)
 ive_fit <- read_rds("outputs/ive_yrep_20241010.rds")
 ive_data <- ive_fit$yrep
@@ -177,529 +125,10 @@ pop_by_age_wpp <- as.data.frame(fread("outputs/wpp_pop_by_age_20241022.csv"))
 life_exp_data <- as.data.frame(fread("outputs/wpp_life_expectancy_20241022.csv"))
 gdp_data <- read_xls("data/GDP_WorldBank.xls")
 workforce_data <- read_xls("data/Workforce_Worldbank.xls")
-outbreak_data <- as.data.frame(data.table::fread("outputs/outbreak_data_20241121.csv"))
-outbreak_data_all <- as.data.frame(data.table::fread("outputs/outbreak_data_all_20241121.csv"))
-```
-
-## Functions to summarize vaccine impact
-```{r}
-# exclude outbreaks with OCVs, add population size based on ts
-# global variables need to be set: VC3, ts, docv
-set_svim_raw_res <- function(svim_df) {
-  svim <- svim_df[vacc_cov %in% VC3] # we only use three vacc_covs
-  svim <- svim[!(id_outbreak %in% docv$id_outbreak)] # outbreaks for which no ocv's affected
-  tsdt <- setDT(ts)[week == 1]
-  svim <- svim[tsdt, on ="id_outbreak", population := i.pop]
-  svim <- svim[, 
-               c("s_ch_vacc", "outbk_yesno", "outbk_vacc_yesno") :=
-                 list(s_ch - s_ch_averted,
-                  ifelse(1e5 * s_ch / population > threshold, 1, 0),
-                  ifelse(1e5 * (s_ch - s_ch_averted) / population > threshold, 1, 0))]
-  return(svim)
-}
-
-# sum across week in terms of cases, deaths, ...
-svim_sum_across_week <- function(svim, case_trigger=FALSE) {
-  if (!case_trigger) {
-    sum_across_week_by_runid <- svim[, .(
-      country = country[1],
-      start_date = as.Date(start_date_outbreak[1]),
-      end_date = as.Date(end_date_outbreak[1]),
-      prop_u5 = prop_u5[1],
-      population = population[1],
-      week_delay_to_vacc_effect = week_delay_to_vacc_effect[1],
-      threshold = threshold[1],
-      ori_occurred = ori_occurred[1],
-      ive = ive[1],
-      c_ch_tot = sum(c_ch, na.rm=T),
-      death_tot = sum(deaths, na.rm=T),
-      death_averted_tot = sum(deaths_averted, na.rm=T),
-      pct_reduc_death = 100 * sum(deaths_averted, na.rm=T)/sum(deaths, na.rm=T),
-      s_ch_averted_u5_tot = sum(s_ch_averted_u5), # weekly to cumulative
-      s_ch_averted_5p_tot = sum(s_ch_averted_5p),
-      s_ch_tot = sum(s_ch),
-      s_ch_averted_tot = sum(s_ch_averted),
-      pct_reduc_case = 100 * sum(s_ch_averted)/sum(s_ch),
-      outbk_dur = sum(outbk_yesno),
-      outbk_dur_vacc = sum(outbk_vacc_yesno),
-      dur_reduced = sum(outbk_yesno) - sum(outbk_vacc_yesno),
-      pct_reduc_dur = 100*((sum(outbk_yesno) - sum(outbk_vacc_yesno))/sum(outbk_yesno))),
-      by = .(runid, id_outbreak, vacc_week, vacc_cov)]
-  }
-  else if (case_trigger) {
-  sum_across_week_by_runid <- svim[, .(
-    country = country[1],
-    start_date = as.Date(start_date_outbreak[1]),
-    end_date = as.Date(end_date_outbreak[1]),
-    prop_u5 = prop_u5[1],
-    population = population[1],
-    vacc_week = vacc_week[1],
-    week_delay_to_vacc_effect = week_delay_to_vacc_effect[1],
-    threshold = threshold[1],
-    ori_occurred = ori_occurred[1],
-    ive = ive[1],
-    c_ch_tot = sum(c_ch, na.rm=T),
-    death_tot = sum(deaths, na.rm=T),
-    death_averted_tot = sum(deaths_averted, na.rm=T),
-    pct_reduc_death = 100 * sum(deaths_averted, na.rm=T)/sum(deaths, na.rm=T),
-    s_ch_averted_u5_tot = sum(s_ch_averted_u5), # weekly to cumulative
-    s_ch_averted_5p_tot = sum(s_ch_averted_5p),
-    s_ch_tot = sum(s_ch),
-    s_ch_averted_tot = sum(s_ch_averted),
-    pct_reduc_case = 100 * sum(s_ch_averted)/sum(s_ch),
-    outbk_dur = sum(outbk_yesno),
-    outbk_dur_vacc = sum(outbk_vacc_yesno),
-    dur_reduced = sum(outbk_yesno) - sum(outbk_vacc_yesno),
-    pct_reduc_dur = 100*((sum(outbk_yesno) - sum(outbk_vacc_yesno))/sum(outbk_yesno))),
-    by = .(runid, id_outbreak, case_trigger, vacc_cov)]
-  }
-  return(sum_across_week_by_runid)
-}
-
-# compute mean across runid
-svim_mean_across_runid <- function(sum_across_week_by_runid, case_trigger=FALSE){
-  if (!case_trigger) {
-    mean_across_runid <- sum_across_week_by_runid[, .(
-      country = country[1],
-      start_date = start_date[1],
-      end_date = end_date[1],
-      prop_u5 = prop_u5[1],
-      population = population[1],
-      week_delay_to_vacc_effect = week_delay_to_vacc_effect[1],
-      threshold = threshold[1],
-      ori_occurred = ori_occurred[1],
-      c_ch_tot = mean(c_ch_tot),
-      ive = mean(ive),
-      s_ch_averted_u5_tot = mean(s_ch_averted_u5_tot), # weekly to cumulative
-      s_ch_averted_5p_tot = mean(s_ch_averted_5p_tot),
-      s_ch_tot = mean(s_ch_tot),
-      s_ch_averted_tot = mean(s_ch_averted_tot),
-      pct_reduc_case = mean(pct_reduc_case),
-      death_tot = mean(death_tot),
-      death_averted_tot = mean(death_averted_tot), 
-      pct_reduc_death = mean(pct_reduc_death),
-      outbk_dur = mean(outbk_dur),
-      outbk_dur_vacc = mean(outbk_dur_vacc),
-      dur_reduced = mean(dur_reduced),
-      pct_reduc_dur = mean(pct_reduc_dur)),
-      by = .(id_outbreak, vacc_week, vacc_cov)]
-  }
-  else if (case_trigger) {
-        mean_across_runid <- sum_across_week_by_runid[, .(
-      country = country[1],
-      start_date = start_date[1],
-      end_date = end_date[1],
-      prop_u5 = prop_u5[1],
-      population = population[1],
-      vacc_week = vacc_week[1],
-      week_delay_to_vacc_effect = week_delay_to_vacc_effect[1],
-      threshold = threshold[1],
-      ori_occurred = ori_occurred[1],
-      c_ch_tot = mean(c_ch_tot),
-      ive = mean(ive),
-      s_ch_averted_u5_tot = mean(s_ch_averted_u5_tot), # weekly to cumulative
-      s_ch_averted_5p_tot = mean(s_ch_averted_5p_tot),
-      s_ch_tot = mean(s_ch_tot),
-      s_ch_averted_tot = mean(s_ch_averted_tot),
-      pct_reduc_case = mean(pct_reduc_case),
-      death_tot = mean(death_tot),
-      death_averted_tot = mean(death_averted_tot), 
-      pct_reduc_death = mean(pct_reduc_death),
-      outbk_dur = mean(outbk_dur),
-      outbk_dur_vacc = mean(outbk_dur_vacc),
-      dur_reduced = mean(dur_reduced),
-      pct_reduc_dur = mean(pct_reduc_dur)),
-      by = .(id_outbreak, case_trigger, vacc_cov)]
-  }
-  return(mean_across_runid)
-}
-
-# compute sd across runid
-svim_sd_across_runid <- function(sum_across_week_by_runid, case_trigger=FALSE) {
-  
-  if (!case_trigger) {
-    sd_across_runid <- sum_across_week_by_runid[, .(
-      country = country[1],
-      start_date = start_date[1],
-      end_date = end_date[1],
-      prop_u5 = prop_u5[1],
-      population = population[1],
-      week_delay_to_vacc_effect = week_delay_to_vacc_effect[1],
-      threshold = threshold[1],
-      ori_occurred = ori_occurred[1],
-      c_ch_tot = sd(c_ch_tot),
-      ive = sd(ive),
-      s_ch_averted_u5_tot = sd(s_ch_averted_u5_tot), # weekly to cumulative
-      s_ch_averted_5p_tot = sd(s_ch_averted_5p_tot),
-      s_ch_tot = sd(s_ch_tot),
-      s_ch_averted_tot = sd(s_ch_averted_tot),
-      pct_reduc_case = sd(pct_reduc_case),
-      death_tot = sd(death_tot),
-      death_averted_tot = sd(death_averted_tot), 
-      pct_reduc_death = sd(pct_reduc_death),
-      outbk_dur = sd(outbk_dur),
-      outbk_dur_vacc = sd(outbk_dur_vacc),
-      dur_reduced = sd(dur_reduced),
-      pct_reduc_dur = sd(pct_reduc_dur)),
-      by = .(id_outbreak, vacc_week, vacc_cov)]
-  } 
-  else if(case_trigger) {
-    sd_across_runid <- sum_across_week_by_runid[, .(
-      country = country[1],
-      start_date = start_date[1],
-      end_date = end_date[1],
-      prop_u5 = prop_u5[1],
-      population = population[1],
-      vacc_week = vacc_week[1],
-      week_delay_to_vacc_effect = week_delay_to_vacc_effect[1],
-      threshold = threshold[1],
-      ori_occurred = ori_occurred[1],
-      c_ch_tot = sd(c_ch_tot),
-      ive = sd(ive),
-      s_ch_averted_u5_tot = sd(s_ch_averted_u5_tot), # weekly to cumulative
-      s_ch_averted_5p_tot = sd(s_ch_averted_5p_tot),
-      s_ch_tot = sd(s_ch_tot),
-      s_ch_averted_tot = sd(s_ch_averted_tot),
-      pct_reduc_case = sd(pct_reduc_case),
-      death_tot = sd(death_tot),
-      death_averted_tot = sd(death_averted_tot), 
-      pct_reduc_death = sd(pct_reduc_death),
-      outbk_dur = sd(outbk_dur),
-      outbk_dur_vacc = sd(outbk_dur_vacc),
-      dur_reduced = sd(dur_reduced),
-      pct_reduc_dur = sd(pct_reduc_dur)),
-      by = .(id_outbreak, case_trigger, vacc_cov)]
-  }
-  
-  return(sd_across_runid)
-}
-
-# across outbreak week
-svim_sum_across_week_all_outbreaks <- function(svim, case_trigger=FALSE) {
-  # variable names change (s is droped from deaths): deaths_averted -> death_averted_tot, 
-  # deaths -> death_tot
-  if (!case_trigger) {
-  sum_across_week_by_runid <- svim[, .(
-    country = country[1],
-    start_date = as.Date(start_date_outbreak[1]),
-    end_date = as.Date(end_date_outbreak[1]),
-    prop_u5 = prop_u5[1],
-    population = population[1],
-    ori_occurred = ori_occurred[1],
-    c_ch_tot = sum(c_ch, na.rm=T),
-    death_tot = sum(deaths, na.rm=T),
-    death_averted_tot = sum(deaths_averted, na.rm=T),
-    s_ch_averted_u5_tot = sum(s_ch_averted_u5), # weekly to cumulative
-    s_ch_averted_5p_tot = sum(s_ch_averted_5p),
-    s_ch_tot = sum(s_ch),
-    s_ch_averted_tot = sum(s_ch_averted),
-    outbk_dur = sum(outbk_yesno),
-    outbk_dur_vacc = sum(outbk_vacc_yesno)),
-    
-    by = .(runid, id_outbreak, vacc_week, vacc_cov)]
-  }
-  else if (case_trigger) {
-   sum_across_week_by_runid <- svim[, .(
-    country = country[1],
-    start_date = as.Date(start_date_outbreak[1]),
-    end_date = as.Date(end_date_outbreak[1]),
-    prop_u5 = prop_u5[1],
-    population = population[1],
-    ori_occurred = ori_occurred[1],
-    c_ch_tot = sum(c_ch, na.rm=T),
-    death_tot = sum(deaths, na.rm=T),
-    death_averted_tot = sum(deaths_averted, na.rm=T),
-    s_ch_averted_u5_tot = sum(s_ch_averted_u5), # weekly to cumulative
-    s_ch_averted_5p_tot = sum(s_ch_averted_5p),
-    s_ch_tot = sum(s_ch),
-    s_ch_averted_tot = sum(s_ch_averted),
-    outbk_dur = sum(outbk_yesno),
-    outbk_dur_vacc = sum(outbk_vacc_yesno)),
-    
-    by = .(runid, id_outbreak, case_trigger, vacc_cov)]
-  }
-  return(sum_across_week_by_runid)
-}
-
-# cea variables for each outbreak
-add_cea_results_all_outbreaks <- function(svim) {
-# CEA variables are added but ratio measure need to be computed when values are summed across outbreaks
-  svim |>
-    mutate(yld = compute_yld(s_ch_tot, parms=parms),
-           yld_averted = compute_yld(s_ch_averted_tot, parms=parms),
-           yll = compute_yll(death_tot, life_exp, parms),
-           yll_averted = compute_yll(death_averted_tot, life_exp, parms), 
-           daly_averted = yld_averted + yll_averted,
-           coi_averted = s_ch_averted_tot * coi_per_patient,
-           cod_averted = death_averted_tot * gdp * life_exp,
-           productivity_lost_averted = 
-             s_ch_averted_tot * gdp * ((patient_workday_lost/365)*(pct_workforce/100) +
-                                   (caregiver_workday_lost/365)),
-           vacc_dose = ifelse(ori_occurred, population * vacc_cov * dose_regimen, 0),
-           vacc_cost = (vacc_cost_per_dose + vacc_delivery_cost) * vacc_dose,
-           net_cost = vacc_cost - coi_averted - cod_averted - productivity_lost_averted) -> svim_cea
-  
-  return(svim_cea)
-}
-# across outbreaks
-svim_sum_across_outbreaks_by_runid <- 
-  function(sum_across_week_by_runid, case_trigger=FALSE) {
-    if (!case_trigger) {
-      all_outbreaks_by_runid <- sum_across_week_by_runid[, .(  
-        population = sum(population), 
-        vacc_dose = sum(ifelse(ori_occurred, population * vacc_cov, 0)),
-        c_ch_tot = sum(c_ch_tot, na.rm=T),
-        death_tot = sum(death_tot, na.rm=T),
-        death_averted_tot = sum(death_averted_tot, na.rm=T),
-        pct_reduc_death = 100 * sum(death_averted_tot, na.rm=T)/sum(death_tot, na.rm=T),
-        s_ch_averted_u5_tot = sum(s_ch_averted_u5_tot), # weekly to cumulative
-        s_ch_averted_5p_tot = sum(s_ch_averted_5p_tot),
-        s_ch_tot = sum(s_ch_tot),
-        s_ch_averted_tot = sum(s_ch_averted_tot),
-        pct_reduc_case = 100 * sum(s_ch_averted_tot) / sum(s_ch_tot),
-        outbk_dur = sum(outbk_dur),
-        outbk_dur_vacc = sum(outbk_dur_vacc),
-        dur_reduced = sum(outbk_dur) - sum(outbk_dur_vacc),
-        pct_reduc_dur = 100*((sum(outbk_dur) - sum(outbk_dur_vacc)) / sum(outbk_dur)),
-        case_averted_per_1000_OCV =
-          1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
-        death_averted_per_1000_OCV = 
-          1000 * sum(death_averted_tot, na.rm=T) /sum(vacc_dose),
-        cost_per_daly_averted = sum(net_cost, na.rm=T) / sum(daly_averted, na.rm=T),
-        cost_per_case_averted = sum(net_cost, na.rm=T) / sum(s_ch_averted_tot, na.rm=T),
-        cost_per_death_averted = sum(net_cost, na.rm=T) / sum(death_averted_tot, na.rm=T)),
-        by = .(runid, vacc_week, vacc_cov)] 
-    }
-    else if(case_trigger) {
-            all_outbreaks_by_runid <- sum_across_week_by_runid[, .(  
-        population = sum(population), 
-        vacc_dose = sum(ifelse(ori_occurred, population * vacc_cov, 0)),
-        c_ch_tot = sum(c_ch_tot, na.rm=T),
-        death_tot = sum(death_tot, na.rm=T),
-        death_averted_tot = sum(death_averted_tot, na.rm=T),
-        pct_reduc_death = 100 * sum(death_averted_tot, na.rm=T)/sum(death_tot, na.rm=T),
-        s_ch_averted_u5_tot = sum(s_ch_averted_u5_tot), # weekly to cumulative
-        s_ch_averted_5p_tot = sum(s_ch_averted_5p_tot),
-        s_ch_tot = sum(s_ch_tot),
-        s_ch_averted_tot = sum(s_ch_averted_tot),
-        pct_reduc_case = 100 * sum(s_ch_averted_tot) / sum(s_ch_tot),
-        outbk_dur = sum(outbk_dur),
-        outbk_dur_vacc = sum(outbk_dur_vacc),
-        dur_reduced = sum(outbk_dur) - sum(outbk_dur_vacc),
-        pct_reduc_dur =
-          100*((sum(outbk_dur) - sum(outbk_dur_vacc)) / sum(outbk_dur)),
-        case_averted_per_1000_OCV =
-          1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
-        death_averted_per_1000_OCV = 
-          1000 * sum(death_averted_tot, na.rm=T) /sum(vacc_dose),
-        cost_per_daly_averted = 
-          sum(net_cost, na.rm=T) / sum(daly_averted, na.rm=T),
-        cost_per_case_averted = 
-          sum(net_cost, na.rm=T) / sum(s_ch_averted_tot, na.rm=T),
-        cost_per_death_averted =
-          sum(net_cost, na.rm=T) / sum(death_averted_tot, na.rm=T)),
-        by = .(runid, case_trigger, vacc_cov)]
-    }
-  return(all_outbreaks_by_runid)
-}
-
-svim_summary_all_outbreaks <- function(d, case_trigger=FALSE){ 
-  if (!case_trigger) {
-  summary_all_outbreaks <- d[, 
-    .(population = population[1],
-      s_ch_tot = s_ch_tot[1],
-      c_ch_tot = c_ch_tot[1],
-      death_tot = death_tot[1],
-      outbk_dur = outbk_dur[1],
-      mean_vacc_dose = mean(vacc_dose),
-      mean_CA = mean(s_ch_averted_tot), 
-      q500_CA = quantile(s_ch_averted_tot, probs=0.5),
-      q025_CA = quantile(s_ch_averted_tot, probs=0.025),
-      q975_CA = quantile(s_ch_averted_tot, probs=0.975),
-      mean_DA = mean(death_averted_tot), 
-      q500_DA = quantile(death_averted_tot, probs=0.5),
-      q025_DA = quantile(death_averted_tot, probs=0.025),
-      q975_DA = quantile(death_averted_tot, probs=0.975),
-      means_CAPD = mean(case_averted_per_1000_OCV),
-      q500_CAPD = quantile(case_averted_per_1000_OCV, probs=0.5),
-      q025_CAPD = quantile(case_averted_per_1000_OCV, probs=0.025),
-      q975_CAPD = quantile(case_averted_per_1000_OCV, probs=0.975),
-      means_DAPD = mean(death_averted_per_1000_OCV),
-      q500_DAPD = quantile(death_averted_per_1000_OCV, probs=0.5),
-      q025_DAPD = quantile(death_averted_per_1000_OCV, probs=0.025),
-      q975_DAPD = quantile(death_averted_per_1000_OCV, probs=0.975),
-      mean_PCR = mean(pct_reduc_case),
-      q500_PCR = quantile(pct_reduc_case, probs=0.5),
-      q025_PCR = quantile(pct_reduc_case, probs=0.025),
-      q975_PCR = quantile(pct_reduc_case, probs=0.975),
-      mean_PDR = mean(pct_reduc_death),
-      q500_PDR = quantile(pct_reduc_death, probs=0.5),
-      q025_PDR = quantile(pct_reduc_death, probs=0.025),
-      q975_PDR = quantile(pct_reduc_death, probs=0.975),
-      mean_durR = mean(dur_reduced),
-      q500_DurR = quantile(dur_reduced, probs=0.5),
-      q025_DurR = quantile(dur_reduced, probs=0.025),
-      q975_DurR = quantile(dur_reduced, probs=0.975),
-      mean_PDurR = mean(pct_reduc_dur),
-      q500_PDurR = quantile(pct_reduc_dur, probs=0.5),
-      q025_PDurR = quantile(pct_reduc_dur, probs=0.025),
-      q975_PDurR = quantile(pct_reduc_dur, probs=0.975)),
-    by = .(vacc_week, vacc_cov)]
-  }
-  else if (case_trigger){
-    
-  summary_all_outbreaks <- d[, 
-    .(population = population[1],
-      s_ch_tot = s_ch_tot[1],
-      c_ch_tot = c_ch_tot[1],
-      death_tot = death_tot[1],
-      outbk_dur = outbk_dur[1],
-      mean_vacc_dose = mean(vacc_dose),
-      mean_CA = mean(s_ch_averted_tot), 
-      q500_CA = quantile(s_ch_averted_tot, probs=0.5),
-      q025_CA = quantile(s_ch_averted_tot, probs=0.025),
-      q975_CA = quantile(s_ch_averted_tot, probs=0.975),
-      mean_DA = mean(death_averted_tot), 
-      q500_DA = quantile(death_averted_tot, probs=0.5),
-      q025_DA = quantile(death_averted_tot, probs=0.025),
-      q975_DA = quantile(death_averted_tot, probs=0.975),
-      means_CAPD = mean(case_averted_per_1000_OCV),
-      q500_CAPD = quantile(case_averted_per_1000_OCV, probs=0.5),
-      q025_CAPD = quantile(case_averted_per_1000_OCV, probs=0.025),
-      q975_CAPD = quantile(case_averted_per_1000_OCV, probs=0.975),
-      means_DAPD = mean(death_averted_per_1000_OCV),
-      q500_DAPD = quantile(death_averted_per_1000_OCV, probs=0.5),
-      q025_DAPD = quantile(death_averted_per_1000_OCV, probs=0.025),
-      q975_DAPD = quantile(death_averted_per_1000_OCV, probs=0.975),
-      mean_PCR = mean(pct_reduc_case),
-      q500_PCR = quantile(pct_reduc_case, probs=0.5),
-      q025_PCR = quantile(pct_reduc_case, probs=0.025),
-      q975_PCR = quantile(pct_reduc_case, probs=0.975),
-      q500_PDR = quantile(pct_reduc_death, probs=0.5),
-      q025_PDR = quantile(pct_reduc_death, probs=0.025),
-      q975_PDR = quantile(pct_reduc_death, probs=0.975),
-      mean_dur_reduced = mean(dur_reduced),
-      q500_DR = quantile(dur_reduced, probs=0.5),
-      q025_DR = quantile(dur_reduced, probs=0.025),
-      q975_DR = quantile(dur_reduced, probs=0.975),
-      mean_PDR = mean(pct_reduc_dur),
-      q500_PDR = quantile(pct_reduc_dur, probs=0.5),
-      q025_PDR = quantile(pct_reduc_dur, probs=0.025),
-      q975_PDR = quantile(pct_reduc_dur, probs=0.975)),
-    by = .(case_trigger, vacc_cov)]
-  }
-  return(summary_all_outbreaks)
-}
-
-
-get_groud_id <- function(x, cutoff) {
-    id <- NA
-    for(i in (length(cutoff)-1):1) {
-      if(!is.na(x) & x >= cutoff[i]){
-        id <- i
-        break
-      }
-    }
-  return(id)
-}
-
-add_summary_stats <- function(svim, case_trigger=FALSE){
-  svim <- 
-    left_join(svim, 
-              ds[, c("location", "spatial_scale", "outbreak_pop", 
-                     "weekly_threshold_per_10e5", "total_s_ch", "total_c_ch", 
-                     "total_deaths", "duration_weeks", 
-  "peak_week_incidence", "time_to_peak_week", "peak_week_incidence_per_100percent", 
-  "peak_week_incidence_per_10e3", "mean_r0_1st_week", "area_per_1km2", 
-  "ar_per_10e3", "cfr_per_100percent", "id_outbreak")], by="id_outbreak")
-  
-  # paste0(format_num(nrow(svim)), " rows")
-  
-  probs <- seq(0,1,by=0.1)
-  ar_grp_cutoff <- quantile(ds$ar_per_10e3, probs=probs)
-  vc <- unique(svim$vacc_cov)[1] # just to extract one condition
-  if (!case_trigger) {
-    vw <- unique(svim$vacc_week)[1] # just to extract one condition
-    size_grp_cutoff <- quantile(svim[vacc_week == vw & vacc_cov == vc, s_ch_tot], probs=probs)
-    dur_grp_cutoff <- quantile(svim[vacc_week == vw & vacc_cov == vc, outbk_dur], probs=probs, na.rm=T)
-  }
-  else if (case_trigger) {
-    ct <- unique(svim$case_trigger)[1] # just to extract one condition
-    size_grp_cutoff <- quantile(svim[case_trigger == ct & vacc_cov == vc, s_ch_tot], probs=probs)
-    dur_grp_cutoff <- quantile(svim[case_trigger == ct & vacc_cov == vc, outbk_dur], probs=probs, na.rm=T)
-  }
-  
-  svim$size_grp <- sapply(svim$s_ch_tot, function(x) get_groud_id(x, size_grp_cutoff))
-  svim$dur_grp <- sapply(svim$outbk_dur, function(x) get_groud_id(x, dur_grp_cutoff))
-  svim$ar_grp <- sapply(svim$ar_per_10e3, function(x) get_groud_id(x, ar_grp_cutoff))
-  
-  return(svim)
-}
-
-add_cea_variables <- function(svim) {
-  svim$year <- data.table::year(as.Date(svim$start_date))
-  svim <- left_join(svim,
-            life_exp_data[, c("country","year", as.character(avg_age_inf))], 
-                     by = c("country","year"))
-  names(svim)[names(svim) == as.character(avg_age_inf)] <- "life_exp"
-  svim$life_exp <- as.numeric(svim$life_exp)
-  svim <- left_join(svim, 
-                    gdp_long[, c("country", "year", "gdp")],
-                    by = c("country", "year"))
-  
-  # sum(is.na(svim$gdp))
-  # paste0("GDP unavailable for: ")
-  # paste0(unique(svim[is.na(svim$gdp),]$country))
-  # 
-  svim <- left_join(svim, 
-                     workforce_long[, c("country", "year", "pct_workforce")],
-                     by = c("country", "year"))
-  return(svim)
-  # svim |> 
-  #   group_by(id_outbreak) |> 
-  #   summarize(pct_workforce = pct_workforce[1])
-  # sum(is.na(svim$pct_workforce))
-}
-
-add_cea_results <- function(svim) {
-  svim |>
-    mutate(yld = compute_yld(s_ch_tot, parms=parms),
-           yld_averted = compute_yld(s_ch_averted_tot, parms=parms),
-           yll = compute_yll(death_tot, life_exp, parms),
-           yll_averted = compute_yll(death_averted_tot, life_exp, parms), 
-           daly_averted = yld_averted + yll_averted,
-           coi_averted = s_ch_averted_tot * coi_per_patient,
-           cod_averted = death_averted_tot * gdp * life_exp,
-           productivity_lost_averted = 
-             s_ch_averted_tot * gdp * ((patient_workday_lost/365)*(pct_workforce/100) +
-                                   (caregiver_workday_lost/365)),
-           vacc_dose = ifelse(ori_occurred, population * vacc_cov * dose_regimen, 0),
-           vacc_cost = (vacc_cost_per_dose + vacc_delivery_cost) * vacc_dose,
-           net_cost = vacc_cost - coi_averted - cod_averted - productivity_lost_averted,
-           cost_per_daly_averted = 
-             ifelse(daly_averted > 0, net_cost / daly_averted, NA),
-           cost_per_case_averted = 
-             ifelse(s_ch_averted_tot > 0, net_cost / s_ch_averted_tot, NA),
-           cost_per_death_averted = 
-             ifelse(death_averted_tot > 0, net_cost / death_averted_tot, NA),
-           case_averted_per_1000_OCVs = 
-             ifelse(vacc_dose > 0, 1000 * s_ch_averted_tot / vacc_dose, NA),
-           death_averted_per_1000_OCVs = 
-             ifelse(vacc_dose > 0, 1000 * death_averted_tot / vacc_dose, NA),
-           cost_eff_threshold = 3 * gdp,
-           ratio_cost_per_daly_averted_to_gdp = 
-             ifelse(gdp > 0, cost_per_daly_averted / gdp, NA), 
-           cost_effective = 
-             ifelse(cost_per_daly_averted > cost_eff_threshold, 
-                                 FALSE, TRUE)) -> svim_cea
-  return(svim_cea)
-}
-```
 
 ## Cost-effectiveness analysis parameters
-```{r}
 # Disease symptoms, vaccine costs, etc.
-parms <- as.data.frame(data.table::fread("data/parameters.csv"))
+parms <- as.data.frame(fread("data/parameters.csv"))
 parms <- filter(parms, Disease == "Cholera")
 pr_asymp <- parms[parms$Parameter == "Prop_Asymptomatic", "Value"]
 pr_mild <- parms[parms$Parameter == "Prop_Mild", "Value"]
@@ -732,10 +161,8 @@ pr_tot <- pr_moderate + pr_severe
     pr_severe / pr_tot * (patient_cost_hosp + public_cost_hosp))
 
 avg_age_inf <- parms[parms$Parameter == "Mean_Age_Infection", "Value"]
-```
 
-Cost adjustment 2015 to 2023
-```{r}
+## Cost adjustment 2015 to 2023
 # consumer price index for cost adjustment (2015 to 2023)
 cpi_data <- read_xls("data/API_FP.CPI.TOTL.ZG_DS2_en_excel_v2_9839.xls")
 # another gdp_data used previously
@@ -750,7 +177,6 @@ gdp1 <- gdp_data2 %>%
   pivot_longer(cols = `2001`:`2023`, names_to = "year", values_to = "value")
 gdp1$year <- as.numeric(gdp1$year)
 gdp1 <- gdp1 %>% filter(year >= 2015 & year <= 2023)
-
 
 # Use % change in CPI for sub-Saharan African region, which is available
 
@@ -792,11 +218,8 @@ patient_cost_outpt <- patient_cost_outpt_adj
 public_cost_hosp <- public_cost_hosp_adj
 public_cost_outpt <- public_cost_outpt_adj
 vacc_delivery_cost <- vacc_delivery_cost_adj
-```
 
-Life expectancy and other cost data
-
-```{r}
+## Life expectancy and other cost data
 # the following gdp is different from the overall sub-Saharan Africa gdp
 # gdp_data2 <- read_xls("data/GDP_WorldBank.xls")
 names(life_exp_data)[names(life_exp_data) == "ISO3 Alpha-code"] <- "country"
@@ -821,70 +244,125 @@ gdp_long$year <- as.integer(gdp_long$year)
 
 ### Across study variation across or among outbreaks 
 ```{r}
-svim_df <- fread("outputs/svim_raw_20241113.csv")
-svim <- set_svim_raw_res(svim_df) # remove OCV-affected outbreaks, add population size, ..
-rm(svim_df)
-svim_sum_across_week_by_runid <- svim_sum_across_week(svim, case_trigger=FALSE)
+nruns <- 200
+batch_size <- 5
+batch_ids <- seq(1, nruns, by=batch_size)
+save_rds <- TRUE
 
-if (save_csv) {
-  fwrite(svim_sum_across_week_by_runid,
-    paste0("outputs/svim_sum_across_week_by_runid_", tstamp(), ".csv"))
-}
+for (vc in VC3) {
+  svim_df <- data.table()
+  cat("vacc_cov =" , vc, "\n")
+  for (i in 1:length(batch_ids)) {
+    cat("batch_id =" , batch_ids[i], "\n")
+    d <- rbindlist(read_rds(
+      paste0("G:/My Drive/Simulation/svim_week_list_vacc_week_batch_", batch_ids[i],
+             "_20241209.rds")))
+    d <- d[vacc_cov == vc]
+    svim_df <- rbindlist(list(svim_df, d)) 
+    rm(d)
+  }
+  
+  svim <- set_svim_raw_res(svim_df) # remove OCV-affected outbreaks, add population size, ..
+  rm(svim_df)
 
-svim_mean <- 
-  svim_mean_across_runid(svim_sum_across_week_by_runid, case_trigger=FALSE)
-svim_mean <- add_summary_stats(svim_mean)
-
-if (save_csv) {
-  fwrite(svim_mean,
-    paste0("outputs/svim_mean_across_runid_", tstamp(), ".csv"))
+  svim_sum_across_week_by_runid <- svim_sum_across_week(svim, case_trigger=FALSE)
+  if (save_rds) {
+    saveRDS(svim, 
+            paste0("outputs/svim_", vc, "_time_trigger_weekly_by_runid_", tstamp(), ".rds"))
+  }
+  rm(svim)
+  
+  if (save_rds) {
+    saveRDS(svim_sum_across_week_by_runid, 
+            paste0("outputs/svim_", vc, "_time_trigger_sum_across_week_by_runid_", tstamp(), ".rds"))
+    
+  }
+  
+  # svim_sum_across_week_by_runid <-
+  #   readRDS("outputs/svim_time_trigger_sum_across_week_by_runid_20241220.rds")
+  
+  svim_mean <- svim_mean_across_runid(svim_sum_across_week_by_runid)
+  
+  # cost-effectiveness analysis
+  svim_mean_cea <- add_cea_variables(svim_mean)
+  svim_mean_cea <- add_cea_results(svim_mean_cea)
+  
+  svim_sum_cea <- add_cea_variables(svim_sum_across_week_by_runid)
+  svim_sum_cea <- add_cea_results(svim_sum_cea)
+  
+  if (save_rds) {
+    saveRDS(svim_mean_cea,
+      paste0("outputs/svim_", vc, "_time_trigger_mean_cea_across_runid_", 
+             tstamp(), ".rds"))
+    saveRDS(svim_sum_cea,
+     paste0("outputs/svim_", vc, "_time_trigger_sum_cea_across_runid_", 
+            tstamp(), ".rds"))
+  }
 }
-# cost-effectiveness analysis
-svim_mean_cea <- add_cea_variables(svim_mean)
-svim_mean_cea <- add_cea_results(svim_mean_cea)
-if (save_csv) {
-  fwrite(svim_mean_cea,
-    paste0("outputs/svim_mean_cea_across_runid_", tstamp(), ".csv"))
-}
+rm(svim_sum_across_week_by_runid)
+rm(svim_mean)
+rm(svim_mean_cea)
+rm(svim_sum_cea)
 
 # case-trigger vaccination
-# svim_ct_df <- fread("outputs/svim_case_trigger_raw_20241113.csv")
-svim_ct_df <- fread("outputs/svim_case_trigger_raw_20241123.csv")
-svim_ct <- set_svim_raw_res(svim_ct_df)
-rm(svim_ct_df)
-svim_ct_sum_across_week_by_runid <- 
-  svim_sum_across_week(svim_ct, case_trigger=TRUE)
-rm(svim_ct)
-# case-triggered simulation occurred two separate runs and to need to combine
-svim_ct_df <- fread("outputs/svim_case_trigger_raw_20241113.csv")
-svim_ct2 <- set_svim_raw_res(svim_ct_df)
-rm(svim_ct_df)
-svim_ct_sum_across_week_by_runid2 <- 
-  svim_sum_across_week(svim_ct2, case_trigger=TRUE)
-rm(svim_ct2)
-
-svim_ct_sum_across_week_by_runid <-
-  rbind(svim_ct_sum_across_week_by_runid, svim_ct_sum_across_week_by_runid2)
-rm(svim_ct_sum_across_week_by_runid2)
-
-if (save_csv) {
-  fwrite(svim_ct_sum_across_week_by_runid,
-         paste0("outputs/svim_ct_sum_across_week_by_runid_", tstamp(), ".csv"))
-}
-svim_ct_mean <- 
-  svim_mean_across_runid(svim_ct_sum_across_week_by_runid, case_trigger=TRUE)
-svim_ct_mean <- add_summary_stats(svim_ct_mean)
-
-if (save_csv) {
-  fwrite(svim_ct_mean,
-    paste0("outputs/svim_ct_mean_across_runid_", tstamp(), ".csv"))
-}
-# cost-effectiveness analysis
-svim_ct_mean_cea <- add_cea_variables(svim_ct_mean)
-svim_ct_mean_cea <- add_cea_results(svim_ct_mean_cea)
-if (save_csv) {
-  fwrite(svim_ct_mean_cea,
-    paste0("outputs/svim_ct_mean_cea_across_runid_", tstamp(), ".csv"))
+for (vc in VC3) {
+  svim_df <- data.table()
+  cat("vacc_cov =" , vc, "\n")
+  for (i in 1:length(batch_ids)) {
+    cat("batch_id =" , batch_ids[i], "\n")
+    d <- rbindlist(read_rds(
+      paste0("G:/My Drive/Simulation/svim_case_trigger_week_list_batch_", batch_ids[i],
+             "_20241211.rds")))
+    d <- d[vacc_cov == vc]
+    svim_df <- rbindlist(list(svim_df, d)) 
+    rm(d)
+  }
+  
+  svim <- set_svim_raw_res(svim_df) # remove OCV-affected outbreaks, add population size, ..
+  rm(svim_df)
+  
+  svim_ct_sum_across_week_by_runid <- svim_sum_across_week(svim, case_trigger=TRUE)
+  if (save_rds) {
+    saveRDS(svim, 
+            paste0("outputs/svim_", vc, "_case_trigger_weekly_by_runid_", 
+                   tstamp(), ".rds"))
+  }
+  rm(svim)
+  
+  if (save_rds) {
+   saveRDS(svim_ct_sum_across_week_by_runid, 
+          paste0("outputs/svim_", vc, "_case_trigger_sum_across_week_by_runid_", 
+                 tstamp(), ".rds"))
+  }
+  # svim_ct_sum_across_week_by_runid <-
+  #   readRDS("outputs/svim_case_trigger_sum_across_week_by_runid_20241220.rds")
+  
+  svim_ct_mean <-
+    svim_mean_across_runid(svim_ct_sum_across_week_by_runid, case_trigger=TRUE)
+  
+  svim_ct_mean <- add_summary_stats(svim_ct_mean, case_trigger=TRUE)
+  
+  if (save_rds) {
+    saveRDS(svim_ct_mean,
+      paste0("outputs/svim_", vc, "_case_trigger_mean_across_runid_", tstamp(), ".rds"))
+  }
+  
+  # cost-effectiveness analysis
+  svim_ct_sum_cea <- add_cea_variables(svim_ct_sum_across_week_by_runid)
+  rm(svim_ct_sum_across_week_by_runid)
+  svim_ct_sum_cea <- add_cea_results(svim_ct_sum_cea)
+  svim_ct_mean_cea <- add_cea_variables(svim_ct_mean)
+  rm(svim_ct_mean)
+  svim_ct_mean_cea <- add_cea_results(svim_ct_mean_cea)
+  
+  if (save_rds) {
+    saveRDS(svim_ct_sum_cea,
+      paste0("outputs/svim_", vc, "_case_trigger_sum_cea_across_runid_", tstamp(), ".rds"))
+    saveRDS(svim_ct_mean_cea,
+      paste0("outputs/svim_", vc, "_case_trigger_mean_cea_across_runid_", tstamp(), ".rds"))
+  }
+  rm(svim_ct_sum_cea)
+  rm(svim_ct_mean_cea)
 }
 
 # pre-emptive vaccination
@@ -908,7 +386,6 @@ if (save_csv) {
     paste0("outputs/svim_pe_mean_cea_across_runid_", tstamp(), ".csv"))
 }
 
-
 svim_pe_sum_across_week_by_runid |> 
   filter(vacc_cov %in% VC3) |>
   group_by(vacc_cov) |>
@@ -925,12 +402,57 @@ svim_pe_mean |>
             q025_pcr = quantile(pct_reduc_case, probs=0.025),
             q975_pcr = quantile(pct_reduc_case, probs=0.975))
 
+# change 1000_OCV -> 1000_OCV
+# vs <- c(0.6, 0.75, 0.9)
+# for (v in vs) {
+#   fn1 <- paste0("outputs/svim_", v, "_time_trigger_sum_cea_across_runid_20241222.rds")
+#   d1 <- readRDS(fn1)
+#   nms1 <- names(d1)
+#   nms1[c(45,46)] <- c("case_averted_per_1000_OCV", "death_averted_per_1000_OCV")
+#   names(d1) <- nms1
+#   saveRDS(d1, fn1)
+#   
+#   fn2 <- paste0("outputs/svim_", v, "_time_trigger_mean_cea_across_runid_20241222.rds")
+#   d2 <- readRDS(fn2)
+#   nms2 <- names(d2)
+#   nms2[c(44,45)] <- c("case_averted_per_1000_OCV", "death_averted_per_1000_OCV")
+#   names(d2) <- nms2
+#   saveRDS(d2, fn2)
+# }
+# 
+# for (v in vs) {
+#   fn1 <- paste0("outputs/svim_", v, "_case_trigger_sum_cea_across_runid_20241223.rds")
+#   d1 <- readRDS(fn1)
+#   nms1 <- names(d1)
+#   if (nms1[45] == "case_averted_per_1000_OCVs" & 
+#       nms1[46] == "death_averted_per_1000_OCVs"){
+#     cat("45 & 46\n")
+#     nms1[c(45,46)] <- c("case_averted_per_1000_OCV", "death_averted_per_1000_OCV")
+#   }
+#   names(d1) <- nms1
+#   saveRDS(d1, fn1)
+#   
+#   fn2 <- paste0("outputs/svim_", v, "_case_trigger_mean_cea_across_runid_20241223.rds")
+#   d2 <- readRDS(fn2)
+#   nms2 <- names(d2)
+#   if (nms2[63] == "case_averted_per_1000_OCVs" & nms2[64] == "death_averted_per_1000_OCVs"){
+#     cat("63 & 64\n")
+#     nms2[c(63,64)] <- c("case_averted_per_1000_OCV", "death_averted_per_1000_OCV")
+#   }
+#   names(d2) <- nms2
+#   saveRDS(d2, fn2)
+# }
 ```
 
 ### All outbreaks collectively
 
 ```{r}
 svim_df <- fread("outputs/svim_raw_20241113.csv")
+# > nrow(svim_df)
+# [1] 136516800
+svim_df <- svim_df[start_date_outbreak <= YEAR]
+# > nrow(svim_df)
+# [1] 129408000
 svim <- set_svim_raw_res(svim_df)
 rm(svim_df)
 a <- svim_sum_across_week_all_outbreaks(svim)
@@ -941,107 +463,39 @@ acea <- add_cea_results_all_outbreaks(ace)
 svim_all_by_runid <- svim_sum_across_outbreaks_by_runid(acea)
 
 if (save_file) {
-  fwrite(svim_all_by_runid, 
-         paste0("outputs/svim_all_outbreaks_by_runid_", tstamp(), ".csv"))
+  # fwrite(svim_all_by_runid, 
+  #        paste0("outputs/svim_all_outbreaks_by_runid_", tstamp(), ".csv"))
   fwrite(svim_all_by_runid,
     paste0("outputs/svim_all_outbreaks_cea_across_runid_", tstamp(), ".csv"))
 }
-
-dat <- svim_all_by_runid |> filter(vacc_cov == VC & vacc_week == VW)
-
-# create tables for impact
-impact_tab2 <- function(dat, probs=c(0.025,0.25,0.5,0.75,0.975)) {
-  lst <- vector('list', 11)
-  lst[[1]] <- quantile(dat$pct_reduc_case, probs=probs, na.rm=T)
-  lst[[2]] <- quantile(dat$s_ch_averted_tot, probs=probs, na.rm=T)
-  lst[[3]] <- quantile(dat$pct_reduc_death, probs=probs, na.rm=T)
-  lst[[4]] <- quantile(dat$death_averted_tot, probs=probs, na.rm=T)
-  lst[[5]] <- quantile(dat$case_averted_per_1000_OCV, probs=probs, na.rm=T)
-  lst[[6]] <- quantile(dat$death_averted_per_1000_OCV, probs=probs, na.rm=T)
-  # dose required to avert a case
-  dat$dose_per_case_averted <- ifelse(dat$case_averted_per_1000_OCV > 0, 
-                                      1000/dat$case_averted_per_1000_OCV, NA)
-  dat$dose_per_death_averted <- ifelse(dat$death_averted_per_1000_OCV > 0,  
-                                       1000/dat$death_averted_per_1000_OCV, NA)
-  
-  lst[[7]] <- quantile(dat$dose_per_case_averted, probs=probs, na.rm=T)
-  lst[[8]] <- quantile(dat$dose_per_death_averted, probs=probs, na.rm=T)  
-  lst[[9]] <- quantile(dat$cost_per_case_averted, probs=probs, na.rm=T)
-  lst[[10]] <- quantile(dat$cost_per_death_averted, probs=probs, na.rm=T)
-  lst[[11]] <- quantile(dat$cost_per_daly_averted, probs=probs, na.rm=T)
-  
-  names(lst) <- c("PCR","CA","PDR","DA","CAPD","DAPD","DPCA","DPDA",
-                  "CPCA","CPDA","ICER")
-  
-  return(lst)
-}
-
-svim_all_by_runid |> filter(vacc_cov == VC & vacc_week == VW) -> dat
-d <- impact_tab2(dat=dat)
-
-create_table <- function(d) {
-  nrow <- 1
-  tab <- data.frame(
-      PCR = rep(NA,nrow),
-      CA = rep(NA,nrow),
-      PDR = rep(NA,nrow),
-      DA = rep(NA,nrow),
-      CAPD = rep(NA,nrow),
-      DAPD = rep(NA,nrow),
-      CPCA = rep(NA,nrow),
-      CPDA = rep(NA,nrow),
-      ICER = rep(NA,nrow))
-  i <- 1
-  tab$PCR[i] <- format_median_with_95(c(d$PCR[3],d$PCR[1],d$PCR[5]), digits=1)
-  tab$CA[i] <- format_median_with_95(c(d$CA[3],d$CA[1],d$CA[5]), digits=0)
-  tab$PDR[i] <- format_median_with_95(c(d$PDR[3],d$PDR[1],d$PDR[5]), digits=1)
-  tab$DA[i] <- format_median_with_95(c(d$DA[3],d$DA[1],d$DA[5]), digits=0)
-  tab$CAPD[i] <- format_median_with_95(c(d$CAPD[3],d$CAPD[1],d$CAPD[5]), digits=3)
-  tab$DAPD[i] <- format_median_with_95(c(d$DAPD[3],d$DAPD[1],d$DAPD[5]), digits=3)
-  tab$CPCA[i] <- format_median_with_95(c(d$CPCA[3],d$CPCA[1],d$CPCA[5]), digits=1)
-  tab$CPDA[i] <- format_median_with_95(c(d$CPDA[3],d$CPDA[1],d$CPDA[5]), digits=1)
-  tab$ICER[i] <- format_median_with_95(c(d$ICER[3],d$ICER[1],d$ICER[5]), digits=1)
-
-  return(tab)
-}
-
-vacc_weeks <- c(1, 5, 9, 13, 17)
-tab <- create_table(d)
-vcw <- expand.grid(VC3, vacc_weeks)
-names(vcw) <- c("Vaccine coverage", "Campaign timing (week)")
-df <- data.frame()
-for (i in 1:nrow(vcw)) {
-  svim_all_by_runid |> filter(vacc_cov == vcw[i,1] & vacc_week == vcw[i,2]) -> dat
-  d <- impact_tab2(dat=dat, probs=probs)
-  tab <- create_table(d)
-  df <- rbind(df, tab)
-}
-df <- cbind(vcw, df)
-if (save_csv) {
-  fwrite(df, paste0("outputs/svim_summary_all_outbreaks", tstamp(), ".csv"))
-}
 ```
 
-## Subsets of outbreaks
+## Outbreak subsets
 
 ```{r}
+# number of doses
+dat <- fread("data/OCV_Use_GTFCC_Dashboard.csv")
+dat <- clean_names(dat)
+# pop_size <- sum(dat[(type=="Reactive" & year < 2024), dose])
+pop_size <- sum(dat[(type=="Reactive" & year <= data.table::year(YEAR)), dose])
 svim <- fread("outputs/svim_mean_across_runid_20241122.csv")
-d <- svim |> filter(vacc_cov == VC, vacc_week == VW)
-d <-  d[,c("id_outbreak", "duration_weeks", "s_ch_tot", "ar_per_10e3", "population")]
-names(d) <- c("id_outbreak", "duration","cumulative_cases", "attack_rate", "population_size")
+d <- svim[(vacc_cov == VC & vacc_week == VW & start_date <= YEAR),
+          c("id_outbreak", "population", "duration_weeks", "s_ch_tot", "ar_per_10e3")]
 
-sum(d$attack_rate > 1000)
-d <- d[d$attack_rate <=1000, ] # >1000 is nonsensical attack rate definition = 
-methods <- c("random", "attack_rate","duration", "cases")
-outbreak_subsets <- vector('list',4)
+names(d) <- c("id_outbreak", "population_size", 
+              "duration", "cumulative_cases", "attack_rate")
+
+methods <- c("random", "attack_rate", "duration", "cases")
+outbreak_subsets <- vector('list', 4)
 names(outbreak_subsets) <- methods
-target_pop <- 135e6
+target_pop <- pop_size
+
 samp_size <- 200
-# seeds <- 1:samp_size
-max_attempts <- 1e5
+max_attempts <- 1e5 # parameters used to limit the number of times to search outbreaks
 set.seed(42)
 
 for(i in 1:length(methods)) {
+  cat("i =", methods[i], "\n")
   subset <- vector("list", samp_size)
   for (j in 1:length(subset)) {
     subset[[j]] <-
@@ -1049,19 +503,20 @@ for(i in 1:length(methods)) {
         outbreak_data = d, 
         target_population = target_pop,
         sampling_method = methods[i], 
-        # seed = seeds[j], 
         max_attempts = max_attempts)
   }
   outbreak_subsets[[i]] <- subset
 }
 
-saveRDS(outbreak_subsets, paste0("outputs/svim_outbreak_subsets_ids_", tstamp(), ".rds"))
+saveRDS(outbreak_subsets, paste0("outputs/svim_outbreak_subsets_ids_",
+                                 tstamp(), ".rds"))
 ```
 
 ### Subsets into a single dataframe
+
 ```{r}
 samp_size <- 200
-methods <- c("random", "attack_rate","duration", "cases")
+methods <- c("random", "attack_rate", "duration", "cases")
 lst <- vector("list", samp_size * length(methods))
 for (i in 1:length(methods)) {
   for (j in 1:samp_size){
@@ -1078,257 +533,57 @@ if (save_csv) {
 }
 ```
 
-### Subset summary statistics
+### Subset analysis - time-triggered
 
 ```{r}
-df <- fread("outputs/svim_outbreak_subsets_20241126.csv")
-unique(df$subset_method)
-# lvs <- c("random", "attack_rate", "duration", "cases")
-# df$subset_method <- factor(df$subset_method, 
-#                            levels=lvs)  
-  
-df |> # across outbreaks in a given data subset with subset_id
-  filter(vacc_cov == VC & vacc_week == VW) |> 
-  group_by(subset_method, subset_id) |> # across outbreak ids
-  summarize(sum_pop = sum(population),
-            sum_case = sum(s_ch_tot),
-            overall_ar = 1000 * sum_case / sum_pop,
-            sum_dur = sum(duration_weeks)) |> 
-  group_by(subset_method) |> # across subset_id 
-  summarize(median_pop = quantile(sum_pop, probs=c(0.5)), 
-            median_case = quantile(sum_case, probs=c(0.5)),
-            median_ar = quantile(overall_ar, probs=c(0.5)),
-            median_dur = quantile(sum_dur, probs=c(0.5)),
-            lower_pop = quantile(sum_pop, probs=c(0.025)), 
-            lower_case = quantile(sum_case, probs=c(0.025)),
-            lower_ar = quantile(overall_ar, probs=c(0.025)),
-            lower_dur = quantile(sum_dur, probs=c(0.025)),
-            upper_pop = quantile(sum_pop, probs=c(0.975)), 
-            upper_case = quantile(sum_case, probs=c(0.975)),
-            upper_ar = quantile(overall_ar, probs=c(0.975)),
-            upper_dur = quantile(sum_dur, probs=c(0.975))) -> dfs
-            
-tab <- data.frame(subset=dfs$subset_method,
-                  population=rep(NA,4), cases=rep(NA,4), 
-                  duration=rep(NA,4), attack_rate=rep(NA,4))
-for (i in 1:4) {
-  
-  tab$population[i] <- format_median_with_95(c(dfs$median_pop[i],
-                                          dfs$lower_pop[i],
-                                          dfs$upper_pop[i]), digit=0)
-  tab$cases[i] <- format_median_with_95(c(dfs$median_case[i],
-                                          dfs$lower_case[i],
-                                          dfs$upper_case[i]), digit=0)
-  tab$duration[i] <- format_median_with_95(c(dfs$median_dur[i],
-                                          dfs$lower_dur[i],
-                                          dfs$upper_dur[i]), digit=0)
-  tab$attack_rate[i] <- format_median_with_95(c(dfs$median_ar[i],
-                                          dfs$lower_ar[i],
-                                          dfs$upper_ar[i]), digit=2)
-}
-tab
-
-if (save_csv) {
-  fwrite(tab, paste0("outputs/subset_summary_stat_", tstamp(), ".csv"))
-}
-```
-
-### Subsets analysis - time-triggered
-```{r}
-subset_ids <- readRDS("outputs/svim_outbreak_subsets_ids_20241126.rds")
+# subset_ids <- readRDS("outputs/svim_outbreak_subsets_ids_20241126.rds")
+subset_ids <- readRDS("outputs/svim_outbreak_subsets_ids_20250225.rds")
 svim_df <- fread("outputs/svim_raw_20241113.csv")
 # create svim_df subsets
-# nm <- "attack_rate"
-# nm <- "duration"
-nm <- "cases"
+nms <- c("random", "cases", "attack_rate", "duration")
 df <- data.frame()
-# mean across runids and later compute statistics across subset ids
-for (i in 1:200) {
-  cat("i = ", i,"\n")
-  # d <- svim_df |> 
-  #   filter(id_outbreak %in% subset_ids$random[[i]]$sampled_data$id_outbreak)
-  # d <- svim_df |> 
-  #   filter(id_outbreak %in% subset_ids$attack_rate[[i]]$sampled_data$id_outbreak)
-  # d <- svim_df[id_outbreak %in% subset_ids$duration[[i]]$sampled_data$id_outbreak]  
-  d <- svim_df[id_outbreak %in% subset_ids$cases[[i]]$sampled_data$id_outbreak]  
-  svim <- set_svim_raw_res(d)
-  rm(d)
-  a <- svim_sum_across_week_all_outbreaks(svim)
-  rm(svim)
-  as <- add_summary_stats(a)
-  ace <- add_cea_variables(as)
-  acea <- add_cea_results_all_outbreaks(ace)
-  #a_ <- svim_sum_across_week(svim) # the above version a lot faster
-  svim_subset_by_runid <- svim_sum_across_outbreaks_by_runid(acea)
-  # mean across runid
-  # svim_subset_by_runid |> 
-  #   group_by(vacc_cov, vacc_week) |> 
-  #   summarise(across(population:cost_per_death_averted, ~ mean(.x, na.rm = TRUE))) ->
-  #   svim_mean1
-  
-  svim_mean <- svim_subset_by_runid[, lapply(.SD, mean), by = .(vacc_cov, vacc_week),
-          .SDcols = population:cost_per_death_averted]
-  
-  rm(svim_subset_by_runid)
-  svim_mean$subset_id <- i
-  df <- rbind(df, svim_mean)
-}
-# fwrite(df, paste0("outputs/svim_mean_random_subset_ids_", tstamp(), ".csv"))
-# fwrite(df, paste0("outputs/svim_mean_attack_rate_subset_ids_", tstamp(), ".csv"))
-fwrite(df, paste0("outputs/svim_mean_", nm, "_subset_ids_", tstamp(), ".csv"))
-
-svim_means <- df
-
-# tab <- create_table(d)
-vacc_weeks <- c(1, 5, 9, 13, 17)
-vcw <- expand.grid(VC3, vacc_weeks)
-names(vcw) <- c("Vaccine coverage", "Campaign timing (week)")
-df <- data.frame()
-for (i in 1:nrow(vcw)) {
-  svim_means[vacc_cov == vcw[i,1] & vacc_week == vcw[i,2]] -> dat
-  d <- impact_tab2(dat=dat, probs=PROBS)
-  tab <- create_table(d)
-  df <- rbind(df, tab)
-}
-df <- cbind(vcw, df)
-df$subset_method <- nm
-
-if (save_csv) {
-  fwrite(df, paste0("outputs/svim_summary_", nm, "_subsets_", tstamp(), ".csv"))
-}
-
-df1 <- fread("outputs/svim_mean_random_subset_ids_20241126.csv")
-d1 <- filter(df1, vacc_cov == VC, vacc_week == VW)
-df2 <- fread("outputs/svim_mean_attack_rate_subset_ids_20241126.csv")
-d2 <- filter(df2, vacc_cov == VC, vacc_week == VW)
-df3 <- fread("outputs/svim_mean_cases_subset_ids_20241126.csv")
-d3 <- filter(df3, vacc_cov == VC, vacc_week == VW)
-df4 <- fread("outputs/svim_mean_duration_subset_ids_20241126.csv")
-d4 <- filter(df4, vacc_cov == VC, vacc_week == VW)
-
-d1 <- impact_tab2(dat=d1, probs=PROBS)
-tab1 <- create_table(d1)
-d2 <- impact_tab2(dat=d2, probs=PROBS)
-tab2 <- create_table(d2)
-d3 <- impact_tab2(dat=d3, probs=PROBS)
-tab3 <- create_table(d3)
-d4 <- impact_tab2(dat=d4, probs=PROBS)
-tab4 <- create_table(d4)
-
-tab <- rbind(tab1, tab2, tab3, tab4)
-tab$subset_method <- c("random","attack_rate","cases","duration")
-if (save_csv) {
-  fwrite(tab, paste0("outputs/svim_summary_subsets_", tstamp(), ".csv"))
-}
-# d <- impact_tab2(dat=df, probs=PROBS)
-# tab <- create_table(d)
-```
-
-### Subsets analysis - case-triggered
-```{r}
-subset_ids <- readRDS("outputs/svim_outbreak_subsets_ids_20241126.rds")
-svim_df <- fread("outputs/svim_case_trigger_raw_20241113.csv")
-nsample <- 200
-# create svim_df subsets
-nms <- c("random", "attack_rate", "duration", "cases")
+# mean across runid's and later compute statistics across subset id's
 for (nm in nms) {
-  cat("subset:", nm, "\n")
-  df <- data.frame()
-  # mean across runids and later compute statistics across subset ids
-  for (i in 1:nsample) {
-    cat("i =", i,"\n")
+  for (i in 1:200) {
+    cat("i = ", i,"\n")
     if (nm == "random") {
       d <- svim_df[id_outbreak %in% subset_ids$random[[i]]$sampled_data$id_outbreak]
     }
-    else if (nm == "attack_rate") {
-     d <- svim_df[id_outbreak %in% subset_ids$attack_rate[[i]]$sampled_data$id_outbreak]
+    else if(nm == "attack_rate"){
+      d <- svim_df[id_outbreak %in% subset_ids$attack_rate[[i]]$sampled_data$id_outbreak]
     }
-    else if (nm == "duration") {
-     d <- svim_df[id_outbreak %in% subset_ids$duration[[i]]$sampled_data$id_outbreak] 
+    else if(nm == "duration") {
+      d <- svim_df[id_outbreak %in% subset_ids$duration[[i]]$sampled_data$id_outbreak]  
     }
-    else if (nm == "cases") {
-      d <- svim_df[id_outbreak %in% subset_ids$cases[[i]]$sampled_data$id_outbreak] 
+    else if(nm == "cases") {
+      d <- svim_df[id_outbreak %in% subset_ids$cases[[i]]$sampled_data$id_outbreak]  
     }
-    #  
-    #  
+    
     svim <- set_svim_raw_res(d)
     rm(d)
-    a <- svim_sum_across_week_all_outbreaks(svim, case_trigger=TRUE)
+    a <- svim_sum_across_week_all_outbreaks(svim)
     rm(svim)
-    as <- add_summary_stats(a, case_trigger=TRUE)
+    as <- add_summary_stats(a)
+    rm(a)
     ace <- add_cea_variables(as)
+    rm(as)
     acea <- add_cea_results_all_outbreaks(ace)
-    #a_ <- svim_sum_across_week(svim) # the above version a lot faster
-    svim_subset_by_runid <- svim_sum_across_outbreaks_by_runid(acea, case_trigger=TRUE)
-    rm(acea)
-    # mean across runid
-    # svim_subset_by_runid |> 
-    #   group_by(vacc_cov, vacc_week) |> 
-    #   summarise(across(population:cost_per_death_averted, ~ mean(.x, na.rm = TRUE))) ->
-    #   svim_mean1
+    rm(ace)
+    # we could either pick one runid or mean across multiple ids
+    svim_subset_by_runid <- svim_sum_across_outbreaks_by_runid(acea)
     
     svim_mean <- 
       svim_subset_by_runid[, lapply(.SD, mean), 
-                           by = .(vacc_cov, case_trigger),
-                           .SDcols = population:cost_per_death_averted]
+                           by=.(vacc_cov, vacc_week),
+                           .SDcols=population:cost_per_death_averted]
     
     rm(svim_subset_by_runid)
     svim_mean$subset_id <- i
     df <- rbind(df, svim_mean)
-    rm(svim_mean)
   }
-  
-  fwrite(df, paste0("outputs/svim_ct_mean_", nm, "_subset_ids_", tstamp(), ".csv"))
-  rm(df)
+  fwrite(df, paste0("outputs/svim_mean_", nm, "_subset_ids_", tstamp(), ".csv"))
 }
-
-svim_means <- df
-
-# tab <- create_table(d)
-case_triggers <- c(5, 9, 13, 17)
-vcw <- expand.grid(VC3, case_triggers)
-names(vcw) <- c("Vaccine coverage", "Case trigger")
-df <- data.frame()
-for (i in 1:nrow(vcw)) {
-  svim_means[vacc_cov == vcw[i,1] & case_trigger == vcw[i,2]] -> dat
-  d <- impact_tab2(dat=dat, probs=PROBS)
-  tab <- create_table(d)
-  df <- rbind(df, tab)
-}
-df <- cbind(vcw, df)
-df$subset_method <- nm
-
-if (save_csv) {
-  fwrite(df, paste0("outputs/svim_summary_", nm, "_subsets_", tstamp(), ".csv"))
-}
-
-df1 <- fread("outputs/svim_mean_random_subset_ids_20241126.csv")
-d1 <- filter(df1, vacc_cov == VC, vacc_week == VW)
-df2 <- fread("outputs/svim_mean_attack_rate_subset_ids_20241126.csv")
-d2 <- filter(df2, vacc_cov == VC, vacc_week == VW)
-df3 <- fread("outputs/svim_mean_cases_subset_ids_20241126.csv")
-d3 <- filter(df3, vacc_cov == VC, vacc_week == VW)
-df4 <- fread("outputs/svim_mean_duration_subset_ids_20241126.csv")
-d4 <- filter(df4, vacc_cov == VC, vacc_week == VW)
-
-d1 <- impact_tab2(dat=d1, probs=PROBS)
-tab1 <- create_table(d1)
-d2 <- impact_tab2(dat=d2, probs=PROBS)
-tab2 <- create_table(d2)
-d3 <- impact_tab2(dat=d3, probs=PROBS)
-tab3 <- create_table(d3)
-d4 <- impact_tab2(dat=d4, probs=PROBS)
-tab4 <- create_table(d4)
-
-tab <- rbind(tab1, tab2, tab3, tab4)
-tab$subset_method <- c("random","attack_rate","cases","duration")
-if (save_csv) {
-  fwrite(tab, paste0("outputs/svim_summary_subsets_", tstamp(), ".csv"))
-}
-# d <- impact_tab2(dat=df, probs=PROBS)
-# tab <- create_table(d)
 ```
-
 
 
 ## Vaccine impact simulation
@@ -1411,7 +666,7 @@ for (batch_id in seq(1, nruns, by = batch_size)) {
 }
 ```
 
-Parallel pre-emptive vaccination `run_vacc_impact_outbreak_weekly`
+Parallel preemptive vaccination `run_vacc_impact_outbreak_weekly`
 
 ```{r, eval=FALSE}
 library(doParallel)
@@ -1479,527 +734,4 @@ svim_df <- rbindlist(lst)
 # table(svim_df$ori_occurred)
 # table(svim_df$week_delay_to_vacc_effect)
 fwrite(svim_df, paste0("outputs/svim_preemptive_raw_", tstamp(), ".csv"))
-```
-
-## Comparison with the dynamic model
-
-Identify outbreaks (`id_outbreak`) that led to poor fits
-1. Parameter values are too close to the bound 
-2. The number of data points are fewer than 8, two times the number of parameters to be estimated (i.e., 4)
-3. Modeled trajectories didn't capture the dynamics of outbreaks
-```{r}
-fit <- fread("julia/outputs/fit_4p_fA010_20241203T18.csv")
-ndata <- fread("julia/outputs/fit_params_ndata_20241206T08.csv")
-fit <- left_join(fit, ndata, by=c("data_id", "id_outbreak"))
-er <- 0.01 # error factor 5%
-fit$est_close_to_bounds <- ifelse(fit$s0 < 1*er | fit$s0 > 1*(1-er) | fit$R0 > 30*(1-er), 1, 0) 
-fit$ndata_low <- ifelse(fit$ndata < 8, 1, 0)
-
-ids_est_close_to_bounds <- fit[est_close_to_bounds == 1, id_outbreak]
-ids_ndata_low <- fit[ndata_low == 1, id_outbreak]  
-
-# vaccine efficacy
-fit_vis <-  readxl::read_xlsx("julia/outputs/vacc_fit_params_20241203T2122.xlsx")
-fit_vis$Good_Fit_Visual <- ifelse(is.na(fit_vis$Good_Fit_Visual), 1, 0)
-fit_vis |> 
-  filter(Good_Fit_Visual == 0) |>
-  pull(id_outbreak) -> ids_poor_fit_visual
-
-# ids_robust <- unique(c(ids1 %in%, ids2))
-ids_poor_fit <- unique(c(ids_est_close_to_bounds, ids_ndata_low, ids_poor_fit_visual))
-ids_robust <- unique(fit$id_outbreak)[!(unique(fit$id_outbreak) %in% ids_poor_fit)]
-```
-
-```{r}
-svim_pe_sum <- fread("outputs/svim_pe_sum_across_week_by_runid_20241203.csv")
-svim_pe_mean <- fread("outputs/svim_pe_mean_across_runid_20241203.csv")
-# summary across id_outbreak and runid's
-svim_pe_q <- svim_pe_sum |> 
-  filter(vacc_cov == 0.75) |> 
-  summarize(q025 = quantile(pct_reduc_case, probs=0.025),
-            q250 = quantile(pct_reduc_case, probs=0.25),
-            q500 = quantile(pct_reduc_case, probs=0.5),
-            q750 = quantile(pct_reduc_case, probs=0.75),
-            q975 = quantile(pct_reduc_case, probs=0.975))
-
-svim_pe_sum_vc <- filter(svim_pe_sum, vacc_cov == 0.75)
-   
-d <- fread("julia/outputs/vacc_fit_params_20241203T2122.csv")
-
-d$ove_vc60 <- (1 - d$CI_VC60 / d$CI_novacc) * 100
-d$ove_vc75 <- (1 - d$CI_VC75 / d$CI_novacc) * 100
-d$ove_vc90 <- (1 - d$CI_VC90 / d$CI_novacc) * 100
-d_ <- d[, c("data_id","id_outbreak","ove_vc60", "ove_vc75", "ove_vc90")]
-names(d_) <- c("data_id","id_outbreak", 0.6, 0.75, 0.9)
-dlong <- pivot_longer(d_, cols=-c(data_id, id_outbreak))
-names(dlong) <- c("data_id", "id_outbreak", "vacc_cov", "pct_reduc_case_dynamic")
-dlong$vacc_cov <- as.numeric(dlong$vacc_cov)
-
-dd <- left_join(dlong, 
-                svim_pe_mean[,c("id_outbreak","vacc_cov", "vacc_week", "pct_reduc_case")],
-                by=c("id_outbreak","vacc_cov"))
-
-d2 <- readxl::read_xlsx("julia/outputs/vacc_fit_params_20241203T2122.xlsx")
-d2$Good_Fit_Visual <- ifelse(is.na(d2$Good_Fit_Visual), 1, 0)
-d2 |> filter(Good_Fit_Visual ==1) |> pull(id_outbreak) -> ids
-dd |> 
-  group_by(as.factor(vacc_cov)) |>
-  filter(id_outbreak %in% ids) |>
-  summarize(mean_pcr = mean(pct_reduc_case),
-            mean_pcr_dynamic = mean(pct_reduc_case_dynamic)) -> x
-x
-dd |> 
-  filter(vacc_cov == 0.75) |>
-  filter(id_outbreak %in% ids) |> 
-  ggplot()+
-  geom_boxplot(aes(x="dynamic",y=pct_reduc_case_dynamic))+
-    stat_summary(aes(x="dynamic",y=pct_reduc_case_dynamic), 
-               fun=mean, colour="firebrick", geom="point", 
-               shape=18, size=3, show.legend=FALSE)+
-  geom_boxplot(data=svim_pe_sum_vc, 
-               aes(x="static",y=pct_reduc_case))+
-  stat_summary(data=svim_pe_sum_vc,
-               aes(x="static",y=pct_reduc_case), 
-               fun=mean, colour="firebrick", geom="point", 
-               shape=18, size=3, show.legend=FALSE)+
-  # geom_hline(aes(yintercept=pct_reduc_case[1]), color="forestgreen", 
-  #            linewidth=1, linetype ="dotted")+
-  theme_light()+
-  labs(x="", y="Case reduction (%)")
-
-```
-
-Direct, indirect, total, and overall vaccine effectiveness computation for
-the static and the dynamic model
-```{r}
-# static model
-# effetiveness computations are based on the definition
-# DVE, IVE: parameter values
-# TVE = 1 - (1-DVE)(1-IVE)
-# OVE = 1 - (vc*(1-DVE)(1-IVE) + (1-vc)*(1-IVE))
-
-setDT(outbreak_data)
-age_dist <- pop_by_age_wpp
-# extract outbreak data, can be done by including only the first rwo
-od <- outbreak_data[week == 1]
-od$prop_u5 <- NA
-for (i in 1:nrow(od)) {
-  od$prop_u5[i] <- 
-    age_dist[(age_dist$`ISO3 Alpha-code` == od$country[i] &
-                as.character(age_dist$Year) == as.character(od$year[i])), "prop_u5"]
-}
-
-vacc_par <- params[,c("vacc_effect_direct_u5", "vacc_effect_direct_5p", "vacc_effect_indirect_id")]
-increment <- 0.02 # increment used in posterior predictive values
-vacc_par$ive <- as.numeric(ive_data[vacc_par$vacc_effect_indirect_id, (round(vc/increment)+1)])
-
-lst <- vector('list', nrow(od))
-vacc_eff_static <- data.frame()
-vcs <- c(0.6, 0.75, 0.9)
-nsample <- 200
-for (vc in vcs) {
-  for (i in 1:nrow(od)) {
-    d <- od[i, ]
-    d <- rbindlist(lapply(1:100, function(x) rbind(d,d)))
-    d$runid <- NA
-    d$vacc_cov <- vc
-    d$ve_u5 <- NA
-    d$ve_5p <- NA
-    d$dve <- NA
-    d$ive <- NA
-    d$tve <- NA
-    d$ove <- NA
-    
-    for (j in 1:nsample) {
-      d$runid[j] <- j
-      d$ve_u5[j] <- vacc_par$vacc_effect_direct_u5[j]
-      d$ve_5p[j] <- vacc_par$vacc_effect_direct_5p[j]
-      d$dve[j] <- d$prop_u5[j]*d$ve_u5[j] + (1-d$prop_u5[j])*d$ve_5p[j]
-      d$ive[j] <- vacc_par$ive[j]
-      d$tve[j] <- 1 - (1-d$dve[j])*(1-d$ive[j])
-      d$ove[j] <- 1 - (vc*(1-d$dve[j])*(1-d$ive[j]) + (1-vc)*(1-d$ive[j]))
-    }
-    lst[[i]] <- d
-  }
-  vacc_eff_static <- rbindlist(list(vacc_eff_static, rbindlist(lst)))
-}
-vacc_eff_static
-
-# dynamic model
-# effectiveness computations are based on the modeled incidence 
-# d <- fread("julia/outputs/vacc_fit_params_by_vacc_state_20241204T15.csv")
-# d <- fread("julia/outputs/vacc_fit_params_by_vacc_state_20241205T15.csv")
-# d$dve_vc60_ <- 1 - (d$CI_VC60_vacc/vc)/(d$CI_VC60_novacc/(1-vc))
-# d$ive_vc60_ <- 1 - (d$CI_VC60_novacc/(1-vc)) /(d$CI_novacc)
-# d$tve_vc60_ <- 1 - (d$CI_VC60_vacc/vc) /(d$CI_novacc)
-# d$ove_vc60_ <- 1 - (d$CI_VC60_vacc + d$CI_VC60_novacc)/(d$CI_novacc)
-
-d <- fread("julia/outputs/vacc_fit_params_by_vacc_state_20241206T08.csv")
-# d <- fread("julia/outputs/vacc_fit_params_by_vacc_state_20241205T17.csv")
-vcs <- c(0.6, 0.75, 0.9)
-
-lst <- vector('list', length(vcs))
-for (i in 1:length(vcs)) {
-  vc <- vcs[i]
-  df <- d[, c("runid","data_id","id_outbreak")]
-  v <- round(100*vc, digits=0)
-  df$vacc_cov <- vc
-  df$dve <- 1 - (d[[paste0("CI_VC", v, "_vacc")]]/vc)/(d[[paste0("CI_VC", v, "_novacc")]]/(1-vc))
-  df$ive <- 1 - (d[[paste0("CI_VC", v, "_novacc")]]/(1-vc))/d[[paste0("CI_novacc")]]
-  df$tve <- 1 - (d[[paste0("CI_VC", v, "_vacc")]]/vc)/d[[paste0("CI_novacc")]]
-  df$ove <- 1 - (d[[paste0("CI_VC", v, "_vacc")]] + d[[paste0("CI_VC", v, "_novacc")]])/d[[paste0("CI_novacc")]]
-  
-  lst[[i]] <- df
-}
-vacc_eff_dynamic <- rbindlist(lst)
-
-# nrow(vacc_eff_dynamic)/3/200
-# [1] 1406
-# nrow(vacc_eff_static)/3/200
-# [1] 1406
-```
-
-
-```{r}
-# dve_cutoff <- 0.4
-d1 <- vacc_eff_dynamic[,c("runid","id_outbreak","vacc_cov","dve","ive","tve","ove")]
-d1$model <- "Dynamic"
-# d1 <- filter(d1, d1$dve > dve_cutoff)
-ids_low_dve <- d1 |> filter(dve < dve_cutoff) |> pull(id_outbreak) |> unique()
-
-length(unique(d1$id_outbreak))
-d2 <- vacc_eff_static[,c("runid","id_outbreak","vacc_cov","dve","ive","tve","ove")]
-d2$model <- "Static"
-d <- rbind(d1,d2) 
-
-dlong <- pivot_longer(d, cols=c("dve","ive","tve","ove"), 
-                      names_to = "vacc_eff")
-dlong$vacc_eff <- as.factor(dlong$vacc_eff)
-# levels(dlong$vacc_eff)
-levels(dlong$vacc_eff) <- 
-  c("Direct VE", "Indirect VE", "Overall VE", "Total VE")
-dlong$value <- dlong$value * 100
-
-vc <- 0.75
-ids_all <- unique(fit$id_outbreak)
-# ids_est_close_to_bounds
-# ids_ndata_low
-# ids_poor_fit_visual
-
-# ids_robust <- ids_all[!(ids_all%in% ids_est_close_to_bounds)]
-# ids_robust <- ids_all[!(ids_all%in% ids_ndata_low)]
-ids_poor <- unique(c(ids_est_close_to_bounds, ids_poor_fit_visual, ids_ndata_low))
-ids_robust <- ids_all[!(ids_all%in% ids_poor)]
-
-levels(dlong$name)
-dlong |> 
-  filter(vacc_cov == vc) |>
-  # filter(runid == 1) |>
-  filter(id_outbreak %in% ids_robust) |> 
-  ggplot()+
-  geom_boxplot(aes(x=model, y=value))+
-  stat_summary(aes(x=model, y=value), 
-               fun=mean, colour="firebrick", geom="point", 
-               shape=18, size=3, show.legend=FALSE)+
-  facet_wrap(~vacc_eff)+
-  theme_light()+
-  theme_tight()+
-  labs(x="", y="Vaccine effectiveness") -> plt
-
-
-# ggsave(paste0("plots/vacc_eff_4_typese_", tstamp(), ".pdf"), plt,
-#          device = cairo_pdf, width=fgw2, height=fgw2, units="mm")
-  
-# vacc_eff_dynamic |> 
-#   filter(vacc_cov == vc) |>
-#   filter(id_outbreak %in% ids) |> 
-#   ggplot()+
-#   geom_boxplot(aes(x="dynamic", y=dve))+
-#   stat_summary(aes(x="dynamic",y=dve), 
-#                fun=mean, colour="firebrick", geom="point", 
-#                shape=18, size=3, show.legend=FALSE)+
-#   geom_boxplot(data=filter(vacc_eff_static, vacc_cov==0.75), 
-#                aes(x="static",y=dve))+
-#   stat_summary(data=filter(vacc_eff_static, vacc_cov==0.75),
-#                aes(x="static",y=dve), 
-#                fun=mean, colour="firebrick", geom="point", 
-#                shape=18, size=3, show.legend=FALSE)+
-#   theme_light()+
-#   labs(x="", y="Case reduction (%)", title="Direct VE")
-# 
-# 
-# vacc_eff_dynamic |> 
-#   filter(vacc_cov == vc) |>
-#   filter(id_outbreak %in% ids) |> 
-#   ggplot()+
-#   geom_boxplot(aes(x="dynamic", y=ive))+
-#   stat_summary(aes(x="dynamic",y=ive), 
-#                fun=mean, colour="firebrick", geom="point", 
-#                shape=18, size=3, show.legend=FALSE)+
-#   geom_boxplot(data=filter(vacc_eff_static, vacc_cov==0.75), 
-#                aes(x="static",y=ive))+
-#   stat_summary(data=filter(vacc_eff_static, vacc_cov==0.75),
-#                aes(x="static",y=ive), 
-#                fun=mean, colour="firebrick", geom="point", 
-#                shape=18, size=3, show.legend=FALSE)+
-#   theme_light()+
-#   labs(x="", y="Case reduction (%)", title="Indirect VE")
-# 
-# 
-# vacc_eff_dynamic |> 
-#   filter(vacc_cov == 0.75) |>
-#   filter(id_outbreak %in% ids) |> 
-#   ggplot()+
-#   geom_boxplot(aes(x="dynamic", y=tve))+
-#   stat_summary(aes(x="dynamic",y=tve), 
-#                fun=mean, colour="firebrick", geom="point", 
-#                shape=18, size=3, show.legend=FALSE)+
-#   geom_boxplot(data=filter(vacc_eff_static, vacc_cov==0.75), 
-#                aes(x="static",y=tve))+
-#   stat_summary(data=filter(vacc_eff_static, vacc_cov==0.75),
-#                aes(x="static",y=tve), 
-#                fun=mean, colour="firebrick", geom="point", 
-#                shape=18, size=3, show.legend=FALSE)+
-#   theme_light()+
-#   labs(x="", y="Case reduction (%)", title="Total VE")
-
-```
-
-
-## Likelihood of an outbreak size given the cumulative cases
-Then, we can explore the impact of an outbreak given that
-```{r}
-svim <- fread("outputs/svim_mean_across_runid_20241126.csv")
-svim_ct <- fread("outputs/svim_ct_mean_across_runid_20241126.csv")
-svim_pe <- fread("outputs/svim_pe_mean_across_runid_20241126.csv")
-
-svim_cea <- fread("outputs/svim_mean_cea_across_runid_20241126.csv")
-svim_ct_cea <- fread("outputs/svim_ct_mean_cea_across_runid_20241126.csv")
-
-subset_random <- fread("outputs/svim_mean_random_subset_ids_20241126.csv")
-subset_attack_rate <- fread("outputs/svim_mean_attack_rate_subset_ids_20241126.csv")
-subset_cases <- fread("outputs/svim_mean_cases_subset_ids_20241126.csv")
-subset_duration <- fread("outputs/svim_mean_duration_subset_ids_20241126.csv")
-```
-
-
-```{r}
-# outbreak_data |>
-#   group_by(week) |>
-#   summarize(s_ch_tot = sum(s_ch)) |> 
-#   ggplot(aes(week, s_ch_tot))+
-#   geom_line() +
-#   theme_minimal()+
-#   scale_x_log10()
-# 
-# 
-# outbreak_data |>
-#   ggplot(aes(week, s_ch, group=id_outbreak))+
-#   geom_line(color="grey30") +
-#   theme_minimal()+
-#   scale_x_log10()+
-#   scale_y_log10()
-
-outbreak_data |>
-  group_by(week) |>
-  summarize(s_ch_tot = sum(s_ch)) -> data_tot 
-
-outbreak_data |>
-  filter(week %in% seq(1, 15, 2)) |> 
-  ggplot(aes(x=s_ch+1, y=as.factor(week))) +
-  geom_density_ridges(fill="steelblue", alpha=0.5) +
-  geom_point(data=filter(data_tot, week %in% seq(1, 15, 2)), 
-             aes(cumsum(s_ch_tot), as.factor(week)), shape=15) +
-  geom_line(data=filter(data_tot, week %in% seq(1, 15, 2)), 
-            aes(cumsum(s_ch_tot), as.factor(week)),
-            linetype="solid", linewidth=0.7, group=1)+
-  scale_x_log10() +
-  coord_flip() +
-  geom_line(data=filter(data_tot, week %in% seq(1, 15, 2)), 
-            aes(s_ch_tot, as.factor(week)), 
-            linetype="dotted", linewidth=0.7, group=1) +
-  geom_point(data=filter(data_tot, week %in% seq(1, 15, 2)), 
-             aes(s_ch_tot, as.factor(week)), shape=15) +
-  theme_light()+
-  theme_tight()+
-  labs(y="Week", x="Suspected cases")
-
-
-# outbreak_data[, cum_s_ch := cumsum(s_ch), by="id_outbreak"]
-# cum_cases <- c(100, 200, 300)
-# length(unique(outbreak_data$id_outbreak))
-# outbreak_data |>
-#   group_by(id_outbreak) |>
-#   filter(max(cum_s_ch) > 100) -> d
-# 
-# length(unique(d$id_outbreak))
-
-target_case <-  c(5,40,80,120,160,200,240,280)
-lst <- vector('list', length(target_case))
-
-for (i in 1:length(target_case)) {
-  outbreak_data |>
-    group_by(id_outbreak) |>
-    filter(max(cum_s_ch) > target_case[i]) |>
-    ungroup() |>
-    filter(cum_s_ch >= target_case[i]) |>
-    group_by(id_outbreak) |>
-    summarize(min_week = min(week)) |>
-    pull(min_week) -> lst[[i]]
-}
-
-df <- data.frame()
-for (i in 1:length(target_case)) {
-  d <- data.frame(cumul_case = target_case[i], week = lst[[i]])
-  df <- rbind(df, d)
-}
- 
-df |>
-  ggplot(aes(cumul_case, week, group=cumul_case))+
-  geom_boxplot(width=8)+
-  scale_y_continuous("Weeks required to reach the case number")+
-  scale_x_discrete("") +
-  theme_light()+
-  theme_tight()+
-  theme(axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.x = element_blank())
-
-hist(dw)
-
-
-outbreak_data |>
-  filter(week %in% seq(1, 15, 2)) |> 
-  ggplot(aes(week, s_ch, group=id_outbreak))+
-  geom_line(color="grey30") +
-  geom_density_ridges()+
-  theme_minimal()+
-  scale_x_log10()+
-  scale_y_log10()
-
-
-outbreak_data |>
-  ggplot(aes(week, s_ch, group=id_outbreak))+
-  geom_point(color="grey30") +
-  theme_minimal()+
-  scale_x_log10()+
-  scale_y_log10()
-
-outbreak_data |>
-  ggplot(aes(week, s_ch, group=id_outbreak))+
-  geom_point(size=0.3) +
-  theme_minimal()
-
-outbreak_data |>
-  filter(week %in% seq(1,200, by=3)) |>
-  ggplot()+
-  geom_boxplot(aes(as.factor(week), s_ch), outlier.size=0.6) +
-  theme_minimal()
-
-outbreak_data |>
-  filter(week %in% seq(1,200, by=3)) |>
-  ggplot()+
-  # geom_boxplot(aes(as.factor(week), s_ch), outlier.size=0.6) +
-  geom_violin(aes(as.factor(week), s_ch), outlier.size=0.6) +
-  theme_minimal()
-
-```
-
-```{r}
-# outbreaks with more than X cases
-
-# impact of outbreaks
-outbreak_data |> 
-  ggplot(aes(week,s_ch))+
-  geom_line(aes(group=id_outbreak), color="grey50")+
-  theme_light()+
-  labs(x="Week", y="Suspected cases")
-
-outbreak_data[, cum_s_ch := cumsum(s_ch), by="id_outbreak"]
-outbreak_data[, s_ch_tot := sum(s_ch), by="id_outbreak"]
-
-outbreak_data |> 
-  filter(s_ch_tot > 100)
-
-# Let's look at the situation where we intervene
-svim_ct |> 
-  # filter(case_trigger %in% c(10, 100, 200, 500,  1000)) |>
-  group_by(case_trigger) |> 
-  filter(s_ch_tot > case_trigger) |> 
-  summarize(n=n(),
-            mean_pcr = mean(pct_reduc_case),
-            pcr_q500 = quantile(pct_reduc_case, probs=0.5),
-            pcr_q975 = quantile(pct_reduc_case, probs=0.975),
-            pcr_q025 = quantile(pct_reduc_case, probs=0.025)) -> pcr_cum
-  
-dlong <- pivot_longer(pcr_cum, cols=c("mean_pcr","pcr_q500","pcr_q975","pcr_q025"))
-dlong |> 
-  filter(name == "pcr_q500") |> 
-  filter(case_trigger %in% c(50, 100, 1000)) |> 
-  ggplot()+
-  geom_line(aes(x=case_trigger, y=value, group=name, color=name))
-  # geom_violin(aes(x=case_trigger, value, group=case_trigger))
-```
-
-## Ghost outbreaks because of the lasting immunity from the previous immunization
-
-We first identify outbreaks that might disappear if we consider lasting immunity from prior immunization activities. `find_ghost_outbreaks` function returns ids of the outbreak that might disappear.
-
-```{r, eval=FALSE}
-# 
-# str <- names(svim)
-# names(svim) <- gsub("mean_", "", str) # remove "mean_" to match the variable names in the existing function
-# # add attack rate variable for analysis by group 
-# dtmp <- ds[, c("attack_rate", "ID_outbreak")]
-# names(dtmp) <- c("attack_rate", "id")
-# svim <- left_join(svim, dtmp, by="id")  
-# 
-# svim |> filter(vacc_cov == 0.9, week_vaccination == 4) -> svim_v9w4
-
-svim$location <- sapply(svim$id_outbreak, function(x) strsplit(x, "-")[[1]][1])
-adms <- lapply(svim$id_outbreak, function(x) get_adm(x))
-# create admin variables to classify outbreaks accordingly
-svim$admin0 <- sapply(adms, function(x) x[[1]][2])
-svim$admin1 <- sapply(adms, function(x) x[[1]][3])
-svim$admin2 <- sapply(adms, function(x) x[[1]][4])
-svim$admin3 <- sapply(adms, function(x) x[[1]][5])
-
-# ghost ids are computed only for one scenario of vaccination coverage and week
-# in this case, coverage of 90% and week 1
-svim_v9w1 <- filter(svim, vacc_cov == 0.9 & vacc_week == 1)
-svim_v9w1_sub <- svim_v9w1 |> filter(!is.na(admin0) & !is.na(admin1) & !is.na(admin2))
-svim_v9w1_sub <- svim_v9w1_sub[order(svim_v9w1_sub$start_date),] 
-  
-svim_v9w1_sub |>
-  group_by(admin0, admin1, admin2) |>
-  mutate(min_end_date = min(end_date)) |> 
-  ungroup() -> svim_v9w1_sub
-
-svim_v9w1_sub |> 
-  mutate(day_since_previous_outbreak = start_date - min_end_date) -> svim_v9w1_sub
-
-length(unique(svim_v9w1_sub$id_outbreak))
-mean_dur_campaign <- 6 # days duration of the vaccination campaign
-mean_delay_vacc_eff <- 11 # days, mean delay before the immunity kicks in
-
-x |>
-  mutate(date_immunity = start_date + (vacc_week - 1) * 7 + 3.5 +
-           mean_dur_campaign + mean_delay_vacc_eff) -> x1
-
-x1 |>
-  group_by(admin0, admin1, admin2) |>
-  reframe(min_date_immunity = min(date_immunity)) -> x2
-
-x1 <- left_join(x1, x2, by=c("admin0", "admin1", "admin2"))
-x1 <- mutate(x1, date_diff = date_immunity - min_date_immunity)
-
-# identify the first outbreak in the region (date_diff = 0) and the outbreaks
-# that could disappear (ghost outbreaks, lb <= date_diff <= ub)
-ghost_id <- c()
-ghost_id <- c(ghost_id, x1[x1$date_diff > lb & x1$date_diff <= ub,]$id_outbreak)
-length(ghost_ids)
-
-# the following com
-ghost_ids <- find_ghost_outbreaks(x=svim_v9w1_sub, lb=0, ub=365)
-length(ghost_ids)
 ```
