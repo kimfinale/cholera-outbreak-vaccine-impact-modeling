@@ -1,59 +1,67 @@
 ## Kim JH, Duong M, Lee E,… Impact of cholera outbreak response immunization: Insights from modeling extensive outbreaks from sub-Saharan Africa, 2010-2023.
 
-We modeled the outcomes of outbreak response immunization (ORI)
-campaigns for 1,406 cholera outbreaks in sub-Saharan Africa (2010–2023).
-Our analysis accounted for vaccine effectiveness (direct and indirect),
-age-specific vaccine efficacy, deployment delays, and immune response
-times. In addition to all outbreaks, we evaluated subsets prioritized
-based on attack rates and outbreak size to simulate scenarios with
-limited vaccine supplies. Key metrics included cases, deaths,
-disability-adjusted life years (DALYs) averted, and cost-effectiveness.
+This study models the outcomes of outbreak response immunization (ORI)
+campaigns across 1,406 cholera outbreaks in sub-Saharan Africa from 2010
+to 2023. We incorporated vaccine effectiveness (both direct and
+indirect), age-specific efficacy, deployment delays, and immune response
+timelines into our analysis. Beyond evaluating all outbreaks, we
+analyzed prioritized subsets based on attack rates and outbreak scale to
+mimic scenarios with constrained vaccine availability. Key outcomes
+assessed include cases prevented, deaths averted, disability-adjusted
+life years (DALYs) gained, and cost-effectiveness.
 
 ### R code and data for reproducing analysis
 
-*ive_beta_reg.qmd* implements beta regression to model the indirect
-vaccine effectiveness
+**ive_beta_reg.qmd**: Uses beta regression to estimate indirect vaccine
+effectiveness.
 
-*vacc_impct.qmd* file includes codes for the following:
+**parameters.qmd**: Generates 200 parameter samples via Sobol’s
+low-discrepancy sequence.
 
--   set parameters for vaccine impact and cost-effectiveness analysis
-    with related datasets and equations
+**vacc_impct.qmd**: Contains code to: - Define parameters for vaccine
+impact and cost-effectiveness analysis, including relevant datasets and
+equations.
 
--   loads utility and vaccine impact functions
+-   Load utility functions and vaccine impact calculations.
 
--   loads the R packages and sources utils.R
+-   Import R packages and source `utils.R`.
 
--   downloads, manipulates, and pre-processes the data
+-   Download, process, and prepare data for analysis.
 
-*plots_tables.qmd* file includes codes for plots and tables for the main
-manuscript and the supplementary material:
+**plots_tables.qmd**: Provides code for creating plots and tables
+featured in the main manuscript and supplementary materials.
 
-*julia* folder includes files for the dynamic model
+**julia folder**: Houses files for the dynamic model:
 
--   *params.jl* setting parameters for dynamic model
+-   *params.jl*: Sets parameters for the dynamic model.
 
--   *utils.jl* loads utility functions for dynamic model
+-   *utils.jl*: Loads utility functions supporting the dynamic model.
 
--   *seiarw_2ag_erlang_vacc.jl* defines ODEs for dynamic model
+-   *seiarw_2ag_erlang_vacc.jl*: Specifies ODEs for the dynamic model.
 
--   *fit_model.jl* handles dynamic model fitting
+-   *fit_model.jl*: Manages fitting of the dynamic model.
 
--   *vacc_simulation.jl* simulates vaccine impact and compares to
-    pre-emptive vaccination from static model
+-   *vacc_simulation.jl*: Simulates vaccine impact and compares it to
+    pre-emptive vaccination from a static model.
 
 ### Datasets used
 
 -   Global Taskforce for Cholera Control’s (GTFCC) Global Cholera
     Database<sup>1</sup>
+
 -   [United Nations World Population Prospects 2024 -
     Mortality](https://population.un.org/wpp/Download/Standard/Mortality/)
+
 -   [United Nations World Population Prospects 2024 -
     Population](https://population.un.org/wpp/Download/Standard/Population/)
+
 -   [World Bank Data, GDP per capita (current
     US$)](https://data.worldbank.org/indicator/NY.GDP.PCAP.CD)
+
 -   [World Bank Data, Labor force participation rate, total (% of total
     population ages 15-64) (modeled ILO
     estimate)](https://data.worldbank.org/indicator/SL.TLF.ACTI.ZS)
+
 -   [International Monetary Fund. Inflation rate, average consumer
     prices](https://www.imf.org/external/datamapper/PCPIPCH@WEO/OEMDC/ADVEC/WEOWORLD)
 

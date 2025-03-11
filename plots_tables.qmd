@@ -5,9 +5,10 @@ editor_options:
   chunk_output_type: console
 ---
 
-## Load packages, source `utils.R`, and outbreak data sets
+## Load packages and source `utils.R`
 
 ```{r}
+source("utils.R") # utility functions
 library(data.table)
 library(tidyverse)
 library(ggridges)
@@ -20,17 +21,19 @@ library(metR)
 library(googlesheets4)
 library(conflicted)
 library(MASS)
+library(patchwork)
+# remove the space between the plot and the legend and the space around the plot
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
-source("utils.R") # utility functions
+#
+source("utils.R")
 save_plot <- FALSE
 save_table <- FALSE
 # figure size
 fgw1 <- figure_size[figure_size$journal =="Lancet",]$single
 fgw2 <- figure_size[figure_size$journal =="Lancet",]$double
 set1 <- RColorBrewer::brewer.pal(9,"Set1") # color sets
-library(patchwork)
-# remove the space between the plot and the legend and the space around the plot
+
 # representative probability values for quantile 
 probs <- c(0.025, 0.25, 0.5, 0.75, 0.975)
 VW <- 9 # representative vaccination week
@@ -39,8 +42,6 @@ VC <- 0.75 # representative vaccination coverage rate
 VC3 <- c(0.6, 0.75, 0.9) # three representative vaccination coverage rates
 YEAR <- as.Date("2020-12-28") # the most recent date in which the OCV campaign data is available. This value is from the `max(docv$start_date,na.rm=T)` from the `vacc_impact.qmd` file
 
-theme_set(theme_gray(base_size=14))
-
 shp <- st_read("data/shapefiles/total_shp_0427.shp")
 africa <- st_read("data/shapefiles/afr_g2014_2013_0.shp")
 ```
@@ -48,9 +49,8 @@ africa <- st_read("data/shapefiles/afr_g2014_2013_0.shp")
 ## Outbreak data and delay
 
 ```{r}
-outbreak_data_all <- as.data.frame(fread("outputs/outbreak_data_all_20241121.csv"))
-outbreak_data <- fread("outputs/outbreak_data_20241121.csv") # for vaccine impact modeling
-
+outbreak_data_all <- as.data.frame(fread("outputs/outbreak_data_all_20250228.csv"))
+outbreak_data <- fread("outputs/outbreak_data_20250228.csv") # for vaccine impact modeling
 # fwrite(ocv_use, paste0("outputs/ocv_use_GTFCC_data_", tstamp(), ".csv"))
 ocv_use <- fread("outputs/ocv_use_GTFCC_data_20241120.csv")
 delay_req_r1 <- as.integer(ocv_use$DATE_ROUND_ONE - ocv_use$DATE_REQUEST)
@@ -58,8 +58,11 @@ delay_req_r1 <- as.integer(ocv_use$DATE_ROUND_ONE - ocv_use$DATE_REQUEST)
 min_pop_camp <- min(ocv_use$DOSE_DELIVERED_ROUND_ONE*1000, na.rm=T)
 ocv_delay <- quantile(delay_req_r1, probs=c(0.25,0.5,0.75,0.9), na.rm=TRUE)
 
-# OCV use data
-docv <- clean_names(fread("data/outbreak_files_Oct2024/ocv_long_dataset.csv"))
+# OCV campaign data
+docv_ <- clean_names(fread("data/outbreak_files_Oct2024/ocv_long_dataset.csv"))
+docv <- docv_[(ocv_before_1 == TRUE | ocv_before_2 == TRUE | 
+                ocv_before_3 == TRUE | ocv_during == TRUE)]
+
 # consumer price index for cost adjustment (2015 to 2023)
 dis_params <- as.data.frame(data.table::fread("data/parameters.csv"))
 # IVE posterior predictive values from Bayesian beta regression (see parameters.qmd)
@@ -76,7 +79,13 @@ ds |>
   mutate(id_outbreak = paste0(location, "-", start_date, "-", end_date)) |> 
   ungroup() -> ds
 
-outbk_data_summary <- left_join(filter(outbreak_data, week == 1), ds, by="id_outbreak")
+outbk_data_summary <- 
+  left_join(filter(outbreak_data, week == 1), 
+            ds[,c("outbreak_pop", "total_s_ch", "total_c_ch", "total_deaths", "duration_weeks", 
+"peak_week_incidence", "time_to_peak_week", "peak_week_incidence_per_100percent", 
+"peak_week_incidence_per_10e3", "mean_r0_1st_week", "area_per_1km2", 
+"rural_urban", "ar_per_10e3", "cfr_per_100percent", "id_outbreak"
+)], by="id_outbreak")
 summary(outbk_data_summary$ar_per_10e3)
 summary(outbk_data_summary$outbreak_pop)
 ```
@@ -120,6 +129,7 @@ chol |>
 
 ## Vaccine impact modeling results
 
+Following results are 
 ```{r}
 # svim <- fread("outputs/svim_mean_across_runid_20241218.csv")
 # svim_cea <- fread("outputs/svim_mean_cea_across_runid_20241218.csv")
@@ -135,12 +145,11 @@ rm(svim_sum_cea_vc60)
 rm(svim_sum_cea_vc75)
 svim_sum_cea <- rbind(svim_sum_cea, svim_sum_cea_vc90)
 rm(svim_sum_cea_vc90)
-svim_sum_cea <- svim_sum_cea[start_date <= YEAR]
 # svim_sum <- fread("outputs/svim_sum_across_week_by_runid_20241218.csv")
 # svim_sum_cea <- fread("outputs/svim_sum_cea_20241218.csv")
 
-svim_ct <- fread("outputs/svim_ct_mean_across_runid_20241126.csv")
-svim_ct <- svim_ct[start_date <= YEAR]
+# svim_ct <- fread("outputs/svim_ct_mean_across_runid_20241126.csv")
+# svim_ct <- svim_ct[start_date <= YEAR]
 
 svim_ct_sum_cea_vc60 <-
   read_rds("outputs/svim_0.6_case_trigger_sum_cea_across_runid_20241223.rds")
@@ -154,30 +163,80 @@ rm(svim_ct_sum_cea_vc60)
 rm(svim_ct_sum_cea_vc75)
 svim_ct_sum_cea <- rbind(svim_ct_sum_cea, svim_ct_sum_cea_vc90)
 rm(svim_ct_sum_cea_vc90)
-svim_ct_sum_cea <- svim_ct_sum_cea[start_date <= YEAR]
 
-svim_pe <- fread("outputs/svim_pe_mean_across_runid_20241126.csv")
+# svim_pe <- fread("outputs/svim_pe_mean_across_runid_20241126.csv")
 svim_pe_sum <- fread("outputs/svim_pe_sum_across_week_by_runid_20241126.csv")
-
-# svim_pe2 <- fread("outputs/svim_pe_mean_across_runid_20241217.csv")
-# svim_pe_sum2 <- fread("outputs/svim_pe_sum_across_week_by_runid_20241217.csv")
 
 svim_ct_cea <- fread("outputs/svim_ct_mean_cea_across_runid_20241126.csv")
 
-subset_random <- fread("outputs/svim_mean_random_subset_ids_20241126.csv")
-subset_attack_rate <- fread("outputs/svim_mean_attack_rate_subset_ids_20241126.csv")
-subset_cases <- fread("outputs/svim_mean_cases_subset_ids_20241126.csv")
-subset_duration <- fread("outputs/svim_mean_duration_subset_ids_20241126.csv")
+subset_random <- fread("outputs/svim_mean_random_subset_ids_20250226.csv")
+subset_attack_rate <- fread("outputs/svim_mean_attack_rate_subset_ids_20250226.csv")
+subset_cases <- fread("outputs/svim_mean_cases_subset_ids_20250226.csv")
+subset_duration <- fread("outputs/svim_mean_duration_subset_ids_20250226.csv")
 
 # svim_subsets <- fread("outputs/svim_outbreak_subsets_20241224.csv")
 # unique(svim_subsets$subset_method)
-
-svim_all <- fread("outputs/svim_all_outbreaks_cea_across_runid_20241127.csv")
-svim_all <- svim_all[start_date <= YEAR]
+ 
+svim_all <- fread("outputs/svim_all_outbreaks_vc_75_cea_across_runid_20250226.csv")
 ```
 
 
 ## Figure 1. Study flowchart
+
+### Example outbreak time series (no vaccine and vaccine) and vaccine impact
+
+```{r, eval=FALSE}
+# The outbreak trajectory was originally derived from the data. However, 
+# later it was recreated manually
+# 
+d <- data.frame(date=seq(as.Date("2010-06-15"), by="week", length.out=23))
+d$s_ch <- c(2,3,4,10,12,29,100,120,150,140,75,68,47,24,5,12,5,3,2,4,1,0,0)
+d$s_ch_vacc <- c(2,3,4,10,12,29,100,120, 0.35*c(150,140,75,68,47,24,5,12,5,3,2,4,1,0,0))
+
+names(d) <- c("date","No vacc","Vacc")
+dlong <- pivot_longer(d, cols=c("No vacc", "Vacc"))
+
+dar <- data.frame(x=c(1,1), y=c(20,10)) # data for arrow
+vdate <- as.Date("2010-07-11")
+
+ggplot(dlong, aes(date, value, linetype=name, shape=name, group=name)) +
+  geom_line()+
+  geom_point()+
+  geom_ribbon(data=subset(d, date>= as.Date("2010-08-08")), 
+          aes(x=date, ymin=`Vacc`, ymax=`No vacc`), fill="steelblue", 
+          alpha=0.5, inherit.aes = FALSE) +
+  geom_segment(aes(x=vdate+7,y=65,xend=vdate+7,yend=30),
+               arrow=arrow(type="closed", angle=10, length=unit(5,"mm")),
+               inherit.aes = FALSE)+
+  annotate("text", x=vdate+7, y=75, label= "Vaccination \nstarted", hjust=0.8) +
+  geom_segment(aes(x=vdate+22,y=140,xend=vdate+22,yend=122),
+               arrow=arrow(type="closed", angle=10, length=unit(5,"mm")),
+               inherit.aes = FALSE)+
+  annotate("text", x=vdate+14, y=144, label= "Vaccine\ntakes effect", hjust=0.8) +
+  annotate("text", x=as.Date("2010-08-23"), y=120, 
+           label= "No\nvaccination", hjust=0) +
+  annotate("text", x=as.Date("2010-09-13"), y=6, 
+           label= "Vaccination", hjust=1) +
+  geom_segment(aes(x=as.Date("2010-09-30"),
+                   y=100,xend=as.Date("2010-08-21"),
+                   yend=80), arrow=arrow(type="closed", angle=10, 
+                                         length=unit(5,"mm")), 
+               inherit.aes = FALSE)+
+  annotate("text", x=as.Date("2010-10-18"), y=108, 
+           label= "Cases reduced \ndue to the vaccine") +
+  labs(x="", y="Suspected cases", linetype="")+
+  theme_light()+
+  theme_tight()+
+  theme(legend.position = "none") -> plt
+
+plt
+
+fac <- 2.0
+if (save_plot) {
+  ggsave(paste0("plots/fig1B_vacc_eff_example_", tstamp(), ".pdf"), plt,
+       device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
+}
+```
 
 ![Study flowchart](plots/fig1_data_method.png)
 
@@ -232,7 +291,6 @@ ggplot(ive_longini)+
   theme(legend.position="top") 
 ```
 
-
 ## Figure S2 Compartmental flow
 
 ![Compartmental flow](plots/compartment_diagram.png)
@@ -262,7 +320,7 @@ ggsave(paste0("plots/fit_examples_", tstamp(), ".pdf"), plt,
 
 ## Figure 2, Outbreak description
 
-### (A) Outbreak time series by group
+(A) Outbreak time series by group
 ```{r, eval=FALSE}
 # outbreaks that have been excluded
 ids_excl <- outbreak_data_all |> 
@@ -321,12 +379,9 @@ summary(outbk_data_summary$ar_per_10e3)
 summary(outbk_data_summary$outbreak_pop)
 ```
 
-### (B) Outbreak size vs. duration by type 
+(B) Outbreak size vs. duration by type 
 
 ```{r, eval=FALSE}
-# outbreak_data$end_date_outbreak <- as.Date(outbreak_data$end_date_outbreak)
-# outbreak_data$start_date_outbreak <- as.Date(outbreak_data$start_date_outbreak)
-
 outbreak_data_all |> 
   group_by(id_outbreak) |> 
   summarize(duration = as.integer(as.Date(end_date_outbreak[1]) - 
@@ -365,7 +420,7 @@ if (save_plot){
 }
 ```
 
-### (C) Map of outbreaks
+(C) Map of outbreaks
 ```{r, eval=F}
 dt <- outbreak_data
 dt_all <- outbreak_data_all 
@@ -448,116 +503,114 @@ if (save_plot) {
 }
 ```
 
+(D) Distribution of outbreak characteristics
+
+```{r}
+outbreak_data_all |> 
+  group_by(id_outbreak) |> 
+  summarize(duration = as.integer(as.Date(end_date_outbreak[1]) - 
+                                    as.Date(start_date_outbreak[1])),
+            total_s_ch = sum(s_ch),
+            total_c_ch = sum(c_ch)) -> d_all
+
+outbreak_data |> 
+  group_by(id_outbreak) |> 
+  summarize(duration = as.integer(as.Date(end_date_outbreak[1]) - 
+                                    as.Date(start_date_outbreak[1])),
+            total_s_ch = sum(s_ch),
+            total_c_ch = sum(c_ch)) -> d
+
+ggplot()+
+  geom_point(data=filter(d_all, id_outbreak %in% ids_excl), 
+             aes(duration, total_s_ch, color="Excluded"), alpha=0.5)+
+  geom_point(data=filter(d, id_outbreak %in% ids_susp), 
+             aes(duration, total_s_ch, color="Suspected"), alpha=0.5)+
+  geom_point(data=filter(d, id_outbreak %in% ids_conf), 
+             aes(duration, total_s_ch, color="Confirmed"), alpha=0.5)+
+  scale_x_log10()+
+  scale_y_log10()+
+  theme_light()+
+  scale_color_manual("", values=c("Excluded" = "yellow4", 
+                                  "Suspected" = "steelblue4", 
+                                  "Confirmed" = "firebrick4"))+
+  labs(x="Outbreak duration (week)", y="Total suspected cases")+
+  theme(legend.position="top") -> plt
+plt
+
+
+
+outbk_data_summary |> 
+  group_by(id_outbreak) |> 
+  summarize(pop1 = pop[1],
+            pop2 = outbreak_pop[1],
+            duration1 = max(week),
+            duration2 = duration_weeks[1],
+            size1 = sum(s_ch),
+            size2 = total_s_ch[1],
+            ar = ar_per_10e3[1]) -> d
+
+d |>
+  as.data.frame() |> 
+  ggplot()+
+  # geom_histogram(aes(x=pop1, y=..density..))+
+  geom_histogram(aes(x=pop1, y=..count../sum(..count..)))+
+  scale_x_log10()+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L))+
+  labs(x="Population", y="")+
+  theme_light()+
+  theme_tight() -> hist_pop
+
+d |>
+  as.data.frame() |> 
+  ggplot()+
+  # geom_histogram(aes(x=pop1, y=..density..))+
+  geom_histogram(aes(x=size1, y=..count../sum(..count..)))+
+  scale_x_log10()+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L))+
+  labs(x="Outbreak size", y="")+
+  theme_light()+
+  theme_tight() -> hist_size
+
+d |>
+  as.data.frame() |> 
+  ggplot()+
+  # geom_histogram(aes(x=pop1, y=..density..))+
+  geom_histogram(aes(x=duration1, y=..count../sum(..count..)))+
+  scale_x_log10()+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L))+
+  labs(x="Duration (weeks)", y="")+
+  theme_light()+
+  theme_tight() -> hist_dur
+
+d |>
+  as.data.frame() |> 
+  ggplot()+
+  # geom_histogram(aes(x=pop1, y=..density..))+
+  geom_histogram(aes(x=ar, y=..count../sum(..count..)))+
+  scale_x_log10()+
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1L))+
+  labs(x="Duration (weeks)", y="")+
+  theme_light()+
+  theme_tight() -> hist_ar
+
+plt <- hist_pop + hist_size + hist_ar + hist_dur + 
+  plot_layout(ncol=1, byrow=T, guides="collect", 
+              axis_titles="collect") &
+  theme(legend.position="top")
+
+
+# if (save_plot){
+#   fac <- 1.25
+#   ggsave(paste0("plots/outbk_size_dur_case_type_", tstamp(), ".pdf"), plt,
+#        device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
+# }
+
+```
+
+
 ## Figure 3. Percentage case reduction
 
-### Example outbreak time series (no vaccine and vaccine) and vaccine impact
 
-```{r, eval=FALSE}
-# week_lst <- read_rds("outputs/svim_week_list_20240822.rds")
-# lst <- read_rds("outputs/svim_list_20240822.rds")
-week_lst <- read_rds("outputs/svim_week_list_20240813.rds")
-lst <- read_rds("outputs/svim_list_20240620.rds")
-
-for (id in unique(week_lst[[runid]]$data_id)) {
-  cat("id = ", id, "\n")
-  runid <- 1
-  outbk_num_id <- id
-  vacc_wk <- 4
-  
-  vacc_cv <- 0.9
-  d <- week_lst[[runid]] |> 
-    filter(data_id == outbk_num_id, vacc_week == vacc_wk, vacc_cov == vacc_cv)
-    
-  plot(d$week, d$s_ch, type="l")
-  points(d$week, d$s_ch)
-  lines(d$week, d$s_ch - d$s_ch_averted, lty="dotted")
-  
-  readline(prompt="Press [enter] to proceed")
-}
-# id = 22, 25, 30, 99, 105, 106, 131, 133, 209, 213-4, 259, 285
-for (runid in 1:200) {
-  cat("run_id = ", runid, "\n")
-  d <- week_lst[[runid]] |> 
-    filter(data_id == outbk_num_id, vacc_week == vacc_wk, vacc_cov == vacc_cv)
-    
-  plot(d$week, d$s_ch, type="l")
-  points(d$week, d$s_ch)
-  lines(d$week, d$s_ch - d$s_ch_averted, lty="dotted")
-  
-  readline(prompt="Press [enter] to proceed")
-}
-# runid = 57, 59, 70
-d <- week_lst[[70]] |> 
-  filter(data_id == 25, vacc_week == 4, vacc_cov == 0.9)
-thr <- ds[ds$ID == 25, ]$threshold
-d <- d[, c("date", "s_ch", "s_ch_averted")]
-d$s_ch_under_vacc <- d$s_ch - d$s_ch_averted
-names(d) <- c("date", "No vacc", "Averted", "Vacc")
-# dlong <- pivot_longer(d, cols=c("s_ch","s_ch_under_vacc"))
-dlong <- pivot_longer(d, cols=c("No vacc", "Vacc"))
-
-dar <- data.frame(x=c(1,1), y=c(20,10)) # data for arrow
-vdate <- as.Date("2010-07-11")
-
-
-ggplot(dlong, aes(date, value, linetype=name, shape=name, group=name)) +
-  geom_line()+
-  geom_point()+
-  geom_ribbon(data=subset(d, date>= as.Date("2010-08-08")), 
-          aes(x=date, ymin=`Vacc`, ymax=`No vacc`), fill="steelblue", 
-          alpha=0.5, inherit.aes = FALSE) +
-  geom_segment(aes(x=vdate+7,y=65,xend=vdate+7,yend=20),
-               arrow=arrow(type="closed", angle=10, length=unit(5,"mm")),
-               inherit.aes = FALSE)+
-  annotate("text", x=vdate+7, y=75, label= "Vaccination \nstarted", hjust=0.8) +
-  geom_segment(aes(x=vdate+24,y=135,xend=vdate+24,yend=115),
-               arrow=arrow(type="closed", angle=10, length=unit(5,"mm")),
-               inherit.aes = FALSE)+
-  annotate("text", x=vdate+24, y=144, label= "Vaccine\ntakes effect", hjust=0.8) +
-  
-  geom_segment(aes(x=vdate-12, y=35, xend=vdate-12, yend=1.8),
-               arrow=arrow(type="closed", angle=10, length=unit(5,"mm")),
-               inherit.aes=FALSE)+
-  annotate("text", x=vdate-12, y=43, label= "Outbreak\nthreshold", hjust=0.3) +
-  annotate("text", x=as.Date("2010-08-28"), y=120, 
-           label= "No\nvaccination", hjust=0) +
-  annotate("text", x=as.Date("2010-09-03"), y=6, 
-           label= "Vaccination", hjust=1) +
-  geom_segment(aes(x=as.Date("2010-09-30"),
-                   y=100,xend=as.Date("2010-08-21"),
-                   yend=80), arrow=arrow(type="closed", angle=10, 
-                                         length=unit(5,"mm")), 
-               inherit.aes = FALSE)+
-  annotate("text", x=as.Date("2010-10-18"), y=110, 
-           label= "Cases reduced \ndue to the vaccine") +
-  geom_hline(yintercept=thr - 1, color="firebrick", linetype="dashed")+
-  geom_vline(xintercept=min(dlong$date), color="steelblue",linetype="dashed")+
-  geom_vline(xintercept=max(dlong$date), color="steelblue", linetype="dashed")+
-  geom_vline(xintercept=as.Date("2010-09-26"), color="steelblue", linetype="dashed")+
-
-  geom_segment(aes(x=min(dlong$date),y=158,xend=max(dlong$date),yend=158),
-               arrow=arrow(type="closed", ends="both", angle=10,
-                           length=unit(5,"mm")), inherit.aes = FALSE)+
-  geom_segment(aes(x=min(dlong$date),y=153,xend=as.Date("2010-09-26"),
-                   yend=153),  arrow=arrow(type="closed", ends="both", angle=10,
-                           length=unit(5,"mm")), inherit.aes = FALSE)+
-  
-  geom_segment(aes(x=as.Date("2010-09-26"),y=153,xend=max(dlong$date),
-                   yend=153), color="steelblue",
-               arrow=arrow(type="closed", ends="both", angle=10,
-                           length=unit(5,"mm")), inherit.aes = FALSE)+
-  annotate("text", x=as.Date("2010-10-18"), y=140, 
-           label= "Duration reduced\ndue to the vaccine") +
-  labs(x="", y="Number of suspected cases", linetype="")+
-  theme_light()+
-  theme(legend.position = "none") -> plt
-
-fac <- 2.0
-if (save_plot) {
-  ggsave(paste0("plots/vacc_eff_example_", tstamp(), ".pdf"), plt,
-       device = cairo_pdf, width=fgw1*fac, height=fgw1*fac, units="mm")
-}
-```
 
 ### Impact from preemptive vaccination
 ```{r}
@@ -813,6 +866,180 @@ ggsave(paste0("plots/fig3_pcr_outbk_size_", tstamp(hour=T), ".pdf"),
        plt3,
        device = cairo_pdf, width=fgw2*fac, height=fgw2*1.15*fac, units="mm")
 ```
+
+## Figure 4. Cumlative impact for subsets
+
+```{r}
+d <- fread("outputs/cea_0.75_time_tigger_subsets_by_year_20250306.csv")
+tt <- 9
+d |> filter(vacc_week == tt, vacc_cov == 0.75) -> d
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=vacc_dose))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_continuous(limits=c(0,4e7))+
+  # labs(x="Vaccination week since the outbreak began",
+  #      y="Cumulative case reduction until year")+
+  labs(x="", y="Cumulative\n OCVs deployed")+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank() -> plt_a1
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=pop_tot))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_continuous(limits=c(0,8.5e7))+
+  # labs(x="Vaccination week since the outbreak began",
+  #      y="Cumulative case reduction until year")+
+  labs(x="", y="Cumulative number\n of outbreak-affected people")+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank() -> plt_b1
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=s_ch_averted_tot+1))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  labs(x="", y="Cumulative\ncase averted")+
+  scale_y_log10(limits=c(1,1e5))+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank() -> plt_b1
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=pct_reduc_case))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_continuous(labels = scales::percent_format(scale=1),
+                     limits=c(0,90))+
+  labs(x="", y="Cumulative\n% case reduction")+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank() -> plt_c1
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=case_averted_per_1000_OCV))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_continuous(limits = c(0,2))+
+  labs(x="", y="Case averted\nper 1000 OCVs")+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank() -> plt_d1
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=cost_per_case_averted))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_log10(limits=c(1,1e5))+
+  labs(x="", y="Cost per\ncase averted (US$)")+
+  theme_light()+
+  theme_tight() -> plt_e1
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=cost_per_death_averted))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_log10()+
+  labs(x="", y="Cost per\ndeath averted (US$)")+
+  theme_light()+
+  theme_tight() -> plt_f1
+
+
+# plt_1 <- (plt_a + plt_b + plt_c + plt_d + plt_e + plt_f) +
+#   # plot_annotation(tag_levels = 'A') +
+#   plot_layout(ncol=1, guides="collect") &
+#   theme(plot.tag.position  = c(0.1,0.9),
+#         plot.tag = element_text(size=13)) &
+#   theme(legend.position = "top")
+
+# ggsave(paste0("plots/fig4_cumulative_impact_tt_", tt, "_", tstamp(), ".pdf"),
+#          plt, device = cairo_pdf, width=70*2.3, height=70*5, units="mm")
+
+
+d <- fread("outputs/cea_0.75_case_trigger_subsets_by_year_20250311.csv")
+ct <- 150
+# select one runid to reduce the number of data points
+d |> filter(case_trigger == ct, vacc_cov == 0.75) -> d
+# # select one runid to reduce the number of data points
+# d |> filter(runid == 1, case_trigger == 150, vacc_cov == 0.75) -> d
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=pop_tot))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_continuous()+
+  # labs(x="Vaccination week since the outbreak began",
+  #      y="Cumulative case reduction until year")+
+  labs(x="", y="")+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank()+
+  theme_y_blank() -> plt_a2
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=s_ch_averted_tot+1))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  labs(x="", y="")+
+    scale_y_log10(limits=c(1,1e5))+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank()+
+  theme_y_blank()  -> plt_b2
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=pct_reduc_case))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_continuous(labels = scales::percent_format(scale=1),
+                     limits=c(0,90))+
+  labs(x="", y="")+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank()+
+  theme_y_blank() -> plt_c2
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=case_averted_per_1000_OCV))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_continuous(limits = c(0,2))+
+  labs(x="", y="")+
+  theme_light()+
+  theme_tight()+
+  theme_x_blank()+
+  theme_y_blank() -> plt_d2
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=cost_per_case_averted))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_log10(limits=c(1,1e5))+
+  labs(x="", y="")+
+  theme_light()+
+  theme_tight()+
+  theme_y_blank() -> plt_e2
+
+d |>
+  ggplot(aes(x=as.factor(year_max), y=cost_per_death_averted))+
+  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
+               outlier.size=0.6)+
+  scale_y_log10()+
+  labs(x="", y="")+
+  theme_light()+
+  theme_tight()+
+  theme_y_blank()  -> plt_f2
+
+plt <- wrap_plots(list(plt_a1,plt_a2,plt_b1,plt_b2,plt_c1,
+                       plt_c2,plt_d1,plt_d2,plt_e1,plt_e2), byrow=T,ncol=2,guides="collect") 
+
+ggsave(paste0("plots/fig4_cumulative_impact_", tstamp(), ".pdf"),
+         plt, device = cairo_pdf, width=70*4.5, height=70*4.5, units="mm")
+```
+
 
 ## Figure S4 Missed outbreaks and weekly incidence trends 
 ```{r}
