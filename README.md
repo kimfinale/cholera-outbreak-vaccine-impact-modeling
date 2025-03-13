@@ -12,21 +12,22 @@ life years (DALYs) gained, and cost-effectiveness.
 
 ### R code and data for reproducing analysis
 
+**utils.R**: Houses various in-house utility functions including those
+to calculate the impact of vaccines.
+
 **ive_beta_reg.qmd**: Uses beta regression to estimate indirect vaccine
 effectiveness.
 
 **parameters.qmd**: Generates 200 parameter samples via Sobol’s
 low-discrepancy sequence.
 
-**vacc_impct.qmd**: Contains code to: - Define parameters for vaccine
-impact and cost-effectiveness analysis, including relevant datasets and
-equations.
+**vacc_impct.qmd**: Contains code to: - Load utility functions and
+vaccine impact calculations (i.e., source `utils.R`). - Calculate
+vaccine impact via time-triggered and case-triggered strategies.
+Simulation can be done in parallel using ‘doParallel’ package and then
+merged later
 
--   Load utility functions and vaccine impact calculations.
-
--   Import R packages and source `utils.R`.
-
--   Download, process, and prepare data for analysis.
+-   Summarize vaccine impact
 
 **plots_tables.qmd**: Provides code for creating plots and tables
 featured in the main manuscript and supplementary materials.

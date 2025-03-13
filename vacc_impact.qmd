@@ -247,16 +247,175 @@ gdp_long <-
 gdp_long$year <- as.integer(gdp_long$year)
 ```
 
+## Vaccine impact simulation
+
+Parallel by batch `run_vacc_impact_outbreak_weekly`
+
+```{r}
+tic <- Sys.time()
+dat <- outbreak_data
+library(doParallel)
+# vacc_covs <- seq(0.6, 0.95, by=0.05)
+vacc_covs <- c(0.6, 0.75, 0.9)
+vacc_weeks <- seq(1, 20, by=1) # vaccination can happen anytime during week 1 and week 20
+nruns <- 50 # number of simulation runs
+batch_size <- 10
+
+for (batch_id in seq(1, nruns, by = batch_size)) {
+  cat("batch id: ", batch_id, "\n")
+  run_ids <- batch_id:(batch_id + batch_size - 1)  # Run IDs in batches of batch_size
+
+  cl <- makeCluster(getOption("cl.cores", detectCores() - 1))
+  registerDoParallel(cl)
+
+  svim_week_list <-
+    foreach(i = run_ids, .packages = c("data.table")) %dopar% {
+      run_vacc_impact_outbreak_weekly(
+        outbreak_data = dat,
+        ive_data = ive_data,
+        parameters = params,
+        age_dist = pop_by_age_wpp,
+        vacc_week = vacc_weeks,
+        vacc_cov = vacc_covs,
+        runid = i)
+    }
+  stopCluster(cl)
+
+  fwrite(rbindlist(svim_week_list), paste0("outputs/svim_week_list_vacc_week_batch_",
+                                 batch_id, "_", tstamp(), ".csv"))
+}
+
+```
+
+Parallel case_trigger by batch
+
+```{r, eval=FALSE}
+library(doParallel)
+dat <- outbreak_data
+case_triggers <- c(1,seq(10,300,by=10),seq(400,1000,by=100))
+batch_size <- 10
+# vacc_covs <- seq(0.6, 0.95, by=0.05)
+vacc_covs <- c(0.6, 0.75, 0.9)
+nruns <- 10 # number of simulation runs
+
+for (batch_id in seq(1, nruns, by = batch_size)) {
+  cat("batch id: ", batch_id, "\n")
+  run_ids <- batch_id:(batch_id + batch_size - 1)  # Run IDs in batches of batch_size
+
+  cl <- makeCluster(getOption("cl.cores", detectCores() - 4))
+  registerDoParallel(cl)
+
+  svim_week_list <-
+    foreach(i = run_ids, .packages = c("data.table")) %dopar% {
+      run_vacc_impact_outbreak_weekly(
+        outbreak_data = dat,
+        ive_data = ive_data,
+        parameters = params,
+        age_dist = pop_by_age_wpp,
+        case_trigger = case_triggers,
+        vacc_cov = vacc_covs,
+        runid = i)
+    }
+  stopCluster(cl)
+  fwrite(rbindlist(svim_week_list), paste0("outputs/svim_week_case_trigger_batch_",
+                               batch_id, "_", tstamp(), ".csv"))
+}
+```
+
+Parallel preemptive vaccination `run_vacc_impact_outbreak_weekly`
+
+```{r, eval=FALSE}
+library(doParallel)
+
+tic <- Sys.time()
+dat <- outbreak_data
+# vacc_covs <- seq(0.6, 0.95, by=0.05)
+vacc_covs <- c(0.6, 0.75, 0.9)
+# maximum possible delay before vaccines take effect after vaccination
+# max(params$dur_campaign)/7 + max(params$delay_vacc_effect)/7
+vacc_weeks <- -52 # some random large number ensure than pre-emptive vaccination
+nruns <- 200 # number of simulation runs
+
+cl <- makeCluster(getOption("cl.cores", detectCores() - 6))
+registerDoParallel(cl)
+
+svim_week_list <-
+  foreach(i = 1:nruns, .packages = c("data.table")) %dopar% {
+    run_vacc_impact_outbreak_weekly(
+      outbreak_data = dat,
+      ive_data = ive_data,
+      parameters = params,
+      age_dist = pop_by_age_wpp,
+      vacc_week = vacc_weeks,
+      vacc_cov = vacc_covs,
+      runid = i)
+  }
+stopCluster(cl)
+
+Sys.time() - tic
+# Time difference of 36.02764 mins
+fwrite(rbindlist(svim_week_list), paste0("outputs/svim_week_preemptive_", tstamp(), ".csv"))
+```
+
+Combine the results from parallel simulation
+```{r}
+# library(data.table)
+# source("utils.R")
+id_begin <- 1
+id_end <- 200
+batch_size <- 10
+batch_ids <- seq(id_begin, id_end, by=batch_size)
+
+svim_df <- data.frame()
+for (i in 1:length(batch_ids)) {
+  d <- fread(paste0("outputs/svim_week_list_vacc_week_batch_", batch_ids[i],
+           "_20250311.csv"))
+  svim_df <- rbindlist(list(svim_df, sum_over_week(d)))
+  rm(d)
+}
+
+fwrite(svim_df, paste0("outputs/svim_vc_85_time_trigger_sum_over_week_runid_1_200_", 
+                        tstamp(), ".csv"))
+
+# case-triggered vaccination
+id_begin <- 1
+id_end <- 120
+batch_size <- 10
+batch_ids <- seq(id_begin, id_end, by=batch_size)
+
+svim_df <- data.frame()
+
+for ( i in 1:length(batch_ids)) {
+  cat("i =", i, "\n")
+  d <- fread(paste0("outputs/svim_case_trigger_week_list_batch_",
+                    batch_ids[i], "_20250312.csv"))
+  svim_df <- rbindlist(list(svim_df, sum_over_week(d, case_trigger=T)))
+  rm(d)
+}
+
+fwrite(svim_df, paste0("outputs/svim_vc_85_case_trigger_sum_over_week_runid_1_200_", 
+                       tstamp(), ".csv"))
+
+# preemptive vaccination
+svim_df <- fread("outputs/svim_week_preemptive_20250228.csv")
+svim_df <- sum_over_week(svim_df)
+fwrite(svim_df, paste0("outputs/svim_preemptive_sum_over_week_runid_1_200_",
+                       tstamp(), ".csv"))
+```
+
 ## Summarize vaccine impact
 
-Conduct cost effectiveness analysis
+Computes (%) case averted, case averted per 1,000 OCVs and cost effectiveness 
+across vaccination timing (time-trigger or case-trigger) and vaccine coverage
 
 ### Time-triggered vaccination
 
 ```{r}
 # sum over week by runid
-d <- fread("outputs/svim_time_trigger_sum_over_week_runid_1_200_20250302.csv")
-
+# d <- fread("outputs/svim_time_trigger_sum_over_week_runid_1_200_20250302.csv")
+d <- fread("outputs/svim_vc_85_time_trigger_sum_over_week_runid_1_200_20250313.csv")
+VC3 <- 0.85
+# library(tidyverse)
 for (vc in VC3) {
   cat("vacc_cov =" , vc, "\n")
   # cost-effectiveness analysis
@@ -287,8 +446,8 @@ rm(d)
 
 ```{r}
 # case-trigger vaccination
-d_ct <- fread("outputs/svim_case_trigger_sum_over_week_runid_1_200_20250304.csv")
-
+# d_ct <- fread("outputs/svim_case_trigger_sum_over_week_runid_1_200_20250304.csv")
+d_ct <- fread("outputs/svim_vc_85_case_trigger_sum_over_week_runid_1_200_20250313.csv")
 for (vc in VC3) {
   cat("vacc_cov =" , vc, "\n")
   svim_ct_cea <- add_cea_variables(d_ct[vacc_cov == vc])
@@ -302,7 +461,6 @@ for (vc in VC3) {
   svim_ct_mean_cea <- add_cea_variables(d_ct[vacc_cov == vc])
   svim_ct_mean_cea <- add_cea_results(svim_ct_mean_cea)
   
-
   fwrite(svim_ct_mean_cea,
     paste0("outputs/cea_", vc, "_case_trigger_mean_across_runid_", 
              tstamp(), ".csv"))
@@ -310,7 +468,7 @@ for (vc in VC3) {
 }
 ```
 
-Preemptive vaccination
+### Preemptive vaccination
 ```{r}
 # pre-emptive vaccination
 # svim_pe_df <- fread("outputs/svim_preemptive_raw_20241203.csv")
@@ -457,161 +615,3 @@ fwrite(dfall, paste0("outputs/cea_0.75_case_trigger_subsets_by_year_", tstamp(),
 ```
  
 
-## Vaccine impact simulation
-
-Parallel by batch `run_vacc_impact_outbreak_weekly`
-
-```{r}
-tic <- Sys.time()
-dat <- outbreak_data
-library(doParallel)
-# vacc_covs <- seq(0.6, 0.95, by=0.05)
-vacc_covs <- c(0.6, 0.75, 0.9)
-vacc_weeks <- seq(1, 20, by=1) # vaccination can happen anytime during week 1 and week 20
-nruns <- 50 # number of simulation runs
-batch_size <- 10
-
-for (batch_id in seq(1, nruns, by = batch_size)) {
-  cat("batch id: ", batch_id, "\n")
-  run_ids <- batch_id:(batch_id + batch_size - 1)  # Run IDs in batches of batch_size
-
-  cl <- makeCluster(getOption("cl.cores", detectCores() - 1))
-  registerDoParallel(cl)
-
-  svim_week_list <-
-    foreach(i = run_ids, .packages = c("data.table")) %dopar% {
-      run_vacc_impact_outbreak_weekly(
-        outbreak_data = dat,
-        ive_data = ive_data,
-        parameters = params,
-        age_dist = pop_by_age_wpp,
-        vacc_week = vacc_weeks,
-        vacc_cov = vacc_covs,
-        runid = i)
-    }
-  stopCluster(cl)
-
-  fwrite(rbindlist(svim_week_list), paste0("outputs/svim_week_list_vacc_week_batch_",
-                                 batch_id, "_", tstamp(), ".csv"))
-}
-
-```
-
-Parallel case_trigger by batch
-
-```{r, eval=FALSE}
-library(doParallel)
-dat <- outbreak_data
-case_triggers <- c(1,seq(10,300,by=10),seq(400,1000,by=100))
-batch_size <- 10
-# vacc_covs <- seq(0.6, 0.95, by=0.05)
-vacc_covs <- c(0.6, 0.75, 0.9)
-nruns <- 10 # number of simulation runs
-
-for (batch_id in seq(1, nruns, by = batch_size)) {
-  cat("batch id: ", batch_id, "\n")
-  run_ids <- batch_id:(batch_id + batch_size - 1)  # Run IDs in batches of batch_size
-
-  cl <- makeCluster(getOption("cl.cores", detectCores() - 4))
-  registerDoParallel(cl)
-
-  svim_week_list <-
-    foreach(i = run_ids, .packages = c("data.table")) %dopar% {
-      run_vacc_impact_outbreak_weekly(
-        outbreak_data = dat,
-        ive_data = ive_data,
-        parameters = params,
-        age_dist = pop_by_age_wpp,
-        case_trigger = case_triggers,
-        vacc_cov = vacc_covs,
-        runid = i)
-    }
-  stopCluster(cl)
-  fwrite(rbindlist(svim_week_list), paste0("outputs/svim_week_case_trigger_batch_",
-                               batch_id, "_", tstamp(), ".csv"))
-}
-```
-
-Parallel preemptive vaccination `run_vacc_impact_outbreak_weekly`
-
-```{r, eval=FALSE}
-library(doParallel)
-
-tic <- Sys.time()
-dat <- outbreak_data
-# vacc_covs <- seq(0.6, 0.95, by=0.05)
-vacc_covs <- c(0.6, 0.75, 0.9)
-# maximum possible delay before vaccines take effect after vaccination
-# max(params$dur_campaign)/7 + max(params$delay_vacc_effect)/7
-vacc_weeks <- -52 # some random large number ensure than pre-emptive vaccination
-nruns <- 200 # number of simulation runs
-
-cl <- makeCluster(getOption("cl.cores", detectCores() - 6))
-registerDoParallel(cl)
-
-svim_week_list <-
-  foreach(i = 1:nruns, .packages = c("data.table")) %dopar% {
-    run_vacc_impact_outbreak_weekly(
-      outbreak_data = dat,
-      ive_data = ive_data,
-      parameters = params,
-      age_dist = pop_by_age_wpp,
-      vacc_week = vacc_weeks,
-      vacc_cov = vacc_covs,
-      runid = i)
-  }
-stopCluster(cl)
-
-Sys.time() - tic
-# Time difference of 36.02764 mins
-fwrite(rbindlist(svim_week_list), paste0("outputs/svim_week_preemptive_", tstamp(), ".csv"))
-```
-
-## Summarize the simulation results
-
-Combine the results from results from separate files across which runid's are different.
-```{r}
-# svim_week_list <- read_rds("outputs/svim_week_list_vacc_week_20241010.rds")
-library(readr)
-library(data.table)
-source("utils.R")
-id_begin <- 1
-id_end <- 200
-batch_size <- 10
-batch_ids <- seq(id_begin, id_end, by=batch_size)
-
-svim_df <- data.frame()
-for (i in 1:length(batch_ids)) {
-  d <- fread(paste0("outputs/svim_week_list_vacc_week_batch_", batch_ids[i],
-           "_20250301.csv"))
-  svim_df <- rbindlist(list(svim_df, sum_over_week(d)))
-  rm(d)
-}
-
-fwrite(svim_df, paste0("outputs/svim_time_trigger_sum_over_week_runid_1_200_", 
-                        tstamp(), ".csv"))
-
-# case-triggered vaccination
-id_begin <- 101
-id_end <- 200
-batch_size <- 10
-batch_ids <- seq(id_begin, id_end, by=batch_size)
-
-svim_df <- data.frame()
-
-for ( i in 1:length(batch_ids)) {
-  d <- fread(paste0("outputs/svim_case_trigger_week_list_batch_",
-                    batch_ids[i], "_20250301.csv"))
-  svim_df <- rbindlist(list(svim_df, sum_over_week(d, case_trigger=T)))
-  rm(d)
-}
-
-fwrite(svim_df, paste0("outputs/svim_case_trigger_sum_over_week_runid_1_200_", 
-                       tstamp(), ".csv"))
-
-# preemptive vaccination
-svim_df <- fread("outputs/svim_week_preemptive_20250228.csv")
-svim_df <- sum_over_week(svim_df)
-fwrite(svim_df, paste0("outputs/svim_preemptive_sum_over_week_runid_1_200_",
-                       tstamp(), ".csv"))
-```

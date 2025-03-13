@@ -867,43 +867,32 @@ ggsave(paste0("plots/fig3_pcr_outbk_size_", tstamp(hour=T), ".pdf"),
        device = cairo_pdf, width=fgw2*fac, height=fgw2*1.15*fac, units="mm")
 ```
 
-## Figure 4. Cumlative impact for subsets
+## Figure 4. Impact for subsets
+The unit of analysis is in this case is a collection of outbreaks that were
+sampled given the number of OCVs deployed over the period of 2013-2022
 
 ```{r}
 d <- fread("outputs/cea_0.75_time_tigger_subsets_by_year_20250306.csv")
 tt <- 9
 d |> filter(vacc_week == tt, vacc_cov == 0.75) -> d
-
+# We assume that the number of OCVs deployed are the same as the size of the
+# outbreak-affected population
 d |>
-  ggplot(aes(x=as.factor(year_max), y=vacc_dose))+
+  ggplot(aes(x=as.factor(year_max), y=pop_tot))+
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
-  scale_y_continuous(limits=c(0,4e7))+
-  # labs(x="Vaccination week since the outbreak began",
-  #      y="Cumulative case reduction until year")+
-  labs(x="", y="Cumulative\n OCVs deployed")+
+  # scale_y_continuous(limits=c(0,4e7))+
+  labs(x="", y="Cumulative OCVs deployed\n(outbreak-affected population)")+
   theme_light()+
   theme_tight()+
   theme_x_blank() -> plt_a1
 
 d |>
-  ggplot(aes(x=as.factor(year_max), y=pop_tot))+
-  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
-               outlier.size=0.6)+
-  scale_y_continuous(limits=c(0,8.5e7))+
-  # labs(x="Vaccination week since the outbreak began",
-  #      y="Cumulative case reduction until year")+
-  labs(x="", y="Cumulative number\n of outbreak-affected people")+
-  theme_light()+
-  theme_tight()+
-  theme_x_blank() -> plt_b1
-
-d |>
   ggplot(aes(x=as.factor(year_max), y=s_ch_averted_tot+1))+
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
-  labs(x="", y="Cumulative\ncase averted")+
-  scale_y_log10(limits=c(1,1e5))+
+  labs(x="", y="Cumulative\ncases averted")+
+  # scale_y_log10(limits=c(1,1e5))+
   theme_light()+
   theme_tight()+
   theme_x_blank() -> plt_b1
@@ -912,9 +901,8 @@ d |>
   ggplot(aes(x=as.factor(year_max), y=pct_reduc_case))+
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
-  scale_y_continuous(labels = scales::percent_format(scale=1),
-                     limits=c(0,90))+
-  labs(x="", y="Cumulative\n% case reduction")+
+  scale_y_continuous(labels = scales::percent_format(scale=1))+
+  labs(x="", y="% reduction\nin cases")+
   theme_light()+
   theme_tight()+
   theme_x_blank() -> plt_c1
@@ -924,7 +912,7 @@ d |>
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
   scale_y_continuous(limits = c(0,2))+
-  labs(x="", y="Case averted\nper 1000 OCVs")+
+  labs(x="", y="Case averted\nper 1,000 OCVs")+
   theme_light()+
   theme_tight()+
   theme_x_blank() -> plt_d1
@@ -938,57 +926,40 @@ d |>
   theme_light()+
   theme_tight() -> plt_e1
 
-d |>
-  ggplot(aes(x=as.factor(year_max), y=cost_per_death_averted))+
-  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
-               outlier.size=0.6)+
-  scale_y_log10()+
-  labs(x="", y="Cost per\ndeath averted (US$)")+
-  theme_light()+
-  theme_tight() -> plt_f1
+plt <- wrap_plots(list(plt_a1,plt_b1,plt_c1,plt_d1,plt_e1), ncol=1,
+                  guides="collect") +
+  plot_annotation(tag_levels = 'A') &
+  theme(plot.tag.position  = c(0.08,0.9),
+        plot.tag = element_text(size=12)) 
 
+ggsave(paste0("plots/fig4_cumulative_impact_tt_", tstamp(), ".pdf"),
+         plt, device = cairo_pdf, width=70*3, height=70*3, units="mm")
+```
 
-# plt_1 <- (plt_a + plt_b + plt_c + plt_d + plt_e + plt_f) +
-#   # plot_annotation(tag_levels = 'A') +
-#   plot_layout(ncol=1, guides="collect") &
-#   theme(plot.tag.position  = c(0.1,0.9),
-#         plot.tag = element_text(size=13)) &
-#   theme(legend.position = "top")
-
-# ggsave(paste0("plots/fig4_cumulative_impact_tt_", tt, "_", tstamp(), ".pdf"),
-#          plt, device = cairo_pdf, width=70*2.3, height=70*5, units="mm")
-
-
+## Figure S4
+```{r}
 d <- fread("outputs/cea_0.75_case_trigger_subsets_by_year_20250311.csv")
 ct <- 150
-# select one runid to reduce the number of data points
 d |> filter(case_trigger == ct, vacc_cov == 0.75) -> d
-# # select one runid to reduce the number of data points
-# d |> filter(runid == 1, case_trigger == 150, vacc_cov == 0.75) -> d
-
 d |>
   ggplot(aes(x=as.factor(year_max), y=pop_tot))+
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
   scale_y_continuous()+
-  # labs(x="Vaccination week since the outbreak began",
-  #      y="Cumulative case reduction until year")+
-  labs(x="", y="")+
+  labs(x="", y="Cumulative OCVs deployed\n(outbreak-affected population)")+
   theme_light()+
   theme_tight()+
-  theme_x_blank()+
-  theme_y_blank() -> plt_a2
+  theme_x_blank() -> plt_a2
 
 d |>
   ggplot(aes(x=as.factor(year_max), y=s_ch_averted_tot+1))+
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
-  labs(x="", y="")+
+  labs(x="", y="Cumulative\ncases averted")+
     scale_y_log10(limits=c(1,1e5))+
   theme_light()+
   theme_tight()+
-  theme_x_blank()+
-  theme_y_blank()  -> plt_b2
+  theme_x_blank()  -> plt_b2
 
 d |>
   ggplot(aes(x=as.factor(year_max), y=pct_reduc_case))+
@@ -996,7 +967,7 @@ d |>
                outlier.size=0.6)+
   scale_y_continuous(labels = scales::percent_format(scale=1),
                      limits=c(0,90))+
-  labs(x="", y="")+
+  labs(x="", y="% reduction\nin cases")+
   theme_light()+
   theme_tight()+
   theme_x_blank()+
@@ -1007,7 +978,7 @@ d |>
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
   scale_y_continuous(limits = c(0,2))+
-  labs(x="", y="")+
+  labs(x="", y="Case averted\nper 1,000 OCVs")+
   theme_light()+
   theme_tight()+
   theme_x_blank()+
@@ -1018,26 +989,19 @@ d |>
   geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
                outlier.size=0.6)+
   scale_y_log10(limits=c(1,1e5))+
-  labs(x="", y="")+
+  labs(x="", y="Cost per\ncase averted (US$)")+
   theme_light()+
   theme_tight()+
   theme_y_blank() -> plt_e2
 
-d |>
-  ggplot(aes(x=as.factor(year_max), y=cost_per_death_averted))+
-  geom_boxplot(width=0.6, position=position_dodge(width=0.7), 
-               outlier.size=0.6)+
-  scale_y_log10()+
-  labs(x="", y="")+
-  theme_light()+
-  theme_tight()+
-  theme_y_blank()  -> plt_f2
+plt <- wrap_plots(list(plt_a2,plt_b2,plt_c2,plt_d2,plt_e2), 
+                  ncol=1,guides="collect")+
+  plot_annotation(tag_levels = 'A') &
+  theme(plot.tag.position  = c(0.08,0.9),
+        plot.tag = element_text(size=12))  
 
-plt <- wrap_plots(list(plt_a1,plt_a2,plt_b1,plt_b2,plt_c1,
-                       plt_c2,plt_d1,plt_d2,plt_e1,plt_e2), byrow=T,ncol=2,guides="collect") 
-
-ggsave(paste0("plots/fig4_cumulative_impact_", tstamp(), ".pdf"),
-         plt, device = cairo_pdf, width=70*4.5, height=70*4.5, units="mm")
+ggsave(paste0("plots/figS4_cumulative_impact_ct_", tstamp(), ".pdf"),
+         plt, device = cairo_pdf, width=70*4, height=70*4, units="mm")
 ```
 
 

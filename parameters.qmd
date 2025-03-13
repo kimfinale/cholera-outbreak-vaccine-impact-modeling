@@ -20,18 +20,20 @@ summary(params$dur_campaign)
 Vaccine coverage data from Table 2 in Pezzoli et al. 2020
 We chose 0.6, 0.75 and 0.9 as the three vaccine coverage rates
 ```{r}
-vac_cov_data <- 
+vacc_cov_data <- 
   data.frame(setting = c("Endemic","Humanitarian crisis","Outbreak"),
            admin_cov_first_dose = c(93.6, 82.9, 98.8)/100,
            admin_cov_second_dose = c(92.4, 82.0, 93.0)/100, 
            estimate_cov_at_least_one = c(85.1, 73.2, 86.3)/100)
 
-vac_cov_data |> 
+vacc_cov_data |> 
   filter(setting != "Endemic") |>
   group_by(setting) |>
   summarize(frac_effect = estimate_cov_at_least_one/(1-(1-admin_cov_first_dose)*(1-admin_cov_second_dose)),
-            vacc_cov_r1 = admin_cov_first_dose*frac_effect) |>
-  summarize(mean_vacc_cov_r1 = mean(vacc_cov_r1))
+            vacc_cov_r1 = admin_cov_first_dose*frac_effect) -> vacc_cov_r1
+vacc_cov_r1
+# we take the vaccine coverage for round 1 for Outbreak rather than Humanitarian crises 
+
 ```
 
 
