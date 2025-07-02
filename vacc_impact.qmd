@@ -396,7 +396,7 @@ batch_size <- 10                  # Number of runs per parallel batch
 # Sys.sleep(60*(60*2+40)) # wait until other CPU-intensive work is completed
 
 # Loop through batches of runs for parallel execution
-for (batch_id in seq(1, nruns, by = batch_size)) {
+for (batch_id in seq(181, nruns, by = batch_size)) {
   message(paste("Processing batch ID:", batch_id))
   run_ids <- batch_id:(batch_id + batch_size - 1)  # Run IDs in current batch
 
@@ -435,9 +435,8 @@ dat <- outbreak_data
 dat <- dat %>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
 
 # Define case thresholds that trigger vaccination
-case_triggers <- c(1, 5, seq(10, 100, 10))
-vacc_covs <- c(seq(0.6, 0.9, 0.15), 0.85)
-vacc_covs <- seq(0.75, 0.85)
+case_triggers <- c(1, 10, 50, 100)
+vacc_covs <- c(0.6, 0.75, 0.9)
 vacc_weeks <- seq(1, 15, 2)
 # vacc_weeks <- seq(5, 9, 2)
 nruns <- 200                # Number of simulation runs
@@ -449,7 +448,7 @@ for (batch_id in seq(1, nruns, by = batch_size)) {
   run_ids <- batch_id:(batch_id + batch_size - 1)
 
   # Create and register parallel cluster
-  cl <- makeCluster(getOption("cl.cores", detectCores() - 4))
+  cl <- makeCluster(getOption("cl.cores", detectCores() - 2))
   registerDoParallel(cl)
 
   # Run simulations in parallel
@@ -476,46 +475,6 @@ toc <- Sys.time()
 message(paste("Total execution time:", round(toc - tic, digits=2), "minutes"))
 ```
 
-
-## Preemptive Vaccination Strategy
-
-This section models vaccination done before outbreaks begin.
-
-```{r preemptive-sim, eval=FALSE}
-tic <- Sys.time()
-dat <- outbreak_data
-
-# Settings for preemptive vaccination
-vacc_covs <- c(0.6, 0.75, 0.9)
-vacc_weeks <- -52  # Negative value ensures pre-emptive vaccination (well before outbreak)
-nruns <- 200       # Number of simulation runs
-
-# Create and register parallel cluster
-cl <- makeCluster(getOption("cl.cores", detectCores() - 6))
-registerDoParallel(cl)
-
-# Run simulations in parallel
-svim_week_list <-
-  foreach(i = 1:nruns, .packages = c("data.table")) %dopar% {
-    run_vacc_impact_outbreak_weekly(
-      outbreak_data = dat,
-      ive_data = ive_data,
-      parameters = params,
-      age_dist = age_dist,
-      vacc_week = vacc_weeks,    # Preemptive vaccination
-      vacc_cov = vacc_covs,
-      runid = i)
-  }
-stopCluster(cl)
-
-# Track execution time
-toc <- Sys.time()
-message(paste("Execution time:", toc - tic))
-
-# Save results
-fwrite(rbindlist(svim_week_list), 
-       paste0("outputs/svim_week_preemptive_", tstamp(), ".csv"))
-```
 
 ## Combine Simulation Results
 
@@ -554,7 +513,7 @@ svim_df <- data.frame()
 for (i in 1:length(batch_ids)) {
   message(paste("Processing batch", i, "of", length(batch_ids)))
   d <- read_rds(paste0("outputs/svim_week_case_trigger_batch_",
-                   batch_ids[i], "_20250523.rds"))
+                   batch_ids[i], "_20250702.rds"))
   svim_df <- rbindlist(list(svim_df, sum_over_week(d, case_trigger = TRUE)))
   rm(d) 
 }
@@ -563,12 +522,6 @@ for (i in 1:length(batch_ids)) {
 saveRDS(svim_df, 
         paste0("outputs/svim_case_trigger_sum_over_week_runid_1_200_",
                tstamp(), ".rds"))
-
-# ---- 3. Preemptive vaccination results ----
-svim_df <- fread("outputs/svim_week_preemptive_20250228.csv")
-svim_df <- sum_over_week(svim_df)
-fwrite(svim_df, paste0("outputs/svim_preemptive_sum_over_week_runid_1_200_",
-                      tstamp(), ".csv"))
 ```
 
 # Cost-Effectiveness Analysis
@@ -615,10 +568,11 @@ rm(d)  # Free memory
 ```{r cea-case-trigger}
 # Load summarized case-triggered vaccination results
 d_ct <- 
-  read_rds("outputs/svim_case_trigger_sum_over_week_runid_1_200_20250523.rds")
+  read_rds(paste0("outputs/svim_case_trigger_sum_over_week_runid_1_200_", 
+                  tstamp(), ".rds"))
 
 # Process each vaccine coverage level
-for (vc in c(VC3,0.85)) {
+for (vc in VC3) {
   message(paste("Processing results for vaccine coverage =", vc))
   
   # Full cost-effectiveness analysis
@@ -629,48 +583,17 @@ for (vc in c(VC3,0.85)) {
   saveRDS(svim_ct_cea,
          paste0("outputs/cea_", vc, "_case_trigger_", 
                 tstamp(), ".rds"))
-    
+  rm(svim_ct_cea)  
   # Calculate mean across simulation runs
-  svim_ct_mean_cea <- add_cea_variables(d_ct[vacc_cov == vc], 
-                                        mean_age_inf = mean_age_inf)
-  svim_ct_mean_cea <- add_cea_results(svim_ct_mean_cea)
+  # svim_ct_mean_cea <- add_cea_variables(d_ct[vacc_cov == vc], 
+  #                                       mean_age_inf = mean_age_inf)
+  # svim_ct_mean_cea <- add_cea_results(svim_ct_mean_cea)
   # Save mean results
-  saveRDS(svim_ct_mean_cea,
-         paste0("outputs/cea_", vc, "_case_trigger_mean_across_runid_", 
-                tstamp(), ".rds"))
-  rm(svim_ct_cea, svim_ct_mean_cea)
-}
-```
-
-## Calculate Impact Metrics for Preemptive Vaccination
-
-```{r cea-preemptive}
-# Load summarized preemptive vaccination results
-d <- fread("outputs/svim_preemptive_sum_over_week_runid_1_200_20250302.csv")
-
-# Process each vaccine coverage level
-for (vc in VC3) {
-  message(paste("Processing results for vaccine coverage =", vc))
+  # saveRDS(svim_ct_mean_cea,
+  #        paste0("outputs/cea_", vc, "_case_trigger_mean_across_runid_", 
+  #               tstamp(), ".rds"))
+  # rm(svim_ct_mean_cea)
   
-  # Full cost-effectiveness analysis
-  cea <- add_cea_variables(d[vacc_cov == vc], mean_age_inf = mean_age_inf)
-  cea <- add_cea_results(cea)
-  
-  # Save detailed results (as RDS for larger files)
-  saveRDS(cea, paste0("outputs/cea_", vc, "_preemptive_", tstamp(), ".rds"))
-  
-  # Calculate mean across simulation runs
-  m <- mean_across_runid(d[vacc_cov == vc])
-  m_cea <- add_cea_variables(m, mean_age_inf = mean_age_inf)
-  m_cea <- add_cea_results(m_cea)
-  
-  # Save average results
-  saveRDS(m_cea,
-          paste0("outputs/cea_", vc, "_preemptive_mean_across_runid_",
-                 tstamp(), ".rds"))
-  
-  # Clean up to save memory
-  rm(cea, m, m_cea)
 }
 ```
 
