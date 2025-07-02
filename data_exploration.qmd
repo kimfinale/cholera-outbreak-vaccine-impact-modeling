@@ -1,0 +1,572 @@
+---
+title: "Outbreak Data Preparation"
+author: "Data Analysis Team"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
+    theme: cosmo
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(dplyr)
+library(lubridate)
+library(stringr)
+library(ggplot2)
+library(tidyr)
+```
+
+# Introduction
+
+This document implements a methodology to identify unique outbreaks from a dataset that may contain duplicate entries across different administrative levels. The approach focuses on:
+
+1. Excluding outbreaks reported at the country level
+2. Examining outbreaks at admin1 level and excluding them if there are outbreaks at admin2 or admin3 that:
+   - Fall under the same admin1 region
+   - Have start and end dates within the timeframe of the admin1 outbreak
+3. Examining outbreaks at admin2 level and excluding them if there are outbreaks at admin3 that:
+   - Fall under the same admin2 region
+   - Have start and end dates within the timeframe of the admin2 outbreak
+
+The result is a deduplicated dataset that contains only the most granular (specific) outbreak information available.
+
+# Data Preparation
+
+## Reading and Preprocessing Data
+
+```{r}
+# Function to read and preprocess the outbreak data
+read_outbreak_data <- function(file_path) {
+  # Read the CSV file
+  outbreak_data <- fread(file_path, stringsAsFactors = FALSE)
+  # outbreak_data <- read.csv(file_path, stringsAsFactors = FALSE)
+  
+  # Convert date columns to Date objects
+  outbreak_data$start_date <- as.Date(outbreak_data$start_date)
+  outbreak_data$end_date <- as.Date(outbreak_data$end_date)
+  
+  # Filter out country-level outbreaks as specified
+  outbreak_data <- outbreak_data[spatial_scale != "country"] 
+  
+
+  # Ensure proper ordering by spatial scale
+  outbreak_data$spatial_scale <- factor(outbreak_data$spatial_scale, 
+                                        levels = c("admin1", "admin2", "admin3"))
+  
+  return(outbreak_data)
+}
+```
+
+## Extracting Administrative Hierarchy
+
+```{r}
+# Function to extract administrative hierarchy from location string
+extract_admin_hierarchy <- function(location) {
+  parts <- strsplit(location, "::")[[1]]
+  
+  # The first element is the region (e.g., "afr"), the second is the country code
+  if (length(parts) < 3) {
+    return(list(admin1 = NA, admin2 = NA, admin3 = NA))
+  }
+  
+  admin1 <- paste(parts[1:3], collapse = "::")
+  admin2 <- if (length(parts) >= 4) paste(parts[1:4], collapse = "::") else NA
+  admin3 <- if (length(parts) >= 5) location else NA
+  
+  return(list(admin1 = admin1, admin2 = admin2, admin3 = admin3))
+}
+
+# Function to identify if an outbreak is within another outbreak's timeframe
+is_within_timeframe <- function(child_start, child_end, parent_start, parent_end) {
+  # Check if child outbreak timeframe is within parent outbreak timeframe
+  # Use vectorized approach to handle multiple dates
+  if(length(child_start) > 1) {
+    return(child_start >= parent_start & child_end <= parent_end)
+  } else {
+    return(child_start >= parent_start && child_end <= parent_end)
+  }
+}
+```
+
+# Deduplication Algorithm
+
+## Main Deduplication Function
+
+```{r}
+# Main function to deduplicate outbreaks
+deduplicate_outbreaks <- function(outbreak_data) {
+  # Add columns to store hierarchy information
+  outbreak_data <- outbreak_data %>%
+    rowwise() %>%
+    mutate(
+      admin_hierarchy = list(extract_admin_hierarchy(location)),
+      admin1_location = admin_hierarchy$admin1,
+      admin2_location = admin_hierarchy$admin2,
+      admin3_location = admin_hierarchy$admin3
+    ) %>%
+    ungroup()
+  
+  # Initialize a column to mark outbreaks for exclusion
+  outbreak_data$exclude <- FALSE
+  
+  # Process admin1 outbreaks
+  admin1_outbreaks <- outbreak_data %>% 
+    filter(spatial_scale == "admin1")
+  
+  # For each admin1 outbreak
+  for (i in 1:nrow(admin1_outbreaks)) {
+    admin1_loc <- admin1_outbreaks$location[i]
+    admin1_start <- admin1_outbreaks$start_date[i]
+    admin1_end <- admin1_outbreaks$end_date[i]
+    
+    # Find potential children (admin2 or admin3) that have this admin1 as parent
+    potential_children <- outbreak_data %>%
+      filter(
+        (spatial_scale == "admin2" | spatial_scale == "admin3") &
+        startsWith(location, paste0(admin1_loc, "::"))
+      )
+    
+    # Check if any children are within the timeframe of this admin1 outbreak
+    children_within_timeframe <- potential_children %>%
+      filter(
+        start_date >= admin1_start & end_date <= admin1_end
+      )
+    
+    # If there are children within the timeframe, mark this admin1 for exclusion
+    if (nrow(children_within_timeframe) > 0) {
+      outbreak_data$exclude[outbreak_data$location == admin1_loc & 
+                            outbreak_data$start_date == admin1_start] <- TRUE
+    }
+  }
+  
+  # Process admin2 outbreaks
+  admin2_outbreaks <- outbreak_data %>% 
+    filter(spatial_scale == "admin2")
+  
+  # For each admin2 outbreak
+  for (i in 1:nrow(admin2_outbreaks)) {
+    admin2_loc <- admin2_outbreaks$location[i]
+    admin2_start <- admin2_outbreaks$start_date[i]
+    admin2_end <- admin2_outbreaks$end_date[i]
+    
+    # Find potential children (admin3) that have this admin2 as parent
+    potential_children <- outbreak_data %>%
+      filter(
+        spatial_scale == "admin3" &
+        startsWith(location, paste0(admin2_loc, "::"))
+      )
+    
+    # Check if any children are within the timeframe of this admin2 outbreak
+    children_within_timeframe <- potential_children %>%
+      filter(
+        start_date >= admin2_start & end_date <= admin2_end
+      )
+    
+    # If there are children within the timeframe, mark this admin2 for exclusion
+    if (nrow(children_within_timeframe) > 0) {
+      outbreak_data$exclude[outbreak_data$location == admin2_loc & 
+                            outbreak_data$start_date == admin2_start] <- TRUE
+    }
+  }
+  
+  # Return the unique outbreaks (not marked for exclusion)
+  unique_outbreaks <- outbreak_data %>%
+    filter(!exclude)
+  
+  return(unique_outbreaks)
+}
+```
+
+# Validation Methods
+
+## Basic Validation
+
+```{r}
+# Function to validate the deduplication results
+validate_deduplication <- function(original_data, deduplicated_data) {
+  # Calculate basic statistics
+  total_original <- nrow(original_data)
+  total_after_country_filter <- nrow(original_data %>% filter(spatial_scale != "country"))
+  total_deduplicated <- nrow(deduplicated_data)
+  
+  excluded_count <- total_after_country_filter - total_deduplicated
+  
+  # Count by spatial scale
+  original_by_scale <- table(original_data$spatial_scale)
+  deduplicated_by_scale <- table(deduplicated_data$spatial_scale)
+  
+  # Create a validation report
+  validation_report <- list(
+    total_original = total_original,
+    total_after_country_filter = total_after_country_filter,
+    total_deduplicated = total_deduplicated,
+    excluded_count = excluded_count,
+    excluded_percentage = round(excluded_count / total_after_country_filter * 100, 2),
+    original_by_scale = original_by_scale,
+    deduplicated_by_scale = deduplicated_by_scale
+  )
+  
+  return(validation_report)
+}
+```
+
+## Extended Validation
+
+```{r}
+# Extended validation function
+validate_deduplication_extended <- function(original_data, deduplicated_data) {
+  # Basic validation
+  basic_validation <- validate_deduplication(original_data, deduplicated_data)
+  
+  # Identify the excluded outbreaks
+  original_ids <- paste0(original_data$location, "_", original_data$start_date)
+  deduplicated_ids <- paste0(deduplicated_data$location, "_", deduplicated_data$start_date)
+  excluded_ids <- setdiff(original_ids, deduplicated_ids)
+  
+  excluded_outbreaks <- original_data[original_ids %in% excluded_ids, ]
+  
+  # Analyze exclusions by administrative level
+  exclusions_by_admin <- table(excluded_outbreaks$spatial_scale)
+  
+  # Analyze exclusions by country
+  exclusions_by_country <- excluded_outbreaks %>%
+    group_by(country) %>%
+    summarise(count = n()) %>%
+    arrange(desc(count))
+  
+  # Time range analysis
+  time_range_excluded <- range(excluded_outbreaks$start_date)
+  time_range_kept <- range(deduplicated_data$start_date)
+  
+  # Check if any admin1 outbreaks with children were NOT excluded
+  false_negatives <- 0
+  admin1_kept <- deduplicated_data %>% filter(spatial_scale == "admin1")
+  
+  for (i in 1:nrow(admin1_kept)) {
+    admin1_loc <- admin1_kept$location[i]
+    admin1_start <- admin1_kept$start_date[i]
+    admin1_end <- admin1_kept$end_date[i]
+    
+    # Find potential children in the deduplicated data
+    potential_children <- deduplicated_data %>%
+      filter(
+        (spatial_scale == "admin2" | spatial_scale == "admin3") &
+        startsWith(location, paste0(admin1_loc, "::")) &
+        start_date >= admin1_start & end_date <= admin1_end
+      )
+    
+    if (nrow(potential_children) > 0) {
+      false_negatives <- false_negatives + 1
+    }
+  }
+  
+  # Check the same for admin2 outbreaks
+  admin2_kept <- deduplicated_data %>% filter(spatial_scale == "admin2")
+  
+  for (i in 1:nrow(admin2_kept)) {
+    admin2_loc <- admin2_kept$location[i]
+    admin2_start <- admin2_kept$start_date[i]
+    admin2_end <- admin2_kept$end_date[i]
+    
+    # Find potential children in the deduplicated data
+    potential_children <- deduplicated_data %>%
+      filter(
+        spatial_scale == "admin3" &
+        startsWith(location, paste0(admin2_loc, "::")) &
+        start_date >= admin2_start & end_date <= admin2_end
+      )
+    
+    if (nrow(potential_children) > 0) {
+      false_negatives <- false_negatives + 1
+    }
+  }
+  
+  # Create a comprehensive validation report
+  extended_validation <- c(basic_validation, list(
+    exclusions_by_admin = exclusions_by_admin,
+    top_countries_with_exclusions = head(exclusions_by_country, 10),
+    time_range_excluded = time_range_excluded,
+    time_range_kept = time_range_kept,
+    false_negatives = false_negatives
+  ))
+  
+  return(extended_validation)
+}
+
+# Function to check for remaining duplicates
+check_remaining_duplicates <- function(unique_outbreaks) {
+  duplicates_found <- 0
+  
+  # Check admin1 outbreaks
+  admin1_outbreaks <- unique_outbreaks %>% filter(spatial_scale == "admin1")
+  
+  for (i in 1:nrow(admin1_outbreaks)) {
+    admin1_loc <- admin1_outbreaks$location[i]
+    admin1_start <- admin1_outbreaks$start_date[i]
+    admin1_end <- admin1_outbreaks$end_date[i]
+    
+    # Look for potential children in the unique outbreaks
+    potential_children <- unique_outbreaks %>%
+      filter(
+        (spatial_scale == "admin2" | spatial_scale == "admin3") &
+        startsWith(location, paste0(admin1_loc, "::")) &
+        start_date >= admin1_start & end_date <= admin1_end
+      )
+    
+    if (nrow(potential_children) > 0) {
+      duplicates_found <- duplicates_found + 1
+      cat(paste0("Found admin1 with children still in dataset: ", admin1_loc, "\n"))
+    }
+  }
+  
+  # Check admin2 outbreaks
+  admin2_outbreaks <- unique_outbreaks %>% filter(spatial_scale == "admin2")
+  
+  for (i in 1:nrow(admin2_outbreaks)) {
+    admin2_loc <- admin2_outbreaks$location[i]
+    admin2_start <- admin2_outbreaks$start_date[i]
+    admin2_end <- admin2_outbreaks$end_date[i]
+    
+    # Look for potential children in the unique outbreaks
+    potential_children <- unique_outbreaks %>%
+      filter(
+        spatial_scale == "admin3" &
+        startsWith(location, paste0(admin2_loc, "::")) &
+        start_date >= admin2_start & end_date <= admin2_end
+      )
+    
+    if (nrow(potential_children) > 0) {
+      duplicates_found <- duplicates_found + 1
+      cat(paste0("Found admin2 with children still in dataset: ", admin2_loc, "\n"))
+    }
+  }
+  
+  if (duplicates_found == 0) {
+    cat("Validation successful: No remaining duplicates found.\n")
+  } else {
+    cat(paste0("Validation failed: Found ", duplicates_found, " cases where potential duplicates remain.\n"))
+  }
+  
+  return(duplicates_found)
+}
+```
+
+# Testing the Algorithms
+
+## Test on Sample Data
+
+```{r}
+# Function to test the deduplication on a sample
+test_deduplication <- function(outbreak_data, sample_size = 100) {
+  # Create a subset of the data for testing
+  set.seed(123) # For reproducibility
+  sample_indices <- sample(1:nrow(outbreak_data), min(sample_size, nrow(outbreak_data)))
+  sample_data <- outbreak_data[sample_indices, ]
+  
+  # Run deduplication on sample
+  cat("Testing deduplication on a sample of", nrow(sample_data), "records...\n")
+  deduplicated_sample <- deduplicate_outbreaks(sample_data)
+  
+  # Validate results
+  validation <- validate_deduplication(sample_data, deduplicated_sample)
+  
+  cat("\nTest Validation Report:\n")
+  cat(paste0("Sample size: ", nrow(sample_data), "\n"))
+  cat(paste0("Unique outbreaks after deduplication: ", nrow(deduplicated_sample), "\n"))
+  cat(paste0("Number of outbreaks excluded: ", validation$excluded_count, 
+             " (", validation$excluded_percentage, "%)\n"))
+  
+  # Example of checking specific cases
+  if (nrow(deduplicated_sample) < nrow(sample_data)) {
+    cat("\nExample of excluded outbreak:\n")
+    excluded <- sample_data %>% 
+      filter(!location %in% deduplicated_sample$location)
+    
+    if (nrow(excluded) > 0) {
+      print(excluded[1, c("location", "spatial_scale", "start_date", "end_date")])
+      
+      # Try to find why it was excluded (find its potential children)
+      if (excluded$spatial_scale[1] == "admin1") {
+        cat("\nPotential children that caused exclusion:\n")
+        children <- sample_data %>%
+          filter(
+            (spatial_scale == "admin2" | spatial_scale == "admin3") &
+            startsWith(location, paste0(excluded$location[1], "::")) &
+            start_date >= excluded$start_date[1] & end_date <= excluded$end_date[1]
+          )
+        
+        if (nrow(children) > 0) {
+          print(children[, c("location", "spatial_scale", "start_date", "end_date")])
+        } else {
+          cat("No children found in the sample that would explain exclusion.\n")
+        }
+      }
+    }
+  }
+  
+  return(deduplicated_sample)
+}
+```
+
+## Full Deduplication Process
+
+```{r}
+# Function to run the full deduplication process
+run_deduplication <- function(file_path) {
+  cat("Reading and preprocessing outbreak data...\n")
+  outbreak_data <- read_outbreak_data(file_path)
+  
+  cat("Running deduplication algorithm...\n")
+  unique_outbreaks <- deduplicate_outbreaks(outbreak_data)
+  
+  cat("Validating results...\n")
+  validation <- validate_deduplication(outbreak_data, unique_outbreaks)
+  
+  cat("\nValidation Report:\n")
+  cat(paste0("Total outbreaks (after filtering country level): ", validation$total_after_country_filter, "\n"))
+  cat(paste0("Total unique outbreaks after deduplication: ", validation$total_deduplicated, "\n"))
+  cat(paste0("Number of outbreaks excluded as potential duplicates: ", validation$excluded_count, 
+             " (", validation$excluded_percentage, "%)\n"))
+  
+  cat("\nOutbreaks by spatial scale (before deduplication):\n")
+  print(validation$original_by_scale)
+  
+  cat("\nOutbreaks by spatial scale (after deduplication):\n")
+  print(validation$deduplicated_by_scale)
+  
+  # Return the deduplicated data
+  return(unique_outbreaks)
+}
+```
+
+# Execute Deduplication Process
+
+```{r}
+# Set the file path to your data
+file_path <- "data/outbreak_data_summary.csv"
+
+# Read in the data
+outbreak_data <- read_outbreak_data(file_path)
+
+# Show basic information about the dataset
+cat("Dataset Information:\n")
+cat(paste0("Total number of outbreaks: ", nrow(outbreak_data), "\n"))
+cat("Outbreaks by spatial scale:\n")
+print(table(outbreak_data$spatial_scale))
+
+# Test the method on a sample
+sample_results <- test_deduplication(outbreak_data, 200)
+```
+
+```{r}
+# Run the full deduplication
+unique_outbreaks <- run_deduplication(file_path)
+
+# Verify there are no remaining duplicates
+cat("\nVerifying deduplication results...\n")
+remaining_duplicates <- check_remaining_duplicates(unique_outbreaks)
+```
+
+# Data Visualization
+
+## Geographic Distribution
+
+```{r}
+# Geographic distribution of unique outbreaks
+country_counts <- unique_outbreaks %>%
+  group_by(country) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+# Plot the top 10 countries by outbreak count
+ggplot(head(country_counts, 10), aes(x = reorder(country, count), y = count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Top 10 Countries by Number of Unique Outbreaks",
+    x = "Country",
+    y = "Number of Outbreaks"
+  ) +
+  theme_minimal()
+```
+
+## Temporal Distribution
+
+```{r}
+# Add year column
+unique_outbreaks$year <- lubridate::year(unique_outbreaks$start_date)
+
+# Create temporal distribution
+year_counts <- unique_outbreaks %>%
+  group_by(year) %>%
+  summarise(count = n()) %>%
+  arrange(year)
+
+# Plot temporal distribution
+ggplot(year_counts, aes(x = year, y = count)) +
+  geom_line(group = 1, color = "steelblue", size = 1) +
+  geom_point(color = "steelblue", size = 3) +
+  labs(
+    title = "Temporal Distribution of Outbreaks",
+    x = "Year",
+    y = "Number of Outbreaks"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(min(year_counts$year), max(year_counts$year), by = 1))
+```
+
+## Distribution by Administrative Level
+
+```{r}
+# Distribution by administrative level
+admin_level_counts <- as.data.frame(table(unique_outbreaks$spatial_scale))
+names(admin_level_counts) <- c("admin_level", "count")
+
+# Plot distribution by administrative level
+ggplot(admin_level_counts, aes(x = admin_level, y = count, fill = admin_level)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Distribution of Outbreaks by Administrative Level",
+    x = "Administrative Level",
+    y = "Number of Outbreaks"
+  ) +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Blues")
+```
+
+# Save Results
+
+```{r}
+# Save the deduplicated data to a CSV file
+output_file <- "unique_outbreaks.csv"
+write.csv(unique_outbreaks, output_file, row.names = FALSE)
+cat(paste0("Deduplicated outbreaks saved to: ", output_file, "\n"))
+```
+
+# Conclusion
+
+This analysis has identified unique outbreaks by filtering out potential duplicates across different administrative levels. The deduplication process:
+
+1. Started with `r nrow(outbreak_data)` outbreaks (excluding country-level)
+2. Identified `r nrow(outbreak_data) - nrow(unique_outbreaks)` potential duplicates (outbreaks at higher administrative levels that had more granular data available)
+3. Resulted in `r nrow(unique_outbreaks)` unique outbreaks
+
+The methodology provides a systematic approach to remove duplicates while preserving the most granular outbreak information available. This ensures that each unique outbreak is counted only once in subsequent analyses.
+
+# Appendix: Function Reference
+
+## Complete List of Functions
+
+- `read_outbreak_data()`: Reads and preprocesses outbreak data
+- `extract_admin_hierarchy()`: Extracts administrative hierarchy from location strings
+- `is_within_timeframe()`: Checks if a date range is within another date range
+- `deduplicate_outbreaks()`: Main deduplication algorithm
+- `validate_deduplication()`: Basic validation of deduplication results
+- `validate_deduplication_extended()`: Extended validation with detailed analysis
+- `check_remaining_duplicates()`: Verifies that no duplicates remain in the dataset
+- `test_deduplication()`: Tests the deduplication on a sample of data
+- `run_deduplication()`: Runs the complete deduplication process

@@ -1,49 +1,305 @@
 ---
-title: "Parameters"
-format: html
+title: "Parameter Preparation for Cholera Vaccine Impact Analysis"
+author: "Your Name"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    code-fold: show
 editor_options: 
   chunk_output_type: console
 ---
 
-## Parameter samples for simulation
-```{r}
+# Introduction
+
+This document handles the preparation of parameters for the cholera vaccine impact simulation. 
+It generates parameter samples for multiple simulation runs, defines vaccine coverage values, 
+and calculates impact metrics that will be used in the main analysis pipeline.
+
+
+# Setup
+
+## Load Packages and Utility Functions
+
+```{r setup}
+#| warning: false
+#| message: false
+
+# Core packages
+library(data.table)
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(ggplot2)
+library(ggridges)
+library(patchwork)
+library(conflicted)
+library(scales)
+library(viridis)
+library(doParallel)  # For parallel processing
+library(MASS)
+
+# Resolve conflicts in favor of dplyr functions
+conflict_prefer("filter", "dplyr")
+conflict_prefer("select", "dplyr")
+conflicts_prefer(data.table::first)
+conflicts_prefer(data.table::year)
+
+# Load utility functions
+source("utils.R")  # Custom utility functions for vaccine impact calculations
+```
+
+# Parameter Sample Generation
+
+We draw parameter samples from distributions to account for uncertainty in our model parameters.
+
+```{r setup}
+# Load required utility functions
 source("utils.R")
-dat_params <- data.table::fread("data/parameters.csv")
-nruns <- 200
-params <- draw_parameter_samples(nruns=nruns, parameter_data=dat_params)
-data.table::fwrite(params, paste0("outputs/params_", tstamp(), ".csv"))
+
+# Load parameter definitions from file
+dat_params <- fread("data/parameters.csv")
+
+# Generate multiple parameter sets for simulation runs
+nruns <- 200  # Number of simulation runs
+params <- draw_parameter_samples(nruns = nruns, parameter_data = dat_params)
+
+# Save parameter samples for later use
+# fwrite(params, paste0("outputs/params_", tstamp(), ".csv"))
+
+# Display summary statistics for the parameter distributions
 summary(params)
+
+# Check distribution of campaign duration parameter
 summary(params$dur_campaign)
 ```
 
+# Vaccine Coverage Configuration
 
-Vaccine coverage data from Table 2 in Pezzoli et al. 2020
-We chose 0.6, 0.75 and 0.9 as the three vaccine coverage rates
-```{r}
+We define vaccine coverage values based on observed field data from Pezzoli et al. 2020.
+
+```{r coverage}
+# Vaccine coverage data from Table 2 in Pezzoli et al. 2020
+# We choose 0.6, 0.75 and 0.9 as representative vaccine coverage rates
 vacc_cov_data <- 
-  data.frame(setting = c("Endemic","Humanitarian crisis","Outbreak"),
-           admin_cov_first_dose = c(93.6, 82.9, 98.8)/100,
+  data.frame(setting = c("Endemic", "Humanitarian crisis", "Outbreak"),
+           admin_cov_first_dose = c(93.6, 82.9, 98.8)/100,  # Convert percentages to proportions
            admin_cov_second_dose = c(92.4, 82.0, 93.0)/100, 
            estimate_cov_at_least_one = c(85.1, 73.2, 86.3)/100)
 
+# Calculate effective first-round coverage for different settings
+# We adjust for the relationship between administrative coverage and survey-estimated coverage
 vacc_cov_data |> 
-  filter(setting != "Endemic") |>
+  filter(setting != "Endemic") |>  # Exclude endemic settings for emergency response
   group_by(setting) |>
-  summarize(frac_effect = estimate_cov_at_least_one/(1-(1-admin_cov_first_dose)*(1-admin_cov_second_dose)),
-            vacc_cov_r1 = admin_cov_first_dose*frac_effect) -> vacc_cov_r1
-vacc_cov_r1
-# we take the vaccine coverage for round 1 for Outbreak rather than Humanitarian crises 
+  summarize(
+    # Calculate fraction of people reached by either dose
+    frac_effect = estimate_cov_at_least_one / 
+                 (1 - (1 - admin_cov_first_dose) * (1 - admin_cov_second_dose)),
+    # Apply this fraction to first dose coverage
+    vacc_cov_r1 = admin_cov_first_dose * frac_effect
+  ) -> vacc_cov_r1
 
+# We use vaccine coverage for outbreak settings rather than humanitarian crises
+print(vacc_cov_r1)
 ```
 
+# Vaccine Impact Calculation
 
-
-## Compute the impact of vaccine
+This section describes how we calculate the expected vaccine impact from the combination of direct 
+and indirect vaccine effectiveness.
 
 The impact expected from the pre-emptive vaccination is computed assuming all vaccine recipients experience the direct vaccine efficacy, DVE. The proportion of the population, age group $i$, at vaccination coverage proportion, $pi$, is given as belows: 
 
 $$P_{i,\pi} = 1-\left[\pi(1-\text{DVE}_i)(1-\text{IVE}) + (1-\pi)(1-\text{IVE})\right]$$
 
-## Compare IVE from the indirect effectiveness
+```{r impact}
+# The impact expected from vaccination is computed assuming all vaccine recipients 
+# experience the direct vaccine efficacy (DVE), plus indirect vaccine effectiveness (IVE).
+
+# For a population with age group i, at vaccination coverage proportion π, 
+# the overall protective effect is given by:
+# P_{i,π} = 1-[π(1-DVE_i)(1-IVE) + (1-π)(1-IVE)]
+
+# Where:
+# - DVE_i is the direct vaccine efficacy for age group i
+# - IVE is the indirect vaccine effectiveness at coverage level π
+# - The first term represents vaccinated people getting protection from both direct and indirect effects
+# - The second term represents unvaccinated people getting protection only from indirect effects
+```
+
+# Indirect Vaccine Effectiveness Model
+
+We load and process the indirect vaccine effectiveness model results from a previously-run
+Bayesian beta regression.
+
+```{r ive}
+# Load IVE model posterior predictive samples
+# This comes from a Bayesian beta regression model of indirect effectiveness vs. coverage
+ive_fit <- read_rds("outputs/ive_yrep_20241010.rds")
+ive_data <- ive_fit$yrep
+rm(ive_fit)  # Remove large object from memory to save space
+
+# The ive_data matrix contains posterior predictive samples of IVE for different coverage levels
+# Rows are simulation runs, columns are coverage levels from 0 to 1 in small increments
+# We will use these values to model how indirect protection varies with coverage
+```
+
+# Compare IVE from Indirect Effectiveness Studies
+
+```{r ive-compare}
+# The Longini et al. (2007) study provides IVE estimates from their individual-based model
+ive_longini <- 
+  data.frame(vc = seq(0.1, 0.9, by = 0.2),
+             ive = c(0.3, 0.7, 0.89, 0.97, 0.99),
+             lb = c(-0.39, 0.31, 0.72, 0.91, 0.98),
+             ub = c(0.83, 0.93, 0.98, 0.99, 1))
+
+# We can also analyze empirical data from field studies
+# Incidence rate based on the study by Ali (2005) in Matlab, Bangladesh
+# Individuals targeted for the trial: 89,596
+ir_baseline <- 11.2  # Baseline incidence rate per 1000 person-years
+vc_cutoff <- c(0, 0.28, 0.35, 0.40, 0.50, 0.65)  # Vaccine coverage cutoff points
+vc_mid <- vc_cutoff[1:5] + diff(vc_cutoff)/2     # Mid-point used as coverage value
+ir <- c(7.01, 5.87, 4.72, 4.65, 1.47)            # Observed incidence rates
+
+# Create data frame of empirical observations
+dat <- data.frame(ir = ir, vc = vc_mid, region = "Matlab")
+
+# Calculate indirect effectiveness from incidence rates
+dat$ive <- 1 - dat$ir / ir_baseline
+
+# Visualize relationship between coverage and indirect effectiveness
+# ggplot() +
+#   geom_point(data = ive_longini, aes(vc, ive, color = "Model"), shape = 15) +
+#   geom_linerange(data = ive_longini, aes(vc, ymin = lb, ymax = ub, color = "Model")) +
+#   geom_point(data = dat, aes(vc, ive, color = "Empirical"), shape = 17) +
+#   scale_y_continuous(limits = c(0, 1)) +
+#   scale_color_manual("Data source", values = c("Model" = "firebrick", "Empirical" = "steelblue")) +
+#   labs(x = "Vaccine coverage", y = "Indirect vaccine effectiveness") +
+#   theme_light()
+```
+
+## Age distribution of cholera cases: average age of infection
+
+```{r}
+# Eastern Mediterranean Health Journal Volume 30 2024  
+# Retrospective analysis of a large-scale cholera outbreak in Sudan
+# Table 1.
+N <- 983 + 985
+mean <- (30.9*983+29.5*985)/(983+985)
+
+# BMC Infectious Diseases volume 19, Article number: 4 (2019)
+# Epidemiological description of a protracted cholera outbreak in Tonj East and Tonj North counties, former Warrap State, South Sudan, May-Oct 2017
+
+N <- c(N, 1451)
+mean <- c(mean, 24)
+
+# Descriptive characterization of the 2010 cholera outbreak in Nigeria
+# BMC Public Health volume 14, Article number: 1167 (2014) 
+
+N <- c(N, 20688)
+median <- 12
+Q1 <- 3
+Q3 <- 17
+IQR <- Q3 - Q1
+# Quick estimation
+
+# Simple average of the quartiles
+mean_est1 <- (Q1 + median + Q3) / 3
+
+# Weighted toward median
+mean_est2 <- (Q1 + 2*median + Q3) / 4
+mean_est3 <- (Q1 + Q3) / 2
+
+# Estimate mean as integral approximation
+mean_est4 <- Q1*0.25 + median*0.25 + Q3*0.25 + 
+            (median-Q1)*0.125 + (Q3-median)*0.125
+
+assumed_min <- Q1 - 1.5*IQR
+assumed_max <- Q3 + 1.5*IQR
+mean_est5 <- (assumed_min + Q1 + median + Q3 + assumed_max) / 5
+
+# For right-skewed: mean > median
+# For left-skewed: mean < median
+skewness_factor <- (Q3 - median) - (median - Q1)
+mean_est6 <- median + skewness_factor * 0.1  # Empirical adjustment
+
+mean <- c(mean, mean_est2) 
+
+# Clin Infect Dis. 2024 Jul 12;79(Suppl 1):S8–S19. doi: 10.1093/cid/ciae236
+# Retrospective Analysis of Cholera/Acute Watery Diarrhea Outbreaks in Ethiopia From 2001 To 2023: Incidence, Case Fatality Rate, and Seasonal and Multiyear Epidemic Patterns
+
+# Age groups and case counts
+age_groups <- data.frame(
+  age_range = c("<5", "5-14", "15-44", "≥45"),
+  lower_bound = c(0, 5, 15, 45),
+  upper_bound = c(5, 14, 44, 75),  # Assumed 75 for ≥45 group
+  midpoint = c(2.5, 9.5, 29.5, 60), # Assumed 60 for ≥45 group
+  cases = c(11460, 18273, 53990, 16215)
+)
+
+total_cases <- sum(age_groups$cases)
+weighted_sum <- sum(age_groups$midpoint * age_groups$cases)
+weighted_mean <- weighted_sum / total_cases
+
+N <- c(N, total_cases)
+mean <- c(mean, weighted_mean)
+
+# Bwire PLoS Negl Trop Dis. 2017 Mar 13;11(3):e0005407. doi: 10.1371/journal.pntd.0005407
+# in the fishing villages of Uganda: 2011-2015
+# test which of the options provided closest value
+median <- 20
+Q1 <- 7
+Q3 <- 30
+(median + Q1 + Q3)/3
+(2*median + Q1 + Q3)/4
+(Q1 + Q3) / 2
+# Estimate mean as integral approximation
+Q1*0.25 + median*0.25 + Q3*0.25 + (median-Q1)*0.125 + (Q3-median)*0.125
+assumed_min <- Q1 - 1.5*IQR
+assumed_max <- Q3 + 1.5*IQR
+(assumed_min + Q1 + median + Q3 + assumed_max) / 5
+
+N <- c(N, 1827)
+mean <- c(mean, 21.2)
+
+##
+# Bwire. PLoS Negl Trop Dis. 2013 Dec 5;7(12):e2545. doi: 10.1371/journal.pntd.0002545
+# The Burden of Cholera in Uganda
+# District-specific data from the Uganda Ministry of Health, Health Management Information System disease surveillance database for the period 2005–2010.
+age_groups <- data.frame(
+  age_range = c("<1", "1-4", "5-14", "15-30", "31-59","60+"),
+  lower_bound = c(0, 1, 5,  15, 31, 60),
+  upper_bound = c(1, 5, 15, 31, 60, 75),  # Assumed 75 for ≥45 group
+  midpoint = c(0.5, 3, 10, 23, 45.5, 67.5), # Assumed 60 for ≥45 group
+  cases = c(5, 10, 17, 22, 31, 15)
+)
+total_cases <- sum(age_groups$cases)
+weighted_sum <- sum(age_groups$midpoint * age_groups$cases)
+weighted_mean <- weighted_sum / total_cases
 
 
+N <- c(N, 2760)
+mean <- c(mean, weighted_mean)
+
+## Summary
+N 
+mean
+paste0("weighted mean = ", round(sum(mean*N)/sum(N), digits=2))
+```
+
+# Conclusion
+
+This document has prepared the parameter sets needed for the cholera vaccine impact simulation.
+The parameters include:
+
+1. Vaccine efficacy parameters (DVE)
+2. Indirect vaccine effectiveness (IVE) estimates
+3. Vaccine coverage targets
+4. Campaign logistics parameters (duration, delay)
+
+These will be used in the main simulation analysis to model the impact of different
+vaccination strategies on cholera outbreaks.

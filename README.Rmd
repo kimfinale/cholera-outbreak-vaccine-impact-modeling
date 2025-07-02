@@ -7,10 +7,10 @@ output:
     variant: markdown_github
 ---
 
-## Kim JH, Duong M, Lee E,... Impact of cholera outbreak response immunization: Insights from modeling extensive outbreaks from sub-Saharan Africa, 2010-2023.
+## Kim JH, Duong M, Lee E,... Impact of cholera outbreak response immunization: Insights from modeling extensive outbreaks from sub-Saharan Africa, 2010-2020.
 
 
-This study models the outcomes of outbreak response immunization (ORI) campaigns across 1,406 cholera outbreaks in sub-Saharan Africa from 2010 to 2023. We incorporated vaccine effectiveness (both direct and indirect), age-specific efficacy, deployment delays, and immune response timelines into our analysis. Beyond evaluating all outbreaks, we analyzed prioritized subsets based on attack rates and outbreak scale to mimic scenarios with constrained vaccine availability. Key outcomes assessed include cases prevented, deaths averted, disability-adjusted life years (DALYs) gained, and cost-effectiveness.
+This study models the outcomes of outbreak response immunization (ORI) campaigns across 1,192 cholera outbreaks in sub-Saharan Africa from 2010 to 2020. We incorporated vaccine effectiveness (both direct and indirect), age-specific efficacy, deployment delays, and immune response timelines into our analysis. Beyond evaluating all outbreaks, we analyzed prioritized subsets based on attack rates and outbreak scale to mimic scenarios with constrained vaccine availability. Key outcomes assessed include cases prevented, deaths averted, disability-adjusted life years (DALYs) gained, and cost-effectiveness.
 
 ### R code and data for reproducing analysis
 
@@ -27,7 +27,7 @@ Simulation can be done in parallel using 'doParallel' package and then merged la
 
 - Summarize vaccine impact  
 
-**plots_tables.qmd**: Provides code for creating plots and tables featured in the main manuscript and supplementary materials.
+**Plots_Tables.qmd**: Provides code for creating plots and tables featured in the main manuscript and supplementary materials.
 
 **julia folder**: Houses files for the dynamic model:
 
