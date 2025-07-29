@@ -15,11 +15,11 @@ library(data.table)
 library(janitor)
 library(tidyverse)
 source("utils.R")
+save_csv <- FALSE
 ```
 
 ## Outbreak data sets
 
-Outbreak Selection Criteria
 Exclude the following outbreaks:
 
  1. Outbreaks too small or too large
@@ -49,47 +49,60 @@ ocv_use <- fread("outputs/ocv_use_GTFCC_data_20241120.csv")
 max_ocv_dose <- 1e3 * max(ocv_use$DOSE_ROUND_ONE, na.rm = TRUE)
 min_ocv_dose <- 1e3 * min(ocv_use$DOSE_ROUND_ONE, na.rm = TRUE)
 
-outbreaks1 <- outbreaks0[outbreak_pop <= max_ocv_dose & outbreak_pop >= min_ocv_dose]
+included1 <- outbreaks0[outbreak_pop <= max_ocv_dose]
 excluded1 <- 
-  outbreaks0[!id_outbreak %in% outbreaks1$id_outbreak][, filter_reason := "Too small or too large"]
+  outbreaks0[!id_outbreak %in% included1$id_outbreak][, filter_reason := "Too large"]
+
+included2 <- included1[outbreak_pop >= min_ocv_dose]
+excluded2 <- 
+  included1[!id_outbreak %in% included2$id_outbreak][, filter_reason := "Too small"]
 
 # Step 2: Remove nested outbreaks
-outbreaks2 <- remove_nested_outbreaks(outbreaks1, selection_method = "size_duration_specificity")
-included2 <- outbreaks2$deduplicated
-excluded2 <- outbreaks1[!id_outbreak %in% included2$id_outbreak][, filter_reason := "Nested outbreak"]
+included3 <- remove_nested_outbreaks(included2, 
+                                      selection_method = "size_duration_specificity")
+included3 <- included3$deduplicated
+excluded3 <- included2[!id_outbreak %in% included3$id_outbreak][, filter_reason := "Nested outbreak"]
 
 # Step 3: Remove outbreaks after 2020 (OCV data unavailable)
-included3 <- included2[start_date <= as.Date("2021-01-01")]
-excluded3 <- 
-  included2[!id_outbreak %in% included3$id_outbreak][, filter_reason := "Outbreak after 2020"]
+included4 <- included3[start_date <= as.Date("2021-01-01")]
+excluded4 <- 
+  included3[!id_outbreak %in% included4$id_outbreak][, filter_reason := "Outbreak after 2020"]
 
 # Step 4: Remove OCV-affected outbreaks
 docv_ <- clean_names(fread("data/outbreak_files_Oct2024/ocv_long_dataset.csv"))
 docv <- docv_[(ocv_before_1 == TRUE | ocv_before_2 == TRUE | 
                ocv_before_3 == TRUE | ocv_during == TRUE)]
 
-included4 <- included3[!id_outbreak %in% docv$id_outbreak]
-excluded4 <- included3[id_outbreak %in% docv$id_outbreak][, filter_reason := "OCV-affected outbreak"]
+included5 <- included4[!id_outbreak %in% docv$id_outbreak]
+excluded5 <- included4[id_outbreak %in% docv$id_outbreak][, filter_reason := "OCV-affected outbreak"]
 
 # Combine all excluded
 # excluded3 and excluded4 inherit the duplicate_group column from included2 
 excluded1[, duplicate_group := NA]
 excluded2[, duplicate_group := NA]
+excluded3[, duplicate_group := NA]
 # adjust the column order
 setcolorder(excluded1, c(setdiff(names(excluded1), c("duplicate_group", "filter_reason")), "duplicate_group", "filter_reason"))
 setcolorder(excluded2, c(setdiff(names(excluded2), c("duplicate_group", "filter_reason")), "duplicate_group", "filter_reason"))
+setcolorder(excluded3, c(setdiff(names(excluded3), c("duplicate_group", "filter_reason")), "duplicate_group", "filter_reason"))
+
 excluded1$start_date <- as.Date(excluded1$start_date)
 excluded1$end_date <- as.Date(excluded1$end_date)
 excluded2$start_date <- as.Date(excluded2$start_date)
 excluded2$end_date <- as.Date(excluded2$end_date)
+excluded3$start_date <- as.Date(excluded3$start_date)
+excluded3$end_date <- as.Date(excluded3$end_date)
 
-excluded_all <- rbindlist(list(excluded1, excluded2, excluded3, excluded4), fill = TRUE)
+excluded_all <- 
+  rbindlist(list(excluded1, excluded2, excluded3, excluded4, excluded5), 
+                          fill = TRUE)
 
-# Save datasets
-saveRDS(outbreaks0, paste0("outputs/outbreaks_initial_", tstamp(), ".rds"))
-saveRDS(included4, paste0("outputs/outbreaks_included_", tstamp(), ".rds"))
-saveRDS(excluded_all, paste0("outputs/outbreaks_excluded_", tstamp(), ".rds"))
-
+# Save data sets
+if (save_rds) {
+  saveRDS(outbreaks0, paste0("outputs/outbreaks_initial_", tstamp(), ".rds"))
+  saveRDS(included4, paste0("outputs/outbreaks_included_", tstamp(), ".rds"))
+  saveRDS(excluded_all, paste0("outputs/outbreaks_excluded_", tstamp(), ".rds"))
+}
 # Create summary log
 filter_log <- data.frame(
   Step = c("Initial", "Size filter", "Nested filter", "OCV cutoff", "OCV-affected"),
@@ -97,152 +110,12 @@ filter_log <- data.frame(
   Excluded = c(0, nrow(excluded1), nrow(excluded2), nrow(excluded3), nrow(excluded4))
 )
 
-write.csv(filter_log, paste0("outputs/outbreak_filter_summary_", tstamp(),".csv"), 
+if (save_csv) {
+  fwrite(filter_log, paste0("outputs/outbreak_filter_summary_", tstamp(),".csv"), 
           row.names = FALSE)
-```
-
-
-Outbreak characteristics depending on the exclusion criteria
-```{r}
-outbreak_data_all <- as.data.frame(fread("outputs/outbreak_data_all_20250228.csv"))
-
-# Load outbreaks not affected by OCVs (for modeling)
-outbreak_data <- fread("outputs/outbreak_data_20250228.csv") 
-outbreaks_filtered <-
-  readRDS("outputs/outbreak_summary_filtered_20250418.rds")
-
-outbreak_data %<>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak) 
-
-
-# (A) Outbreak time series by group
-# Identify outbreaks that have been excluded or included in analysis
-ids_excl <- outbreak_data_all |> 
-  filter(!(id_outbreak %in% outbreak_data$id_outbreak)) |>  
-  pull(id_outbreak) |>
-  unique()
-
-# Identify confirmed outbreaks (with laboratory confirmation)
-ids_conf <- outbreak_data |> 
-  group_by(id_outbreak) |>
-  mutate(c_ch_sum = sum(c_ch)) |> 
-  filter(c_ch_sum > 0) |> 
-  pull(id_outbreak) |>
-  unique()
-
-# Identify suspected (not confirmed) outbreaks
-ids_susp <- outbreak_data |>
-  group_by(id_outbreak) |>
-  mutate(c_ch_sum = sum(c_ch)) |>
-  filter(!(c_ch_sum > 0)) |>
-  pull(id_outbreak) |>
-  unique()
-
-# data on the subregion name
-d <- fread("data/africa_subregion_country_names.csv")
-d$iso3c <- sapply(d$Country, function(x) countrycode::countrycode(x, origin="country.name.en", destination = "iso3c"))
-
-outbreak_data_all$iso3c <- outbreak_data_all$country
-d0 <- left_join(outbreak_data_all, d, by="iso3c")
-d0$outbreak_group <- ifelse(d0$id_outbreak %in% ids_excl, "Excluded", 
-                            ifelse(d0$id_outbreak %in% ids_conf, "Confirmed",
-                                   "Suspected"))
-
-d0$ocv_affected <- ifelse(d0$id_outbreak %in% docv$id_outbreak, "Yes", "No")
-d0$excluded_step <- ifelse(d0$id_outbreak %in% excluded1$id_outbreak, "1",
-                          ifelse(d0$id_outbreak %in% excluded2$id_outbreak, "2", ifelse(d0$id_outbreak %in% excluded3$id_outbreak, "3", ifelse(d0$id_outbreak %in% excluded4$id_outbreak, "4", "NA"))))
-```
-
-
-```{r}
-# Get outbreak summary data
-ds <- clean_names(as.data.frame(fread("data/outbreak_files_Oct2024/outbreak_summary.csv")))
-
-# Create unique IDs for each outbreak
-ds |>
-  group_by(location, outbreak_number) |>
-  mutate(id_outbreak = paste0(location, "-", start_date, "-", end_date)) |> 
-  ungroup() -> ds
-
-# Join outbreak data with summary details
-outbk_data_summary <- 
-  left_join(filter(outbreaks, week == 1), 
-            ds[, c("outbreak_pop", "total_s_ch", "total_c_ch", 
-                   "total_deaths", "duration_weeks", 
-                  "peak_week_incidence", "time_to_peak_week",
-                  "peak_week_incidence_per_100percent", 
-                  "peak_week_incidence_per_10e3", "mean_r0_1st_week", 
-                  "area_per_1km2", "rural_urban", "ar_per_10e3",
-                  "cfr_per_100percent", "id_outbreak")], 
-            by = "id_outbreak")
-```
-
-```{r}
-# Get time series data
-outbreak_ts <- 
-  read_rds("data/outbreak_files_Oct2024/time_series_outbreak_extraction.rds")
-```
-
-```{r}
-ds <- fread("data/outbreak_data_summary.csv")
-ds$ID_outbreak <- paste0(ds$location, "-", ds$start_date, "-", ds$end_date)
-ds$ID <- 1:nrow(ds)
-# data for the outbreaks affected by OCV
-docv <- fread("data/ocv_long_dataset.csv")
-# exclude outbreaks that were affected by OCV campaigns using IDs 
-dat <- ds[!(ds$ID_outbreak %in% docv$ID_outbreak),]
-ts <- readRDS("data/outbreak_data_ts.rds")
-
-fits <- fread("outputs/data_fit_eval_20240409.csv")
-good_fits <- fits[PARAM_GLOBAL == 1 & PARAM_SANITY_5pct == 1 & 
-                    FIT_SANITY == 1 & R2_adj >= 0.5]
-```
-
-
-Combine vaccine impact 
-```{r}
-vacc_cov <- 1:9
-vacc_week <- 0:12
-vacc_impact_list <- vector('list', length(vacc_cov))
-for (i in 1:length(vacc_cov)) {
-  vc <- vacc_cov[i]
-  cols = paste0("inc_C", vc, "T", vacc_week)
-  d = read.csv(paste0("G:\\My Drive\\Projects\\VIMC\\VIMC 2.0\\CholeraOutbreakModel\\julia\\outputs\\vacc_4p_cov", vc, "_20240425.csv"))
-  # NA values are replaced with baseline incidence values when no vaccines were
-  # introduced. The decision was made because NA values were created when
-  # the vaccination was not implemented because outbreak ended earlier than
-  # the vaccination start + duration
-  for (col in cols) {
-    nas = is.na(d[, col])
-    d[nas, col] = d[nas, "inc_novacc"]
-  }
-  d |>
-    group_by(data_id) |>
-    summarise(data_id = data_id[1],
-              ID_outbreak = ID_outbreak[1],
-              across(contains("inc"), sum)) -> d2
-  
-  col_id = 1:ncol(d2)
-  id_iter <- col_id[grepl("inc_C", names(d2))]
-  d3 <- d2
-  for (k in id_iter) {
-    d3[,k] = 100 * (d2[,"inc_novacc"] - d2[,k]) / d2[,"inc_novacc"]
-  }
-  
-  d4 = data.frame(data_id = rep(d3$data_id, length(vacc_week)),
-                  ID_outbreak = rep(d3$ID_outbreak, length(vacc_week)),
-                  vacc_eff = unlist(d3[, id_iter]), 
-                  vacc_cov = vc,
-                  vacc_week = rep(vacc_week, each=nrow(d3)))
- 
-  
-  vacc_impact_list[[i]] <- d4
 }
-
-vacc_impact <- do.call('rbind', vacc_impact_list)
-# vacc_impact_0425 based on parameters comparable to the static model
-# i.e., no waning of vaccine-induced immunity and vaccine efficacy of [30, 64]
-# fwrite(vacc_impact, paste0("outputs/dynamic_vim", tstamp(), ".csv"))
 ```
+
 
 ## Life expectancy data
 ```{r}
@@ -254,25 +127,15 @@ nms <- estimates[12,]
 estimates <- estimates[-(1:12),]
 names(estimates) <- nms
 
-data.table::fwrite(estimates, paste0("outputs/wpp_life_expectancy_", tstamp(), ".csv"))
-
-# # for years 2022 and onwards
-# med_variant <- 
-#   readxl::read_xlsx("data/WPP2022_MORT_F05_1_LIFE_EXPECTANCY_BY_AGE_BOTH_SEXES.xlsx",
-#                      "Medium variant")
-# nms_ <- med_variant[12,]
-# med_variant <- med_variant[-(1:12),]
-# names(med_variant) <- nms_
-# 
-# life_expectancy <- rbind(estimates, med_variant)
-# data.table::fwrite(life_expectancy, 
-#                    paste0("outputs/wpp_life_expectancy_", tstamp(), ".csv"))
+if (save_csv) {
+  fwrite(estimates, paste0("outputs/wpp_life_expectancy_", tstamp(), ".csv"))
+}
 ```
  
 
 ## Population by age to compute the proportion of population under 5
+
 ```{r}
-library(readxl)
 estimates <-
   readxl::read_xlsx("data/WPP2024_POP_F01_1_POPULATION_SINGLE_AGE_BOTH_SEXES.xlsx",
                      "Estimates")
@@ -280,30 +143,22 @@ nms <- estimates[12,]
 estimates <- estimates[-(1:12),]
 names(estimates) <- nms
 
-data.table::fwrite(estimates, 
-                   paste0("outputs/wpp_pop_by_age_", tstamp(), ".csv"))
-
-# # for years 2022 and onwards
-# med_variant <- 
-#   readxl::read_xlsx("data/WPP2022_POP_F01_1_POPULATION_SINGLE_AGE_BOTH_SEXES.xlsx",
-#                      "Medium variant")
-# nms_ <- med_variant[12,]
-# med_variant <- med_variant[-(1:12),]
-# names(med_variant) <- nms_
-# 
-# pop_by_age <- rbind(estimates, med_variant)
+if (save_csv) {
+  fwrite(estimates, paste0("outputs/wpp_pop_by_age_", tstamp(), ".csv"))
+}
 pop_by_age <- estimates
 pop_by_age$prop_u5 <- NA
 for (i in 1:nrow(pop_by_age)) {
  pop_by_age$prop_u5[i] <- sum(as.double(pop_by_age[i, 12:16])) / 
    sum(as.double(pop_by_age[i, 12:112]))
 }
-data.table::fwrite(pop_by_age,
-                   paste0("outputs/wpp_pop_by_age_", tstamp(), ".csv"))
+if (save_csv) {
+  fwrite(pop_by_age, paste0("outputs/wpp_pop_by_age_", tstamp(), ".csv"))
+}
 ```
 
   
-## Indirect vaccine efficacy (IVE)
+## Indirect Vaccine Efficacy (IVE)
 
 IVE data come from a Bayesian beta regression fit
 ```{r}
@@ -312,14 +167,203 @@ fit <- read_rds("outputs/fit_ive_matlab_20241008.rds")
 ive_yrep <- list(yrep = as.data.frame(rstan::extract(fit)$yrep),
                 vacc_cov = round(expit(rstan::extract(fit)$new_X[1,,2]), digits=2))
 ive_yrep$vacc_cov
-saveRDS(ive_yrep, paste0("outputs/ive_yrep_", tstamp(), ".rds"))
-
+if (save_rds) {
+  saveRDS(ive_yrep, paste0("outputs/ive_yrep_", tstamp(), ".rds"))
+}
 # plot(ive_yrep$eff_vacc_cov, ive_yrep$yrep[sample(1:nrow(ive_yrep$yrep),1), ], type="l", col='grey90')
 # for(i in 1:100){
 #   lines(ive_yrep$eff_vacc_cov, 
 #         ive_yrep$yrep[sample(1:nrow(ive_yrep$yrep),1), ], col="grey90")
 #   invisible(readline(prompt="Press [enter] to continue"))
 # }
+```
+
+## Number of days lost due to illness
+
+1. Ilboudo PG, Huang XX, Ngwira B, Mwanyungwe A, Mogasale V, Mengel MA, et al. Cost-of-illness of cholera to households and health facilities in rural Malawi. PLoS One. 2017;12(9):e0185041. 
+8 days for 100 people
+
+2. Awalime DK, Davies-Teye BBK, Vanotoo LA, Owoo NS, Nketiah-Amponsah E. Economic evaluation of 2014 cholera outbreak in Ghana: a household cost analysis. Health Econ Rev. 2017 Dec 4;7(1):45. 
+
+3. Tembo T, Simuyandi M, Chiyenu K, Sharma A, Chilyabanyama ON, Mbwili-Muleya C, et al. Evaluating the costs of cholera illness and cost-effectiveness of a single dose oral vaccination campaign in Lusaka, Zambia. PLoS One. 2019;14(5):e0215972. 
+
+4. Figuereo S, Yoon I, Kaddu SS, Lubogo M, Baruch J, Hossain AA, et al. Cost of Cholera for Households and Health Facilities, Somalia. J Epidemiol Glob Health. 2024 Sep 1;14(3):1219–30. 
+
+5. Poulos C, Riewpaiboon A, Stewart JF, Clemens J, Guh S, Agtini M, et al. Costs of Illness Due to Endemic Cholera. Epidemiol Infect. 2012 Mar;140(3):10.1017/S0950268811000513. 
+
+6. Schaetti C, Weiss MG, Ali SM, Chaignat CL, Khatib AM, Reyburn R, et al. Costs of illness due to cholera, costs of immunization and cost-effectiveness of an oral cholera mass vaccination campaign in Zanzibar. PLoS Negl Trop Dis. 2012;6(10):e1844. 
+
+
+### Patients
+
+```{r}
+df <- data.frame(study = "Ilboudo (2017)", 
+                 location = "Machinga and Zomba, Malawi", 
+                 days_lost = 8.0, n = 100, 
+                 description="patient inactive period")
+df <- rbind(df, 
+            data.frame(study = "Awalime (2017)", 
+                       location = "La-Dadekotopon and Shai-Osudoku, Ghana", 
+                       days_lost = 6.2, n = 439, 
+                       description="days missed"))
+df <- rbind(df,
+            data.frame(study = "Tembo (2019)", 
+                       location = "Zambia", 
+                       days_lost = 6.49, n = 189, 
+                       description="days of hospitalization plus days of inactivity"))
+df <- rbind(df,
+            data.frame(study = "Figuereo (2024)", 
+                       location = "Somalia",
+                       days_lost = 3.08, n = 400, 
+                       description="length of stay at the cholera treatment center"))
+df <- rbind(df, 
+            data.frame(study = "Poulos (2012)", 
+                       location = "Beira, Mozambique", 
+                       days_lost = 6.85, n = 400, 
+                       description="days ill for > 18 yo and adults"))
+df <- rbind(df, 
+            data.frame(study = "Schaetti (2012)", 
+                       location = "Zanzibar, Tanzania", 
+                       days_lost = 5, n = 95, 
+                       description="duration of illness episode"))
+
+df %>% filter(!(study %in% c("Tembo (2019)", "Figuereo (2024)"))) -> df
+
+weighted.mean(df$days_lost, df$n)
+with(df, sum(days_lost * n) / sum(n))
+```
+
+#### Caregivers
+
+```{r}
+df <- data.frame(study = "Ilboudo (2017)", 
+                 location = "Machinga and Zomba, Malawi", 
+                 days_lost = 4.0, n = 100, 
+                 description="caregiver inactive period")
+df <- rbind(df, 
+            data.frame(study = "Awalime (2017)", 
+                       location = "La-Dadekotopon and Shai-Osudoku, Ghana", 
+                       days_lost = 3.2, n = 575, 
+                       description="days missed"))
+
+weighted.mean(df$days_lost, df$n)
+with(df, sum(days_lost * n) / sum(n))
+```
+
+
+
+Individual studies
+```{r}
+#-------------------------------------------------------------------------------
+study <- "Ilboudo (2017)"
+days_inactive_patient <- c(8.0)
+days_inactive_care_giver <- c(4.0)
+n <- c(100)
+
+#-------------------------------------------------------------------------------
+study <- "Awalime (2017)"
+# In Table 3: La-Dadekotopon: Total patient days missed = 2071, Average = 6.9 days. This implies that around 300 (2071 / 6.9 ≈ 300.14) cholera cases were included. While the text says that total number of days missed 48.03 for La-Dadekopon and 24.79 days for Shai-Osudoku, it isn't clear that how they got these numbers. Summing across all four categories--Days missed (Patient),  Days missed (Caregiver),  Admission Days,  and Travel Time (Days)--does not produce this number. It appears that Days missed include the days at the hospital (admission days) and the days missed after discharge. We therefore use this number.
+
+# From the following text:
+# ... The time components include; travel time to facility, time spent at facility
+# till discharge and work or school days lost after discharge ...
+# the days lost column seems to imply days lost after discharge, which is a bit ig 
+
+n_pat_la <-round(2071/6.9) # patients for La-Dadekotopon
+n_cg_la <- round(1451/4.84) # caregiver for La-Dadekotopon
+n_pat_shai <- round(655/4.71) # patients for Shai-Osudoku
+n_cg_shai <- round(388/1.41) # caregiver for Shai-Osudoku
+n_pat_hosp_la <- round(823/2.74)
+n_pat_hosp_shai <- round(357/2.57)
+
+# Updated average days missed and inferred sample sizes
+days_missed_patient <- c(6.90, 4.71)
+n_patient <- c(n_pat_la, n_pat_shai) 
+days_missed_patient_wt <- sum(days_missed_patient * n_patient) / sum(n_patient)
+
+days_hosp <- c(2.74, 2.57)
+n_pat <-c(n_pat_hosp_la, n_pat_hosp_shai)
+
+days_hosp_wt <- sum(days_hosp * n_pat) / sum(n_pat)
+
+days_missed_caregiver <- c(4.84, 1.41)
+n_caregiver <- c(n_cl, n_cs)
+# Compute weighted average
+days_missed_caregiver_wt <- sum(days_missed_caregiver * n_caregiver) / sum(n_caregiver)
+
+travel_time <- 0.02*24 # hours
+
+#-------------------------------------------------------------------------------
+study <- "Tembo (2019)"
+# Days of hospitalisation (Tembo et al. 2019, Table 5)
+counts_hosp <- c(134, 47, 8)
+days_hosp_midpoints <- c(2, 5.5, 9)
+days_hosp_mean <- sum(counts_hosp * days_hosp_midpoints) / sum(counts_hosp)
+
+# Days of inactivity (Tembo et al. 2019, Table 5)
+counts_inact <- c(29, 85, 62, 13)
+days_inact_midpoints <- c(0, 2, 5.5, 9)
+days_inactivity_mean <- sum(counts_inact * days_inact_midpoints) / sum(counts_inact)
+
+(mean_days_lost <- days_hosp_mean + days_inactivity_mean)
+
+#-------------------------------------------------------------------------------
+study <- "Figuereo (2024)"
+# based on the text lines 10- p.1224
+days_hosp <- 3.08
+n <- 400
+
+#-------------------------------------------------------------------------------
+# days ill appear to include days at the hospital and the missed school(or work) days 
+study <- "Poulos (2012)"
+# Table 4
+days_missed_school <- 2.8 # sd(1.2)
+days_missed_work <- 3.7 # sd (2.7)
+days_missed <- c(days_missed_school, days_missed_work) # no work for under 18?, no school for >= 18?
+
+days_ill_child <- 5.8 # sd(1.9) # < 18 yo
+days_ill_adult <- 7.5 # sd(4.5)
+days_ill <- c(days_ill_child, days_ill_adult)
+n_child <- 19
+n_adult <- 31
+n <- c(n_child, n_adult)
+
+days_ill_wt <- sum(days_ill * n) / sum(n)
+days_missed_wt <- sum(days_missed * n) / sum(n)
+
+####
+study <- "Schaetti (2012)"
+days_ill <- 5 # median from patient data
+n <- 95
+```
+
+## Severity 
+
+ Mbewe N, Imamura T, Sivile S, Sinkala A, Zulu P, Chanda C, et al. Clinical Characteristics of 6578 Adult Patients With Cholera Admitted to Community and Referral Cholera Treatment Centers in Lusaka, Zambia, October 2023 to April 2024. Open Forum Infectious Diseases. 2025 Jun 1;12(6):ofaf277. 
+
+
+The number of cases by symptoms at admission across four
+different patients outcomes (Table 2). We assume cases with no dehydration and
+some dehydration belong to the moderate case definition, according to GBD 2017.
+This is a simplification in that patients with no or some dehydration have died,
+which indicates that those with moderate symptoms might have progressed to severe states.
+We accounted for this by deleting 4 cases from those with no dehydration and
+22 cases from those with some dehydration. The proportion, however, does not 
+change much (0.2201713 to 0.2226451). We follow the definition from GBD 2017 because we apply the
+disability weighted as estimated in GBD 2017.
+
+```{r}
+## the third number indicates deaths
+no_dehydra <- 1607+381+4+1603
+some_dehydra <- 1955+691+22+1933
+severe_dehydra <- 1031+252+20+1011
+
+prop <- c(no_dehydra, some_dehydra, severe_dehydra) / 
+  sum(c(no_dehydra, some_dehydra, severe_dehydra))
+prop <- c(no_dehydra-4, some_dehydra-22, severe_dehydra+26) / 
+  sum(c(no_dehydra, some_dehydra, severe_dehydra))
+
+
 ```
 
 

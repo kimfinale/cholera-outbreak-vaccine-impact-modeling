@@ -220,48 +220,40 @@ chol |>
 # Load Vaccine Impact Simulation Results
 
 ```{r load-results}
-# Time-triggered vaccination results
-cea <- read_rds("outputs/cea_onset_trigger_20250520.rds")
-
-# cea_vc85 <- read_rds("outputs/cea_0.85_time_trigger_20250313.rds")
-# Combine results from different coverage levels
-# cea <- rbind(cea, cea_vc85)
-# rm(cea_vc85)
+# Outbreak onset-triggered vaccination results
+# cea <- read_rds("outputs/cea_onset_trigger_20250520.rds")
+cea <- read_rds("outputs/cea_0.6_onset_trigger_20250716.rds")
+cea <- rbind(cea, read_rds("outputs/cea_0.75_onset_trigger_20250716.rds"))
+cea <- rbind(cea, read_rds("outputs/cea_0.9_onset_trigger_20250716.rds"))
 
 # Case-triggered vaccination results
-cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250523.rds")
-# cea_ct <- rbind(cea_ct, read_rds("outputs/cea_0.75_case_trigger_20250523.rds"))
-
-# Preemptive vaccination results
-cea_pe_vc60 <- read_rds("outputs/cea_0.6_preemptive_20250314.rds")
-cea_pe_vc75 <- read_rds("outputs/cea_0.75_preemptive_20250314.rds")
-cea_pe_vc90 <- read_rds("outputs/cea_0.9_preemptive_20250314.rds")
-
-# Combine preemptive results
-cea_pe <- rbind(cea_pe_vc60, cea_pe_vc75)
-rm(cea_pe_vc60, cea_pe_vc75)  # Free memory
-cea_pe <- rbind(cea_pe, cea_pe_vc90)
-rm(cea_pe_vc90)
-cea_pe <- cea_pe %>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
-
-# Load subset analyses
-cea_subsets <-
-  read_rds("outputs/cea_0.75_onset_trigger_random_subsets_by_year_20250606.rds")
-
+# cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250523.rds")
+cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250716.rds")
+# subsets with varying size
 cea_subsets_by_size <-
-  read_rds("outputs/cea_onset_trigger_subsets_by_size_20250607.rds")
+  read_rds("outputs/cea_onset_trigger_subsets_by_size_20250716.rds")
 
-cea <- left_join(cea, outbk_data_summary[,                                 c("id_outbreak","ar_per_10e3","duration_weeks")], 
+# Load subset analyses reflecting global OCV stockpile
+cea_subsets <-
+  read_rds("outputs/cea_0.75_onset_trigger_random_subsets_by_year_20250711.rds")
+
+cea <- left_join(cea, outbk_data_summary[,
+                      c("id_outbreak","ar_per_10e3","duration_weeks")], 
                  by = "id_outbreak")
 
+# excluded outbreaks for sensitivity analysis
+cea_excl <- read_rds("outputs/cea_0.6_onset_trigger_excl_20250716.rds")
+cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.75_onset_trigger_excl_20250716.rds"))
+cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.9_onset_trigger_excl_20250716.rds"))
+cea_ct_excl <- read_rds("outputs/cea_0.75_case_trigger_excl_20250716.rds")
 ```
 
 # Result Figures
 
 ## Figure 1. Outbreaks and % case reduction 
 ```{r}
-# Setup --------------------------------------------------------------
 set.seed(42)
+
 # Global parameters ----------------------------------------------------
 save_plot <- TRUE
 text_size <- 5          # Default text size for annotations
@@ -823,7 +815,6 @@ if (save_plot) {
         height=1.6*fgw1*fac,
         units = "mm")
 }
-
 ```
 
 ## Figure 2: Outbreak Description
@@ -855,6 +846,10 @@ ids_susp <- outbreak_data |>
 ```{r}
 # Load and prepare country-region mapping data
 country_region <- fread("data/africa_subregion_country_names.csv")
+dt <- country_region
+country_region <- country_region[Subregion == "Middle Africa", Subregion := "Central Africa"]
+# change Middle to Central
+country_region %>% mutate()
 country_region$iso3c <- sapply(country_region$Country, 
                                function(x) countrycode(x, origin = "country.name.en", 
                                                      destination = "iso3c"))
@@ -1073,12 +1068,14 @@ if (save_plot) {
   ggsave(paste0("plots/fig2_outbreak_summary_", tstamp(), ".pdf"), combined_plot,
          device = cairo_pdf, width = fgw2 * fac, height = fgw2 * fac, units = "mm")
 }
+
+
 ```
+
 
 ## Figure S1: Excluded outbreaks were also plotted 
 
 ```{r figS1, eval=FALSE}
-save_plot <- TRUE
 # (A) Outbreak time series by group
 # Identify outbreaks that have been excluded or included in analysis
 ids_excl <- outbreak_data_all |> 
@@ -1229,33 +1226,126 @@ if (save_plot) {
 
 ## Figure 3: Outbreak Onset-Triggered Scenario
 
+Codes to produce the numbers used in the text
 ```{r fig3, eval=FALSE}
 cea %>%
-  filter(vacc_cov == 0.75, vacc_week %in% c(1,9)) %>%
+  filter(ori_occurred) %>%
+  filter(vacc_cov %in% c(0.6, 0.75, 0.9), vacc_week %in% c(1,9)) %>%
   group_by(vacc_cov, vacc_week) %>%
   summarize_quantiles(variable = s_ch_averted_tot) -> ca1
 
-format_median_iqr(ca1, row=1)
-format_median_iqr(ca1, row=2)
+format_median_iqr(ca1, row=3)
+format_median_iqr(ca1, row=4)
 
 cea %>%
-  filter(vacc_cov == 0.75, vacc_week %in% c(1,9)) %>%
+  filter(ori_occurred) %>%
+  filter(vacc_week %in% c(1,9)) %>%
   group_by(vacc_cov, vacc_week) %>%
   summarize_quantiles(variable = pct_reduc_case) -> pcr1
 
-format_median_iqr(pcr1, row=1)
-format_median_iqr(pcr1, row=2)
+format_median_iqr(pcr1, row=3)
+format_median_iqr(pcr1, row=4)
 
 cea %>%
-  filter(vacc_cov == 0.9, vacc_week %in% c(1,9)) %>%
+  filter(ori_occurred) %>%
+  filter(vacc_week %in% c(1,9)) %>%
   group_by(vacc_cov, vacc_week) %>%
-  summarize_quantiles(variable = pct_reduc_case) -> pcr2
+  summarize_quantiles(variable = case_averted_per_1000_OCV) -> capd1
 
-format_median_iqr(pcr2, row=1)
-format_median_iqr(pcr2, row=2)
+format_median_iqr(capd1, row=3)
+format_median_iqr(capd1, row=4)
 
-# sampling because large dataset makes plotting slow
-cea_s <- filter(cea, runid %in% sample_runids) # cea subset
+cea %>%
+  filter(ori_occurred) %>%
+  filter(vacc_week %in% c(1,9)) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(variable = cost_per_case_averted) -> cpca1
+
+format_median_iqr(cpca1, row=3)
+format_median_iqr(cpca1, row=4)
+
+# outbreaks missed by delayed vaccination
+
+wks_delay <- c(1, 5, 9, 13) # de
+dur_missed_id <- vector('list', length(wks_delay))
+vax_missed_id <- vector('list', length(wks_delay))
+
+for (i in 1:length(wks_delay)) {
+  outbk_data_summary %>% 
+    filter(duration_weeks <= wks_delay[i]) %>%
+    pull(id_outbreak) -> dur_missed_id[[i]]
+  
+  cea %>% 
+    filter(vacc_week == wks_delay[i] & runid == 1 & vacc_cov == 0.75) %>% 
+    filter(!ori_occurred) %>% 
+    pull(id_outbreak) -> vax_missed_id[[i]]
+}
+n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
+n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
+
+100 * n_outbreaks_missed1 / nrow(outbk_data_summary)
+
+# percentage case reduction by size group
+probs <- seq(0, 1, by = 0.1)
+unq_data <- filter(cea, runid == 1 & vacc_cov == 0.75 & vacc_week == 1)
+size_grp_cutoff <- quantile(unq_data$s_ch_tot, probs = probs)
+d <- cea
+d$size_grp <- sapply(d$s_ch_tot, function(x) get_group_id(x, size_grp_cutoff))
+
+d <- d[ori_occurred == T]
+res <- rbindlist(lapply(1:10, function(i) calculate_impact_by_subset(d, i)))
+res %>% filter(vacc_week %in% c(1,5,9), subset_id %in% c(1,10), vacc_cov == VC)
+
+
+# rate of decrease in percentage case reduction
+# by size, attack rate, and duration
+ar_grp_cutoff <- quantile(outbk_data_summary$ar_per_10e3, probs = probs)
+dur_grp_cutoff <- quantile(outbk_data_summary$duration_weeks, probs = probs)
+
+d %<>%
+  group_by(runid, id_outbreak, vacc_cov) %>%
+  mutate(pct_reduc_case_frac = c(1, 1-frac_diff(pct_reduc_case, lag=1)),
+         pct_reduc_case_diff = c(1, -diff(pct_reduc_case, lag=1)))
+
+d %>% filter(vacc_cov == 0.75) -> d1
+d1$grp <- "All"
+d %>% filter(ar_per_10e3 > ar_grp_cutoff[10]) -> d2 # top 10%
+d2$grp <- "AR"
+d %>% filter(duration_weeks > dur_grp_cutoff[10]) -> d3 # top 10%
+d3$grp <- "Dur"
+d %>% filter(s_ch_tot > size_grp_cutoff[10]) -> d4 # top 10%
+d4$grp <- "Size"
+
+d <- rbind(d1, d2)
+d_ <- rbind(d3, d4)
+d <- rbind(d, d_)
+
+d %>%
+  filter(vacc_week > 1, vacc_week <= 15) %>% 
+  group_by(grp) %>% 
+  summarize_quantiles(pct_reduc_case_frac*100) -> prpcr
+
+format_median_iqr(prpcr, row=1)
+format_median_iqr(prpcr, row=2)
+format_median_iqr(prpcr, row=3)
+format_median_iqr(prpcr, row=4)
+
+d %>%
+  filter(vacc_week > 1, vacc_week <= 15) %>% 
+  mutate(half_life = log(2)/abs(pct_reduc_case_frac)) %>% 
+  group_by(grp) %>% 
+  summarize_quantiles(half_life) -> hlife
+
+format_median_iqr(hlife, row=1)
+format_median_iqr(hlife, row=2)
+format_median_iqr(hlife, row=3)
+format_median_iqr(hlife, row=4)
+```
+
+plots
+```{r}
+# sampling because the data set is very large and plotting becomes slow
+cea_s <- filter(cea, ori_occurred & runid %in% sample_runids ) # cea subset
 
 plt3a <- cea_s |>
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) |>
@@ -1271,10 +1361,7 @@ plt3a <- cea_s |>
   theme_light() +
   theme_tight()
 
-cea_s |> 
-  filter(vacc_cov ==0.75, vacc_week == 1) |>
-  summarize(pct = median(pct_reduc_case))
-             
+
 plt3b <- cea_s |> 
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) |>
   ggplot(aes(x = as.factor(vacc_week), y = pct_reduc_case,
@@ -1299,13 +1386,14 @@ size_grp_cutoff <- quantile(unq_data$s_ch_tot, probs = probs)
 cea_s$size_grp <- sapply(cea_s$s_ch_tot, function(x) get_group_id(x, size_grp_cutoff))
 
 res <- rbindlist(lapply(1:10, function(i) calculate_impact_by_subset(cea_s, i)))
-res %>% filter(vacc_week %in% c(1,9), subset_id %in% c(1,10), vacc_cov == VC)
 
-rbindlist(lapply(1:10, function(i) calculate_impact_by_subset(cea_s, i, summary_fun = "quantile", quantile_prob = c(0.25)))) %>% 
-  filter(vacc_week %in% c(1,9), subset_id %in% c(1,10), vacc_cov == VC)-> res_lb 
+# res %>% filter(vacc_week %in% c(1,5,9), subset_id %in% c(1,10), vacc_cov == VC)
 
-rbindlist(lapply(1:10, function(i) calculate_impact_by_subset(cea_s, i, summary_fun = "quantile", quantile_prob = c(0.75)))) %>% 
-  filter(vacc_week %in% c(1,9), subset_id %in% c(1,10), vacc_cov == VC)-> res_ub
+# rbindlist(lapply(1:10, function(i) calculate_impact_by_subset(cea_s, i, summary_fun = "quantile", quantile_prob = c(0.25)))) %>% 
+#   filter(vacc_week %in% c(1,9), subset_id %in% c(1,10), vacc_cov == VC)-> res_lb 
+# 
+# rbindlist(lapply(1:10, function(i) calculate_impact_by_subset(cea_s, i, summary_fun = "quantile", quantile_prob = c(0.75)))) %>% 
+#   filter(vacc_week %in% c(1,9), subset_id %in% c(1,10), vacc_cov == VC)-> res_ub
 
 # Create heatmap of impact by outbreak size and vaccination week
 plt3c <- res |>
@@ -1329,9 +1417,8 @@ plt3c <- res |>
   theme_tight() +
   theme(legend.position = "bottom")
 
-# probs <- seq(0, 1, by = 0.1)
-# ar_grp_cutoff <- quantile(outbk_data_summary$ar_per_10e3, probs = probs)
-# dur_grp_cutoff <- quantile(outbk_data_summary$duration_weeks, probs = probs)
+ar_grp_cutoff <- quantile(outbk_data_summary$ar_per_10e3, probs = probs)
+dur_grp_cutoff <- quantile(outbk_data_summary$duration_weeks, probs = probs)
 
 cea_s %<>%
   group_by(runid, id_outbreak, vacc_cov) %>%
@@ -1349,31 +1436,6 @@ d4$grp <- "Size"
 d <- rbind(d1,d2)
 d_ <- rbind(d3,d4)
 d <- rbind(d, d_)
-d
-
-d %>%
-  filter(vacc_week > 1, vacc_week <= 15) %>% 
-  group_by(grp) %>% 
-  summarize_quantiles(pct_reduc_case_frac*100) -> prpcr
-
-format_median_iqr(prpcr, row=1)
-format_median_iqr(prpcr, row=2)
-format_median_iqr(prpcr, row=3)
-format_median_iqr(prpcr, row=4)
-
-d %>%
-  filter(vacc_week > 1, vacc_week <= 15) %>% 
-  mutate(half_life = log(2)/abs(pct_reduc_case_frac)) %>% 
-  group_by(grp) %>% 
-  summarize_quantiles(half_life) -> hlife
-
-format_median_iqr(hlife, row=1)
-format_median_iqr(hlife, row=2)
-format_median_iqr(hlife, row=3)
-format_median_iqr(hlife, row=4)
-
-half_life <- log(2)/abs(rate)  # Half-life in weeks
-
 
 plt3d <- d %>% 
   filter(vacc_cov == VC, vacc_week > 1, vacc_week <= 15) %>%
@@ -1412,91 +1474,30 @@ if (save_plot) {
          height = fgw2*1.15*fac, units = "mm")
 }
 
-d %>%
-  filter(vacc_cov == VC, vacc_week > 1, vacc_week <= 15) %>%
-  group_by(grp) %>%
-  summarize_quantiles(variable = 100 * pct_reduc_case_frac) -> prc_frac_summary
-
-rate <- as.double(prc_frac_summary[1, 3:5]) / 100
-half_life <- log(2)/abs(rate)  # Half-life in weeks
-
-# Print correlation coefficients
-cat("Reduction of percentage case reduction:\n")
-for (i in 1:3) {
-  cat("Weekly reduction rate averaged over the first 15 weeks:", 
-      round(rate[i], 3), "\n")
-  cat("Percentage reduction decreases by half every ", round(half_life[i], 3),  "weeks\n")
-}
-
-rate <- as.double(prc_frac_summary[3, 3:5]) / 100
-half_life <- log(2)/abs(rate)  # Half-life in weeks
-
-# Print correlation coefficients
-cat("Reduction of percentage case reduction:\n")
-for (i in 1:3) {
-  cat("Weekly reduction rate averaged over the first 15 weeks:", 
-      round(rate[i], 3), "\n")
-  cat("Percentage reduction decreases by half every ", round(half_life[i], 3),  "weeks\n")
-}
 ```
 
 ## Figure S2: Case reduction across attack rate and duration
 
 ```{r fig3, eval=FALSE}
-# (A) Onset-triggered
-set.seed(42)
-# sampling as large dataset makes plotting slow
-sampled_runids <- sample(1:200, size=30)
-  
-cea_s <- filter(cea, runid %in% sampled_runids) # cea subset
-save_plot <- TRUE
 
-# Impact by duration size for outbreak onset-triggered vaccination
-# Calculate percentiles for outbreak size groups
+# Calculate percentiles for outbreak attack rate groups
 probs <- seq(0, 1, by = 0.1)
 runids <- unique(cea_s$runid)
 unq_data <- filter(cea_s, runid == runids[1] & vacc_cov == 0.75 & vacc_week == 1)
 # size_grp_cutoff <- quantile(unq_data$s_ch_tot, probs = probs)
-ar_grp_cutoff <- quantile(outbk_data_summary$ar_per_10e3, probs = probs)
-dur_grp_cutoff <- quantile(outbk_data_summary$duration_weeks, probs = probs)
+ar_grp_cutoff <- quantile(unq_data$ar_per_10e3, probs = probs)
+cea_s$ar_grp <- sapply(cea_s$ar_per_10e3, function(x) get_group_id(x, ar_grp_cutoff))
 
-# Prepare data by outbreak size group
-d <- cea_s |>
-  group_by(vacc_week, vacc_cov, id_outbreak) |> 
-  summarize(ar_per_10e3 = ar_per_10e3[1],
-            duration_weeks = duration_weeks[1],
-            pct_reduc_case = median(pct_reduc_case)) # median across simulation runs
+res <- rbindlist(lapply(1:10, function(i) 
+  calculate_impact_by_subset(cea_s, i, subset_var = "ar_grp")))
 
-# Assign size group to each outbreak
-d$ar_grp <- sapply(d$ar_per_10e3, function(x) get_group_id(x, ar_grp_cutoff))
-d$dur_grp <- sapply(d$duration_weeks, function(x) get_group_id(x, dur_grp_cutoff))
-
-# Create nested data by size group
-lst <- vector("list", length(ar_grp_cutoff) - 1)
-d <- setDT(d)
-for(i in 1:length(lst)){
-  lst[[i]] <- d[ar_grp >= i]
-}
-
-# Calculate median impact by size group
-res_list <- vector('list', length(ar_grp_cutoff) - 1)
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    ar_grp = min(ar_grp),
-    pct_reduc_case = median(pct_reduc_case, na.rm = TRUE)),
-    by = .(vacc_week, vacc_cov)]
-}
-res_rbind <- rbindlist(res_list)
-
-# Create heatmap of impact by outbreak size and vaccination week
-plt3sa <- res_rbind |>
+plt3sa <- res |>
   filter(vacc_cov %in% VC, vacc_week %in% VW_seq) |>
-  ggplot(aes(x = vacc_week, y = ar_grp)) +
-  metR::geom_contour_fill(aes(z = pct_reduc_case)) +
-  metR::geom_contour2(aes(z = pct_reduc_case, label = stat(level)),
+  ggplot(aes(x = vacc_week, y = subset_id)) +
+  metR::geom_contour_fill(aes(z = pct_reduc_case_median)) +
+  metR::geom_contour2(aes(z = pct_reduc_case_median, label = stat(level)),
                       linetype = "dotted") +
-  scale_fill_viridis_c("Median cases averted (%)", limits = c(0, 100),
+  scale_fill_viridis_c("Median cases averted (%)  ", limits = c(0, 100),
                        breaks = seq(0, 100, 50),
                        labels = scales::percent_format(scale = 1)) +
   labs(x = "Delay in ORI implementation (weeks)", 
@@ -1511,34 +1512,23 @@ plt3sa <- res_rbind |>
   theme_tight() +
   theme(legend.position = "bottom")
 
-# Create nested data by size group
-lst <- vector("list", length(dur_grp_cutoff) - 1)
-d <- setDT(d)
-for(i in 1:length(lst)){
-  lst[[i]] <- d[dur_grp >= i]
-}
+# duration group 
+dur_grp_cutoff <- quantile(unq_data$duration_weeks, probs = probs)
+cea_s$dur_grp <- 
+  sapply(cea_s$duration_weeks, function(x) get_group_id(x, dur_grp_cutoff))
 
-# Calculate median impact by size group
-res_list <- vector('list', length(dur_grp_cutoff) - 1)
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    dur_grp = min(dur_grp),
-    pct_reduc_case = median(pct_reduc_case, na.rm = TRUE)),
-    by = .(vacc_week, vacc_cov)]
-}
-res_rbind <- rbindlist(res_list)
+res <- rbindlist(lapply(1:10, function(i) 
+  calculate_impact_by_subset(cea_s, i, subset_var = "dur_grp")))
 
-# Create heatmap of impact by outbreak size and vaccination week
-plt3sb <- res_rbind |>
+plt3sb <- res |>
   filter(vacc_cov %in% VC, vacc_week %in% VW_seq) |>
-  ggplot(aes(x = vacc_week, y = dur_grp)) +
-  metR::geom_contour_fill(aes(z = pct_reduc_case)) +
-  metR::geom_contour2(aes(z = pct_reduc_case, label = stat(level)),
+  ggplot(aes(x = vacc_week, y = subset_id)) +
+  metR::geom_contour_fill(aes(z = pct_reduc_case_median)) +
+  metR::geom_contour2(aes(z = pct_reduc_case_median, label = stat(level)),
                       linetype = "dotted") +
-  scale_fill_viridis_c("Median cases averted (%)", limits = c(0, 100),
+  scale_fill_viridis_c("Median cases averted (%)  ", limits=c(0, 100),
                        breaks = seq(0, 100, 50),
-                       labels = scales::percent_format(scale = 1)) +
+                       labels = scales::percent_format(scale=1)) +
   labs(x = "Delay in ORI implementation (weeks)", 
        y = "Duration percentile") +
   scale_x_continuous(breaks = seq(1, 15, 2))+
@@ -1551,9 +1541,8 @@ plt3sb <- res_rbind |>
   theme_tight() +
   theme(legend.position = "bottom")
 
-
-# Combine all four plots into a single figure
-plt3 <- (plt3sa + plt3sb) +
+# Combine two plots into a single figure
+plt3s <- (plt3sa + plt3sb) +
   plot_annotation(tag_levels = 'A') +
   plot_layout(ncol = 2,
               nrow = 1,
@@ -1564,37 +1553,38 @@ plt3 <- (plt3sa + plt3sb) +
 
 # Adjust tag positions for top panels
 for (i in c(1, 2)) {
-  plt3[[i]] <- plt3[[i]] + theme(plot.tag.position = c(0.05, 0.9))
+  plt3s[[i]] <- plt3s[[i]] + theme(plot.tag.position = c(0.05, 0.9))
 }
 
 # Save figure
 if (save_plot) {
   fac <- 1.3
   ggsave(paste0("plots/figS2_onset_triggered_AR_Dur_", tstamp(), ".pdf"),
-         plt3,
+         plt3s,
          device = cairo_pdf, width = fgw2*fac, 
          height = fgw1*1.15*fac, units = "mm")
 }
-
 ```
 
 ## Figure 4: Case Reduction in Case-Triggered Scenario
 
 ```{r}
-save_plot <- TRUE
-set.seed(42)
-sample_runid <- sample(1:200, 30)
-cea_ct_s <- filter(cea_ct, runid %in% sample_runid)
+# save_plot <- TRUE
+# set.seed(42)
+# sample_runid <- sample(1:200, 30)
 
-wks <- c(1,5,9)
+wks_delay <- c(1,5,9)
 
-cea_ct_s %>%
-  filter(vacc_cov %in% VC, vacc_week %in% wks, case_trigger %in% c(1,100)) %>% 
+cea_ct %>%
+  filter(ori_occurred) %>% 
+  filter(vacc_cov %in% VC, vacc_week %in% wks_delay, case_trigger %in% c(1,100)) %>% 
   group_by(vacc_week, case_trigger) %>% 
   summarize_quantiles(pct_reduc_case)
 
+cea_ct_s <- filter(cea_ct, runid %in% sample_runids)
+
 plt4a <- cea_ct_s %>%
-  filter(vacc_cov %in% VC, vacc_week %in% wks, 
+  filter(vacc_cov %in% VC, vacc_week %in% wks_delay, 
          case_trigger %in% c(1, seq(20,100,20))) %>%
   ggplot() +
   geom_boxplot(aes(x = as.factor(case_trigger), y = pct_reduc_case,
@@ -1610,56 +1600,29 @@ plt4a <- cea_ct_s %>%
   theme_tight() 
 
 # Impact by outbreak size for case-triggered vaccination
-# Prepare data for case-triggered analysis
-d <- cea_ct_s |> 
-  group_by(vacc_week, case_trigger, vacc_cov, id_outbreak) |> 
-  summarize(s_ch_tot = s_ch_tot[1],
-            med_pct_reduc_case = median(pct_reduc_case))  # median across runid's
 
 probs <- seq(0, 1, by = 0.1)
-runids <- unique(cea_ct_s$runid)
-unq_data <- filter(cea_ct_s, runid == runids[1] 
-                   & vacc_cov == 0.75 & vacc_week == 1)
-# size_grp_cutoff <- quantile(unq_data$s_ch_tot, probs = probs)
-size_grp_cutoff <- quantile(unq_data$s_ch_averted_tot, probs = probs)
-# Assign size group to each outbreak
+d <- cea_ct
+d <- d[ori_occurred == TRUE]
+size_grp_cutoff <- quantile(d$s_ch_averted_tot, probs = probs)
 d$size_grp <- sapply(d$s_ch_tot, function(x) get_group_id(x, size_grp_cutoff))
 
-# Create nested data by size group
-lst <- vector("list", length(size_grp_cutoff) - 1)
-d <- setDT(d)
-for(i in 1:length(lst)){
-  lst[[i]] <- d[size_grp >= i]
-}
+res <- rbindlist(lapply(1:10, function(i) 
+  calculate_impact_by_subset(d, i, subset_var = "size_grp", 
+          grouping_vars = c("vacc_week","vacc_cov","case_trigger"))))
 
-# Calculate median impact by size group
-res_list <- vector('list', length(size_grp_cutoff) - 1)
-for (i in 1:length(lst)) {
-  d <- lst[[i]]
-  res_list[[i]] <- d[, .(
-    size_grp = min(size_grp),
-    med_pct_reduc_case = median(med_pct_reduc_case, na.rm = TRUE)),
-    by = .(vacc_week, case_trigger, vacc_cov)]
-}
-res_rbind <- rbindlist(res_list)
-res_rbind %>%
-  filter(size_grp >2 ) %>% 
-  group_by(vacc_week, vacc_cov, size_grp) %>%
-  mutate(reference = med_pct_reduc_case[case_trigger == 1]) %>%
-  mutate(rel_med_pct_reduc_case = med_pct_reduc_case/reference) -> tmp
-
-tmp %>% 
-  filter(vacc_week %in% c(5), vacc_cov ==0.75, size_grp %in% c(3, 10), 
+res %>% 
+  filter(vacc_week %in% c(5), vacc_cov == 0.75, subset_id %in% c(1, 10), 
          case_trigger %in% c(1,100)) %>%
-  group_by(size_grp, case_trigger) %>%
-  summarize(mprc = med_pct_reduc_case)
+  group_by(subset_id, case_trigger) %>%
+  summarize(mprc = pct_reduc_case_median)
 
-z# Create heatmap of impact by outbreak size and case trigger
-plt4b <- res_rbind |>
+# Create heatmap of impact by outbreak size and case trigger
+plt4b <- res |>
   filter(vacc_cov %in% VC, vacc_week %in% c(5)) |>
-  ggplot(aes(x = case_trigger, y = size_grp)) +
-  metR::geom_contour_fill(aes(z = med_pct_reduc_case)) +
-  metR::geom_contour2(aes(z = med_pct_reduc_case, label = stat(level)),
+  ggplot(aes(x = case_trigger, y = subset_id)) +
+  metR::geom_contour_fill(aes(z = pct_reduc_case_median)) +
+  metR::geom_contour2(aes(z = pct_reduc_case_median, label = stat(level)),
                      linetype = "dotted") +
   scale_fill_viridis_c("Median cases averted (%)", limits = c(0, 60),
                        breaks = seq(0, 60, 20),
@@ -1672,7 +1635,9 @@ plt4b <- res_rbind |>
                               expression(">="*P[60*"%"]),
                               expression(">="*P[90*"%"]))) +
   theme_light() +
-  theme_tight() 
+  theme_tight() +
+  theme(legend.position = "bottom")
+
 
 # Combine all four plots into a single figure
 plt4 <- (plt4a + plt4b) +
@@ -1703,16 +1668,21 @@ sample_runid <- sample(1:200, 30)
 cea_ct_s <- filter(cea_ct, runid %in% sample_runid)
 
 wks <- c(1,5,9)
-
-cea_ct_s %>%
+# 
+# cea_ct_s %>%
+# cea_ct_s <- left_join(cea_ct_s,
+#                  outbk_data_summary[,c("id_outbreak",
+#                                        "ar_per_10e3","duration_weeks")], 
+#                  by = "id_outbreak")
+cea_ct %>%  
   filter(vacc_cov %in% VC, vacc_week %in% wks, case_trigger %in% c(1,100)) %>% 
   group_by(vacc_week, case_trigger) %>% 
   summarize_quantiles(pct_reduc_case)
 
-cea_ct_s <- left_join(cea_ct_s,
-                 outbk_data_summary[,c("id_outbreak",
-                                       "ar_per_10e3","duration_weeks")], 
-                 by = "id_outbreak")
+cea_ct <- 
+  left_join(cea_ct,
+    outbk_data_summary[,c("id_outbreak", "ar_per_10e3","duration_weeks")], 
+     by = "id_outbreak")
 
 # Impact by duration size for outbreak onset-triggered vaccination
 # Calculate percentiles for attack rate groups
@@ -1769,12 +1739,33 @@ tmp %>%
   group_by(ar_grp, case_trigger) %>%
   summarize(mprc = med_pct_reduc_case)
 
+
+
+# 
+# probs <- seq(0, 1, by = 0.1)
+d <- cea_ct
+d <- d[ori_occurred == TRUE]
+ar_grp_cutoff <- quantile(d$ar_per_10e3, probs = probs)
+d$ar_grp <- sapply(d$ar_per_10e3, function(x) get_group_id(x, ar_grp_cutoff))
+
+res <- rbindlist(lapply(1:10, function(i) 
+  calculate_impact_by_subset(d, i, subset_var = "ar_grp", 
+          grouping_vars = c("vacc_week","vacc_cov","case_trigger"))))
+
+res %>% 
+  filter(vacc_week %in% c(5), vacc_cov == 0.75, subset_id %in% c(1, 10), 
+         case_trigger %in% c(1,100)) %>%
+  group_by(subset_id, case_trigger) %>%
+  summarize(mprc = pct_reduc_case_median)
+
+
+
 # Create heatmap of impact by outbreak size and case trigger
-plt4as <- res_rbind |>
+plt4as <- res |>
   filter(vacc_cov %in% VC, vacc_week %in% c(5)) |>
-  ggplot(aes(x = case_trigger, y = ar_grp)) +
-  metR::geom_contour_fill(aes(z = med_pct_reduc_case)) +
-  metR::geom_contour2(aes(z = med_pct_reduc_case, label = stat(level)),
+  ggplot(aes(x = case_trigger, y = subset_id)) +
+  metR::geom_contour_fill(aes(z = pct_reduc_case_median)) +
+  metR::geom_contour2(aes(z = pct_reduc_case_median, label = stat(level)),
                      linetype = "dotted") +
   scale_fill_viridis_c("Median cases averted (%)", limits = c(0, 70),
                        breaks = seq(0, 60, 20),
@@ -1787,39 +1778,28 @@ plt4as <- res_rbind |>
                               expression(">="*P[60*"%"]),
                               expression(">="*P[90*"%"]))) +
   theme_light() +
-  theme_tight() 
+  theme_tight() +
+  theme(legend.position = "bottom")
 
+# Duration group
+dur_grp_cutoff <- quantile(d$duration_weeks, probs = probs)
+d$dur_grp <- sapply(d$duration_weeks, function(x) get_group_id(x, dur_grp_cutoff))
 
-# Create nested data by size group
-lst <- vector("list", length(dur_grp_cutoff) - 1)
-for(i in 1:length(lst)){
-  lst[[i]] <- d[dur_grp >= i]
-}
+res <- rbindlist(lapply(1:10, function(i) 
+  calculate_impact_by_subset(d, i, subset_var = "dur_grp", 
+          grouping_vars = c("vacc_week","vacc_cov","case_trigger"))))
 
-lst[[1]] %>%
-   filter(vacc_cov %in% VC, vacc_week %in% c(5), case_trigger %in% c(1,100), 
-          ar_grp %in% c(1,10)) %>% 
-   group_by(vacc_week, case_trigger, ar_grp) %>% 
-   summarize_quantiles(med_pct_reduc_case)
+res %>% 
+  filter(vacc_week %in% c(5), vacc_cov == 0.75, subset_id %in% c(1, 10), 
+         case_trigger %in% c(1,100)) %>%
+  group_by(subset_id, case_trigger) %>%
+  summarize(mprc = pct_reduc_case_median)
 
-
-# Calculate median impact by dur group
-res_list <- vector('list', length(dur_grp_cutoff) - 1)
-for (i in 1:length(lst)) {
-  el <- lst[[i]]
-  res_list[[i]] <- el[, .(
-    dur_grp = min(dur_grp),
-    med_pct_reduc_case = median(med_pct_reduc_case, na.rm = TRUE)),
-    by = .(vacc_week, case_trigger, vacc_cov)]
-}
-res_rbind <- rbindlist(res_list)
-
-# Create heatmap of impact by outbreak size and case trigger
-plt4bs <- res_rbind |>
+plt4bs <- res |>
   filter(vacc_cov %in% VC, vacc_week %in% c(5)) |>
-  ggplot(aes(x = case_trigger, y = dur_grp)) +
-  metR::geom_contour_fill(aes(z = med_pct_reduc_case)) +
-  metR::geom_contour2(aes(z = med_pct_reduc_case, label = stat(level)),
+  ggplot(aes(x = case_trigger, y = subset_id)) +
+  metR::geom_contour_fill(aes(z = pct_reduc_case_median)) +
+  metR::geom_contour2(aes(z = pct_reduc_case_median, label = stat(level)),
                      linetype = "dotted") +
   scale_fill_viridis_c("Median cases averted (%)", limits = c(0,70),
                        breaks = seq(0, 60, 20),
@@ -1831,8 +1811,9 @@ plt4bs <- res_rbind |>
                               expression(">="*P[30*"%"]),
                               expression(">="*P[60*"%"]),
                               expression(">="*P[90*"%"]))) +
-  theme_light() +
-  theme_tight() 
+  theme_light()+
+  theme_tight()+
+  theme(legend.position = "bottom")
 
 # Combine all four plots into a single figure
 plt4s <- (plt4as + plt4bs) +
@@ -1852,6 +1833,8 @@ if (save_plot) {
          device = cairo_pdf, width = fgw2*fac, 
          height = fgw1*1.15*fac, units = "mm")
 }
+
+ 
 ```
 
 # Aggregated Outbreaks
@@ -1977,16 +1960,21 @@ cea |>
 
 # cases averted
 cea_subsets %>%
-  filter(vacc_cov == 0.75 & vacc_week == 9 & year_max %in% c(2013, 2020)) %>% 
+  filter(vacc_cov == 0.75 & vacc_week == 9 & year_max == 2020) %>% 
   group_by(year_max) %>% 
-  summarize_quantiles(variable=s_ch_averted_tot) %>% 
-  format_median_interval(nrow=2)
+  summarize_quantiles(variable=s_ch_averted_tot) 
 
 # percent case reduction
 cea_subsets %>%
   filter(vacc_cov == 0.75 & vacc_week == 9 & year_max == 2020) %>% 
   summarize_quantiles(variable=pct_reduc_case) %>% 
-  format_median_interval()
+  format_median_interval(interval = "IQR")
+
+# case averted per 1,000 doses
+cea_subsets %>%
+  filter(vacc_cov == 0.75 & vacc_week == 9 & year_max == 2020) %>% 
+  summarize_quantiles(variable=case_averted_per_1000_OCV) %>% 
+  format_median_interval(interval = "IQR")
 
 cea_subsets %>%
   group_by(subset_id) %>% 
@@ -2004,23 +1992,23 @@ weekly_reduc <- cea_subsets_diff %>%
   summarize_quantiles(variable=pct_reduc_case_frac*100) 
 
 weekly_reduc %>% 
-  format_median_interval(digits=1)
+  format_median_interval(digits=1, interval = "IQR")
 
 weekly_reduc %>%  # Half-life in weeks
   summarize_quantiles(variable = log(2)/abs(1/as.numeric(weekly_reduc$q500))) %>% 
-  format_median_interval(digits=1)
+  format_median_interval(digits=1, interval = "IQR")
 
 # case averted per 1,000 OCVs
 cea_subsets %>%
   filter(vacc_cov == 0.75 & vacc_week == 9 & year_max == 2020) %>% 
   summarize_quantiles(variable=case_averted_per_1000_OCV) %>% 
-  format_median_interval(digits=3)
+  format_median_interval(digits=2, interval = "IQR")
 
 # cost ase averted per 1,000 OCVs
 cea_subsets %>%
   filter(vacc_cov == 0.75 & vacc_week == 9 & year_max == 2020) %>% 
   summarize_quantiles(variable=cost_per_case_averted) %>% 
-  format_median_interval(digits=3)
+  format_median_interval(digits=3, interval = "IQR")
 
 # (A) OCV deployment over time# (A) Oq500CV deployment over time
 plt_a1 <- ocv_year |>
@@ -2315,8 +2303,9 @@ d %>% group_by(year_max, sampling) %>%
 wks <- c(1, 5, 9, 13)
 tab <- data.frame()
 interval_est <- "IQR"
+cea_ori <- cea[ori_occurred == TRUE]
 for (wk in wks) {
-  d <- cea[(vacc_cov == VC & vacc_week == wk)]
+  d <- cea_ori[(vacc_cov == VC & vacc_week == wk)]
   tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
 }  
 tab$week <- wks
@@ -2334,9 +2323,10 @@ if (save_table) {
 wks <- c(1, 5, 9, 13)
 tab <- data.frame()
 
+cea_ori <- cea[ori_occurred == TRUE]
 for (vc in VC3) {
   for (wk in wks) {
-    d <- cea[(vacc_cov == vc & vacc_week == wk)]
+    d <- cea_ori[(vacc_cov == vc & vacc_week == wk)]
     tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
   }  
 }
@@ -2350,6 +2340,8 @@ if (save_table) {
 }
 ```
 
+
+
 ## Table 4: Impact of Case-Triggered Vaccination
 
 ```{r table3}
@@ -2358,6 +2350,7 @@ vwks <- c(1, 5, 9, 13)
 ctgs <- c(1, 10, 50, 100)
 tab <- data.frame()
 
+cea_ct_ori <- cea_ct[ori_occurred == TRUE]
 for (wk in vwks) {
   for (ctg in ctgs) {
     d <- cea_ct[(vacc_cov == VC & vacc_week == wk & case_trigger == ctg)]
@@ -2368,7 +2361,7 @@ tab$case_trigger <- rep(ctgs, length(vwks))
 tab$vacc_week <- rep(vwks, each=length(ctgs))
 
 if (save_table) {
-  fwrite(tab, paste0("outputs/table4_case_triggered_impact_IQR_", tstamp(), ".csv"), 
+  fwrite(tab, paste0("outputs/table4_case_triggered_impact_IQR_ori_disregard_", tstamp(), ".csv"), 
             row.names = FALSE)
 }
 ```
@@ -2378,7 +2371,7 @@ if (save_table) {
 
 cea_ocv_stockpile_w9vc75 <- cea_subsets[vacc_week == 9 & vacc_cov == 0.75]
 
-cea_subsets %>% 
+cea_subsets %>%
   filter(vacc_week == 9 & vacc_cov == 0.75) %>% 
   group_by(year_max) %>% 
   summarize(capd_med = median(case_averted_per_1000_OCV, na.rm=T))
@@ -2406,3 +2399,56 @@ if (save_table) {
 }
 ```
 
+## Table S3: Sensitivity Analysis of the Impact of Outbreak Onset-Triggered Vaccination
+
+```{r tableS1}
+cea_0.75 <- read_rds("outputs/cea_0.75_onset_trigger_20250716.rds")
+
+excl <- read_rds("outputs/outbreaks_excluded_20250716.rds")
+reasons <- unique(excl$filter_reason)
+# Create summary for time-triggered vaccination at different times
+vc <- c(0.75) 
+wks <- c(1, 5, 9, 13)
+
+cea_ori <- cea_0.75[ori_occurred == TRUE]
+tab <- data.frame()
+for (wk in wks) {
+  d <- cea_ori[(vacc_cov == vc & vacc_week == wk)]
+  tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
+}
+
+for (wk in wks) {
+  d <- cea_0.75[(vacc_cov == vc & vacc_week == wk)]
+  tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
+}
+
+# > max_ocv_dose
+# [1] 5e+06
+# > min_ocv_dose
+# [1] 16500
+
+excl_to_be_restored <- excl[outbreak_pop >= 5e3 &  outbreak_pop <= 10e6]
+
+cea_excl %>% 
+  filter(id_outbreak %in% excl_to_be_restored$id_outbreak) %>% 
+  rbind(cea_0.75) -> cea_excl_added
+
+cea_excl_added_ori <- cea_excl_added[ori_occurred == TRUE]
+for (wk in wks) {
+  d <- cea_excl_added_ori[(vacc_cov == vc & vacc_week == wk)]
+  tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
+}
+
+for (wk in wks) {
+  d <- cea_excl_added[(vacc_cov == vc & vacc_week == wk)]
+  tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
+}
+
+tab$week <- rep(wks, 4)
+
+
+if (save_table) {
+  fwrite(tab, paste0("outputs/tableS3_outbreak_data_sens_anal_", tstamp(), ".csv"), 
+            row.names = FALSE)
+}
+```
