@@ -295,11 +295,3 @@ saveRDS(ive_yrep, paste0("outputs/ive_yrep_", tstamp(), ".rds"))
 # }
 ```
 
-## OCV requests, deliveries, etc.
-
-Extracts data from GTFCC OCV dashboard.
-
-```{r}
-
-```
-
