@@ -249,13 +249,24 @@ cea_excl <- read_rds("outputs/cea_0.6_onset_trigger_excl_20250716.rds")
 cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.75_onset_trigger_excl_20250716.rds"))
 cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.9_onset_trigger_excl_20250716.rds"))
 cea_ct_excl <- read_rds("outputs/cea_0.75_case_trigger_excl_20250716.rds")
-#
+
+# weekly decline
 fit_decay <- read_rds("outputs/fit_decay_model_20250903.rds")
+
+# Load subset analyses reflecting global OCV stockpile
+cea_stockpile_subsets_q1 <-
+  read_rds("outputs/cea_stockpile_0_onset_trigger_by_year_20250828.rds")
+cea_stockpile_subsets_q2 <-
+  read_rds("outputs/cea_stockpile_0.25_onset_trigger_by_year_20250828.rds")
+cea_stockpile_subsets_q3 <-
+  read_rds("outputs/cea_stockpile_0.5_onset_trigger_by_year_20250828.rds")
+cea_stockpile_subsets_q4 <-
+  read_rds("outputs/cea_stockpile_0.75_onset_trigger_by_year_20250828.rds")
 ```
 
 # Abstract
 
-Figures used in the abstract
+Values used in the abstract
 ```{r}
 onset_impact <- cea_ori %>%
   filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
@@ -325,6 +336,8 @@ stockpile_impact_q4 <- cea_stockpile_subsets_q4 %>%
 format_median_iqr(stockpile_impact_q4, row=1)
 # percentage cases averted
 format_median_iqr(stockpile_impact_q4, row=2)
+
+rm(onset_impact, stockpile_impact, stockpile_impact_q4)
 ```
 
 # Plots
@@ -1332,6 +1345,8 @@ format_median_iqr(onset_impact, digits=3, row=16)
 format_median_iqr(onset_impact, row=21)
 format_median_iqr(onset_impact, row=22)
 
+
+
 # outbreaks missed by delayed vaccination
 wks_delay <- c(1, 5, 9, 14) # de
 dur_missed_id <- vector('list', length(wks_delay))
@@ -1408,9 +1423,6 @@ res$grp <- factor(res$grp, c("All", "AR", "Dur", "Size"))
 for (i in 1:4) print(format_median_iqr(res, row=i))
 for (i in 5:8) print(format_median_iqr(res, digits=3, row=i))
 
-
-# weekly decline
-fit_decay <- read_rds("outputs/fit_decay_model_20250903.rds")
 # percentage reduction in an original scale
 # 1 - exp(-k_hat)
 names(fit_decay)
@@ -1424,6 +1436,8 @@ fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
   filter(vacc_cov == VC) %>% 
   summarize_group(vars=c("half_life"), group_name="> 5 weeks") %>% 
   format_median_iqr(digits=1)
+
+rm(d, d1, d2, d3, d4, res, onset_impact)
 ```
 
 #### Left panel
@@ -1633,27 +1647,80 @@ cat(sprintf("Piecewise model: breakpoint ≈ %.2f weeks; post-break slope ≈ %.
 weeks 1, 5, 9 with week 5 only for the rate of decline
 
 ```{r}
-# percentage reduction in an original scale
-# 1 - exp(-k_hat)
-names(fit_decay)
-d0 <- fit_decay[["5"]] %>% filter(vacc_cov == VC) %>% 
-  mutate(rate_reduc = 1 - exp(-k_hat)) %>% summarize_group(vars=c("rate_reduc"), group_name = "short")
-d1 <- fit_decay[["9"]] %>% filter(vacc_cov == VC) %>% 
-  mutate(rate_reduc = 1 - exp(-k_hat)) %>% summarize_group(vars=c("rate_reduc"), group_name = "medium")
-d2 <- fit_decay[["14"]] %>% filter(vacc_cov == VC) %>% 
-  mutate(rate_reduc = 1 - exp(-k_hat)) %>% summarize_group(vars=c("rate_reduc"), group_name = "long")
+# top quartile
+df <- outbk_data_summary[, c("id_outbreak", "ar_per_10e3", 
+                             "duration_weeks", "spatial_scale", 
+                             "rural_urban", "pop", "total_s_ch")]
 
-khat <- rbindlist(list(d0,d1,d2))
-khat <- khat %>%
-  mutate(group = factor(group, levels = c("short", "medium", "long")))
+qn <- floor(0.25 * nrow(df))
+
+top_ar_ids <- df %>% 
+  arrange(desc(ar_per_10e3)) %>% slice(1:qn) %>% pull(id_outbreak)
+top_dur_ids <- df %>% 
+  arrange(desc(duration_weeks)) %>% slice(1:qn) %>% pull(id_outbreak)
+top_size_ids <- df %>% 
+  arrange(desc(total_s_ch)) %>% slice(1:qn) %>% pull(id_outbreak)
+
+d1 <- filter(cea, id_outbreak %in% top_ar_ids)
+d2 <- filter(cea, id_outbreak %in% top_dur_ids)
+d3 <- filter(cea, id_outbreak %in% top_size_ids)
+
+dat <- rbindlist(list(cea, d1, d2, d3)) 
+                 
+dat$grp <- rep(c("All", "Top AR", "Top dur", "Top size"),
+               c(nrow(cea), nrow(d1), nrow(d2), nrow(d3)))
+rm(d1,d2,d3)
+
+p4 <- dat %>%
+  filter(ori_occurred == TRUE) %>% 
+  filter(vacc_cov %in% VC, vacc_week %in% c(1,5,9,13)) %>%
+  ggplot(aes(x = as.factor(vacc_week), 
+             y = pct_reduc_case,
+             color = as.factor(grp))) +
+  ci_layers(
+    group = as.factor(grp), color = as.factor(grp),
+    dodge_width = line_interval,
+    lw95 = line_width_95,
+    lw50 = line_width_50,
+    pr_size = point_size,
+    mean_size = x_size,
+    mean_stroke = x_stroke
+  )+
+  scale_y_continuous(labels = scales::percent_format(scale = 1))+
+  scale_color_manual(
+    name = "",
+    values = my_discrete_colors[4:7]) +
+  labs(x = "Delay in ORI implementation (weeks)", y = "% cases averted") +
+  theme_light() +
+  theme_tight() +
+  # theme_x_blank() +
+  theme(plot.margin = margin(0,0.1,1,0))
+
+d0 <- fit_decay[["5"]] %>% filter(vacc_cov == VC) %>% 
+  mutate(rate_reduc = 1 - exp(-k_hat)) %>% 
+  summarize_group(vars=c("rate_reduc"), group_name = "All")
+
+d1 <- fit_decay[["5"]] %>% 
+  filter(vacc_cov == VC, id_outbreak %in% top_ar_ids) %>% 
+  mutate(rate_reduc = 1 - exp(-k_hat)) %>% 
+  summarize_group(vars=c("rate_reduc"), group_name = "Top AR")
+
+d2 <- fit_decay[["5"]] %>% 
+  filter(vacc_cov == VC, id_outbreak %in% top_dur_ids) %>% 
+  mutate(rate_reduc = 1 - exp(-k_hat)) %>% 
+  summarize_group(vars=c("rate_reduc"), group_name = "Top dur")
+
+d3 <- fit_decay[["5"]] %>% 
+  filter(vacc_cov == VC, id_outbreak %in% top_size_ids) %>% 
+  mutate(rate_reduc = 1 - exp(-k_hat)) %>% 
+  summarize_group(vars=c("rate_reduc"), group_name = "Top size")
+
+khat <- rbindlist(list(d0, d1, d2, d3))
+khat <- khat %>% mutate(group = factor(group))
 khat$x <- "x" # dummy variable for plotting
 
-p4 <- khat %>%
-  mutate(group_lab = factor(
-    group,
-    levels = c("short", "medium", "long"),                   # adjust to your actual 'group' values
-    labels = c(">=5 weeks", ">=9 weeks", ">=14 weeks"))) %>%
-  ggplot(aes(x = group_lab)) +
+p5 <- khat %>%
+  ggplot(aes(x = group, color=group)) +
   # 95% central range (thin line + median point)
   geom_pointrange(
     aes(y = q500, ymin = q025, ymax = q975),
@@ -1674,40 +1741,44 @@ p4 <- khat %>%
     stroke = x_stroke
   ) +
   scale_y_continuous(labels = scales::percent_format()) +
+  scale_color_manual(
+    name = "",
+    values = my_discrete_colors[4:7]) +
   labs(
     x = NULL,
     y = "Weekly % decline in cases averted"
   ) +
   theme_light() +
   theme_tight() +
+  theme_x_blank() +
   theme(
-    axis.text.x = element_text(angle=20, vjust=1, hjust=0.6),
     legend.position = "none",
     plot.margin = margin(0,0.03,0,0)
   )
-# max_wk <- 45
 
+# half-life
 d0 <- fit_decay[["5"]] %>% filter(vacc_cov == VC) %>% 
-  summarize_group(vars=c("half_life"), group_name = "short")
-d1 <- fit_decay[["9"]] %>% filter(vacc_cov == VC) %>% 
-  summarize_group(vars=c("half_life"), group_name = "medium")
-d2 <- fit_decay[["14"]] %>% filter(vacc_cov == VC) %>% 
-  summarize_group(vars=c("half_life"), group_name = "long")
+  summarize_group(vars=c("half_life"), group_name = "All")
 
-halflife <- rbindlist(list(d0,d1,d2))
-halflife <- halflife %>%
-  mutate(group = factor(group, levels = c("short", "medium", "long")))
+d1 <- fit_decay[["5"]] %>% 
+  filter(vacc_cov == VC, id_outbreak %in% top_ar_ids) %>% 
+  summarize_group(vars=c("half_life"), group_name = "Top AR")
+
+d2 <- fit_decay[["5"]] %>% 
+  filter(vacc_cov == VC, id_outbreak %in% top_dur_ids) %>% 
+  summarize_group(vars=c("half_life"), group_name = "Top dur")
+
+d3 <- fit_decay[["5"]] %>% 
+  filter(vacc_cov == VC, id_outbreak %in% top_dur_ids) %>% 
+  summarize_group(vars=c("half_life"), group_name = "Top size")
+
+halflife <- rbindlist(list(d0, d1, d2, d3))
 
 halflife$x <- "x" # dummy variable for plotting
 
-p5 <-  halflife %>%
+p6 <-  halflife %>%
   mutate(mean = ifelse(is.finite(mean), mean, NA)) %>% # keep from Inf being plotted at the top border
-  mutate(group_lab = factor(
-    group,
-    levels = c("short", "medium", "long"),              # ← adjust to your actual values
-    labels = c(">=5 weeks", ">=9 weeks", ">=14 weeks")
-  )) %>%
-  ggplot(aes(x = group_lab)) +
+  ggplot(aes(x = group, color=group)) +
   # 95% central range (thin)
   geom_pointrange(
     aes(y = q500, ymin = q025, ymax = q975),
@@ -1725,127 +1796,19 @@ p5 <-  halflife %>%
     aes(y = mean),
     shape = 4, size = x_size, stroke = x_stroke
   ) +
+  scale_color_manual(
+    name = "",
+    values = my_discrete_colors[4:7])+
   labs(x = NULL, y = "Halving time (weeks)") +
   theme_light() +
   theme_tight() +
-  theme(axis.text.x = element_text(angle=20, vjust=1, hjust=0.6),
-        legend.position = "none",
-        plot.margin = margin(0,0,0,0))
-
-# Outbreak features of top and bottom quartiles in terms of effect 
-# and in terms of rate of decrease in % case averted
-
-# Define quartiles
-df <- fit_decay[["5"]] %>%
-  filter(vacc_cov == VC) %>%
-  mutate(rate_reduc = 1 - exp(-k_hat)) %>%  # compute first
-  group_by(id_outbreak) %>%
-  summarize_quantiles(rate_reduc, half_life) %>%
-  ungroup() %>%
-  select(variable, id_outbreak, q500) %>%
-  pivot_wider(names_from  = variable, values_from = q500) %>% 
-  select(c("id_outbreak", "rate_reduc", "half_life")) %>%
-  left_join(outbk_data_summary[, c("id_outbreak", "ar_per_10e3", 
-                                   "duration_weeks", "spatial_scale", 
-                                   "rural_urban", "pop", "total_s_ch")], 
-            by = "id_outbreak")
-
-names(df) <- c(names(df)[1:(ncol(df)-1)], "s_ch_tot")
-
-cea %>% 
-  filter(id_outbreak %in% df$id_outbreak, vacc_cov %in% VC, vacc_week == 3) %>% # midpoint of the first 5 weeks
-  group_by(id_outbreak) %>% 
-  summarize(pcr = median(pct_reduc_case)) -> d0
-
-df <- left_join(df, d0, by="id_outbreak")  
-# 1. Convert categorical vars to numeric and apply log1p transform to selected skewed variables
-df <- df %>%
-  mutate(
-    spatial_scale = # such that large numbers indicate larger admin
-      as.numeric(factor(spatial_scale, 
-                        levels = c("admin3", "admin2", "admin1", "country"))) - 1,
-    rural_urban   = ifelse(rural_urban == "rural", 1, 0),
-    # ar_per_10e3 = log1p(ar_per_10e3), 
-    # pop         = log1p(pop),
-    # s_ch_tot    = log1p(s_ch_tot)
+  theme_x_blank() +
+  theme(
+    legend.position = "none",
+    plot.margin = margin(0,0.03,0,0)
   )
 
-# 2. Select variables to normalize
-vars <- c("ar_per_10e3", "duration_weeks", "s_ch_tot", "pop", "rural_urban", "spatial_scale")
-
-# 3. Normalize each variable to 0–1 across the whole dataset
-normalize <- function(x) (x - min(x, na.rm = TRUE)) / 
-  (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
-
-df_original_scale <- df
-df[vars] <- lapply(df[vars], normalize)
-
-# 4. Quartile cut points (rank-based is safer with ties)
-n <- nrow(df)
-q_n <- floor(0.25 * n)
-
-# If you don’t have an ID column, use row_number
-df <- df %>% mutate(row_id = row_number())
-
-bottom_rate_ids <- df %>% arrange(rate_reduc) %>% slice(1:q_n) %>% pull(row_id)
-top_rate_ids <- df %>% arrange(desc(rate_reduc)) %>% slice(1:q_n) %>% pull(row_id)
-bottom_pcr_ids <- df %>% arrange(pcr) %>% slice(1:q_n) %>% pull(row_id)
-top_pcr_ids <- df %>% arrange(desc(pcr)) %>% slice(1:q_n) %>% pull(row_id)
-
-# 6. Create top/bottom summaries
-top_rate <- df %>% filter(row_id %in% top_rate_ids) %>% 
-  summarize_group(vars=vars, group_name = "top quartile rate")
-bottom_rate <- df %>% filter(row_id %in% bottom_rate_ids) %>% 
-  summarize_group(vars=vars, group_name = "bottom quartile rate")
-top_pcr <- df %>% filter(row_id %in% top_pcr_ids) %>% 
-  summarize_group(vars=vars, group_name = "top quartile impact")
-bottom_pcr <- df %>% filter(row_id %in% bottom_pcr_ids) %>% 
-  summarize_group(vars=vars, group_name = "bottom quartile impact")
-
-plot_df <- rbindlist(list(top_rate, bottom_rate, top_pcr, bottom_pcr))
-
-plot_df$variable <- rep(c("Attack rate",  "Duration", "Outbreak size",
-                          "Population size", "Rural", "Spatial scale"), 4)
-plot_df$outcome_var <- rep(c("rate", "pcr"), each=12)
-
-p6 <- plot_df %>% 
-  # filter(outcome_var == "rate") %>%
-  filter(variable != "Rural") %>%
-  ggplot(aes(x = variable, color = group)) +
-  # 95% central range (thin line + median point)
-  geom_pointrange(
-    aes(y = q500, ymin = q025, ymax = q975),
-    position = position_dodge(width = line_interval),
-    linewidth = line_width_95,
-    size = point_size
-  ) +
-  # 50% central range (thicker line only)
-  geom_errorbar(
-    aes(ymin = q250, ymax = q750),
-    linewidth = line_width_50,
-    width = 0,
-    position = position_dodge(width = line_interval)
-  ) +
-  # Mean marked with red X
-  geom_point(
-    aes(group = group, y = mean),
-    shape = 4,  # X shape
-    size = x_size,
-    stroke = x_stroke,
-    # color = "red",
-    position = position_dodge(width = line_interval)
-  ) +
-  scale_color_manual("", 
-          values = c("top quartile rate" = "steelblue", 
-                     "bottom quartile rate" = "firebrick", 
-                     "top quartile impact" = "purple", 
-                     "bottom quartile impact" = "cyan"), 
-          labels = c("Fast decay", "Slow decay", "High impact", "Low impact")) +
-  labs(y = "Normalized scale", x = NULL) +
-  theme_light() +
-  theme_tight() +
-  theme(axis.text.x = element_text(angle=10, vjust=1, hjust=0.5)) +
-  theme(plot.margin = margin(0,0,0,0)) 
+rm(dat, df, d0, d1, d2, d3, khat, halflife)
 ```
 
 #### Combined plot 
@@ -1855,15 +1818,14 @@ left_col <- p1 / p2 / p3
 left_col <- left_col + plot_layout(heights = c(3, 3, 1))
 
 # Combine right column plots first with equal heights
-right_col <- (p4 + p5) / p6  
+right_col <- p4 / (p5 + p6) 
 
 # Now bind the two columns side-by-side
 final_plot <- (left_col | right_col) + plot_layout(widths = c(1, 1)) +
   plot_annotation(tag_levels = 'A') +
-  theme(plot.tag.position = c(0.2, 1),
+  theme(plot.tag.position = c(0.3, 1),
         plot.tag = element_text(size = 13))
 
-# Save figure
 if (save_plot) {
   fac <- 1.3
   ggsave(paste0("plots/fig3_onset_triggered_", tstamp(), ".pdf"),
