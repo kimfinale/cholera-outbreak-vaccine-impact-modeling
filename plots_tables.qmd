@@ -251,17 +251,17 @@ cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.9_onset_trigger_excl_2025071
 cea_ct_excl <- read_rds("outputs/cea_0.75_case_trigger_excl_20250716.rds")
 
 # weekly decline
-fit_decay <- read_rds("outputs/fit_decay_model_20250903.rds")
+# fit_decay <- read_rds("outputs/fit_decay_model_20250903.rds")
 
 # Load subset analyses reflecting global OCV stockpile
-cea_stockpile_subsets_q1 <-
-  read_rds("outputs/cea_stockpile_0_onset_trigger_by_year_20250828.rds")
-cea_stockpile_subsets_q2 <-
-  read_rds("outputs/cea_stockpile_0.25_onset_trigger_by_year_20250828.rds")
-cea_stockpile_subsets_q3 <-
-  read_rds("outputs/cea_stockpile_0.5_onset_trigger_by_year_20250828.rds")
-cea_stockpile_subsets_q4 <-
-  read_rds("outputs/cea_stockpile_0.75_onset_trigger_by_year_20250828.rds")
+# cea_stockpile_subsets_q1 <-
+#   read_rds("outputs/cea_stockpile_0_onset_trigger_by_year_20250828.rds")
+# cea_stockpile_subsets_q2 <-
+#   read_rds("outputs/cea_stockpile_0.25_onset_trigger_by_year_20250828.rds")
+# cea_stockpile_subsets_q3 <-
+#   read_rds("outputs/cea_stockpile_0.5_onset_trigger_by_year_20250828.rds")
+# cea_stockpile_subsets_q4 <-
+#   read_rds("outputs/cea_stockpile_0.75_onset_trigger_by_year_20250828.rds")
 ```
 
 # Abstract
@@ -1346,7 +1346,6 @@ format_median_iqr(onset_impact, row=21)
 format_median_iqr(onset_impact, row=22)
 
 
-
 # outbreaks missed by delayed vaccination
 wks_delay <- c(1, 5, 9, 14) # de
 dur_missed_id <- vector('list', length(wks_delay))
@@ -1468,6 +1467,11 @@ prop_df <- data.frame(
   prop_included_dur = 100 * (1- n_outbreaks_missed1 / n_outbreaks ),
              prop_included_vax = 100 * (1- n_outbreaks_missed2 / n_outbreaks))
 
+ymean  <- 2900
+ymedian<- 2600
+y50    <- c(2400, 2800)
+y95    <- c(2000, 3200)
+
 p1 <- cea_ori %>%
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
   ggplot(aes(x = as.factor(vacc_week), 
@@ -1487,11 +1491,34 @@ p1 <- cea_ori %>%
     values = my_discrete_colors[1:3],
     labels = c(paste0(format_num(VC3*100, 1), "%"))) +
   labs(x = NULL, y = "# cases averted") +
+  add_summary_braces(
+    x0 = 7,
+    ymean = ymean, ymedian = ymedian,
+    y50 = y50, y95 = y95,
+    pt_size_median = 2,
+    pt_size_mean = x_size,
+    pt_stroke_mean = x_stroke,
+    dx50 = 0.3, dx95 = 0.6,
+    text_50_x = 7.3,
+    text_50_y = y50[2],
+    text_95_x = 8,
+    text_95_y = y95[2],
+    brace_50_x = 7.1,
+    brace_95_x = 7.6,
+    text_offset_mean = 0.12,
+    lw_50 = 0.6, lw_95 = 0.6,
+    whisker_50 = line_width_50, 
+    whisker_95 = line_width_95
+  ) +
   theme_light() +
   theme_tight() +
   theme_x_blank() +
   theme(plot.margin = margin(0,0.1,0,0))
-  
+
+ymean  <- 91
+ymedian<- 85
+y50    <- c(82, 88)
+y95    <- c(75, 95)  
 # Middle panel 
 p2 <- cea_ori %>%
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
@@ -1508,17 +1535,45 @@ p2 <- cea_ori %>%
     mean_size = x_size,
     mean_stroke = x_stroke
   )+
+   add_summary_braces(
+    x0 = 7,
+    ymean = ymean, ymedian = ymedian,
+    y50 = y50, y95 = y95,
+    pt_size_median = 2,
+    pt_size_mean = x_size,
+    pt_stroke_mean = x_stroke,
+    dx50 = 0.3, dx95 = 0.6,
+    text_50_x = 7.3,
+    text_50_y = y50[2],
+    text_95_x = 8,
+    text_95_y = y95[2],
+    brace_50_x = 7.1,
+    brace_95_x = 7.6,
+    text_offset_mean = 0.12,
+    lw_50 = 0.6, lw_95 = 0.6,
+    whisker_50 = line_width_50, 
+    whisker_95 = line_width_95
+  ) +
   scale_y_continuous(labels = scales::percent_format(scale = 1)) +
   scale_color_manual(
-    name = "Vaccine coverage",
+    name = "",
     values = my_discrete_colors[1:3],
     labels = c(paste0(format_num(VC3*100, 1), "%")))+
-  guides(color = "none") +   # <-- removes the legend
-  labs(x = NULL, y = "% cases averted") +
+  # guides(color = "none") +   # <-- removes the legend
+  # labs(x = NULL, y = "% cases averted") +
+  labs(x = "Delay in ORI implementation (weeks)", y = "% cases averted") +
   theme_light() +
   theme_tight() +
-  theme_x_blank() +
+  # theme_x_blank() +
   theme(plot.margin = margin(0,0.1,0,0))
+
+# if (save_plot) {
+#   fac <- 1.3
+#   ggsave(paste0("plots/fig3_pct_case_averted_", tstamp(), ".pdf"),
+#          p2,
+#          device = cairo_pdf, width = fgw1*fac,
+#          height = fgw1*fac, units = "mm")
+# }
 
 # Bottom plot: proportion of outbreaks included
 p3 <- prop_df %>% 
@@ -1639,6 +1694,194 @@ cat(sprintf("\nExponential model: relative decline per week = %.2f%%; half-life 
             rel_drop_per_week, half_life_wks))
 cat(sprintf("Piecewise model: breakpoint ≈ %.2f weeks; post-break slope ≈ %.2f percentage-points/week\n",
             bp_est, slope_post))
+
+```
+
+#### Decay panel
+
+```{r}
+fit_decay <- read_rds("outputs/fit_decay_model_20250923.rds")
+```
+
+Plot individual decay 
+
+```{r}
+quantile(fit_decay$`5`$r_squared, probs=c(0.25, 0.5, 0.75), na.rm=T)
+quantile(fit_decay$`5`$decay_rate_k, probs=c(0.25, 0.5, 0.75), na.rm=T)
+rate_reduc  <-  1 - exp(-fit_decay$`5`$decay_rate_k) # weekly redction
+quantile(rate_reduc, probs=c(0.25, 0.5, 0.75), na.rm=T)
+quantile(fit_decay$`5`$half_life_weeks, probs=c(0.25, 0.5, 0.75), na.rm=T)
+
+set.seed(42)
+runid_sample <- 1
+# id_outbreak_sample <- sample(unique(fit_decay$`5`$id_outbreak), size=30)
+id_outbreak_sample <- sample(unique(fit_decay$`5`$id_outbreak), size=20)
+fitted_models <- fit_decay$`5` %>% 
+  filter(runid %in% runid_sample, id_outbreak %in% id_outbreak_sample,
+         vacc_cov == 0.75)
+
+# Define the x-axis range for plotting
+x_range <- seq(1, 15, by = 0.2) 
+
+# Use the fitted parameters to generate y-values for each curve
+spaghetti_data <- fitted_models %>%
+  # Create a list column containing the x_range for each fit
+  mutate(vacc_week = list(x_range)) %>%
+  unnest(vacc_week) %>%
+  mutate(
+    predicted_pct_averted = initial_impact_A0 * exp(-decay_rate_k * vacc_week)
+  )
+
+# --- Calculate the mean and median curves ---
+# This is done by first finding the median A0 and k, then applying the formula.
+summary_params <- fit_decay$`5` %>%
+  ungroup() %>%
+  summarise(
+    mean_A0 = mean(initial_impact_A0, na.rm = TRUE),
+    mean_k = mean(decay_rate_k, na.rm = TRUE),
+    median_A0 = median(initial_impact_A0, na.rm = TRUE),
+    median_k = median(decay_rate_k, na.rm = TRUE)
+  )
+
+summary_curves_data <- data.frame(vacc_week = x_range) %>%
+  mutate(
+    mean_curve = summary_params$mean_A0 * exp(-summary_params$mean_k * vacc_week),
+    median_curve = summary_params$median_A0 * exp(-summary_params$median_k * vacc_week)
+  )
+
+# --- Prepare the raw data points for plotting ---
+raw_data_points <- cea_ori %>%
+  filter(vacc_cov == 0.75,
+         ori_occurred == TRUE,
+         vacc_week %in% VW_seq, 
+         runid %in% runid_sample,
+         id_outbreak %in% id_outbreak_sample)
+
+# Format the numbers for clean presentation in the label
+# A0 as a percentage with one decimal place
+# format_A0 <- paste0(format(median_params$median_A0, nsmall = 1, digits = 1), "%") 
+format_A0 <- paste0(round(summary_params$median_A0/100, digits=3)) 
+# k with two decimal places
+format_k <- paste0(round(summary_params$median_k, digits = 3))
+
+# This is the typographically recommended version.
+equation_label <- bquote(
+  bold("Median:") ~ 
+    italic(y) == .(format_A0) * 
+    "exp" * group("(", -.(format_k) * italic(t), ")")
+)
+
+library(xdvir)
+
+# --- Create the final plot ---
+plt_exp_decay <- ggplot() +
+  # Layer 1: Individual fitted curves (the "spaghetti")
+  # These are plotted first so they are in the background.
+  geom_line(
+    data = spaghetti_data,
+    aes(x = vacc_week, y = predicted_pct_averted, group = id_outbreak, color=id_outbreak),
+    # color = "grey80",
+    alpha = 0.3 # Use very low alpha to see density
+  ) +
+  # Layer 2: Raw data points
+  # Plotting the original data on top helps ground the visualization.
+  geom_point(
+    data = raw_data_points,
+    aes(x = vacc_week, y = pct_reduc_case, color=id_outbreak),
+    # color = "steelblue",
+    alpha = 0.3, # Low alpha to show density
+    size = 1
+  ) +
+  # geom_jitter(data = raw_data_points,
+  #   aes(x = vacc_week, y = pct_reduc_case),
+  #   width = 0.2,   # How much to jitter horizontally
+  #   height = 0,    # No vertical jitter needed
+  #   alpha = 0.05,  # HIGHLY transparent to show density
+  #   color = "grey60",
+  #   size = 1.5,
+  #   shape = 16     # A solid circle
+  # ) +
+  # Layer 3: The median summary curve
+  geom_line(
+    data = summary_curves_data,
+    aes(x = vacc_week, y = median_curve),
+    color = "firebrick",
+    linewidth = 1.2
+  ) +
+
+  # Layer 4: The mean summary curve
+  # geom_line(
+  #   data = summary_curves_data,
+  #   aes(x = vacc_week, y = mean_curve),
+  #   color = "black",
+  #   linewidth = 1.2,
+  #   linetype = "dashed"
+  # ) +
+  # annotate(
+  #   geom = "text",
+  #   x = 4,          # X-coordinate for the label (choose an empty spot)
+  #   y = 100,         # Y-coordinate for the label (in % units)
+  #   label = as.character(as.expression(equation_label)), # Pass the bquote object
+  #   parse = TRUE,
+  #     # ESSENTIAL: Tells ggplot to render the label as an equation
+  #   size = 4,       # Adjust size as needed
+  #   hjust = 0,      # Horizontal justification (0=left, 0.5=center, 1=right)
+  #   vjust = 1, 
+  #   color = "black" # Match the color of the median curve
+  # ) +
+  # 
+  annotate(
+  "latex", 
+  x = 4, 
+  y = 100, 
+  label = paste0("$\\hat{y} = ", format_A0, "\\exp(-", format_k, "t)$"), 
+  size = 4, 
+  hjust = 0,   # left-align text
+  vjust = 1    # top-align text
+  ) +
+  # Formatting and labels
+  scale_y_continuous(labels = scales::percent_format(scale = 1, accuracy = 1), 
+                     limits=c(0,100)) +
+  scale_x_continuous(labels = seq(1,15,2), breaks=seq(1,15,2)) +
+  # coord_cartesian(ylim = c(0, 100), xlim = c(1, 15)) +
+  labs(
+    x = "Delay in ORI implementation (weeks)",
+    y = "% Cases averted"
+  ) +
+  # scale_color_manual(
+  #   name = "",
+  #   values = my_discrete_colors[1:20],
+  #   labels = NULL) +
+  guides(color = "none") +
+  theme_light() +
+  theme_tight()
+
+# Display the plot
+# print(final_plot)
+
+# To add a legend for the mean/median lines, you would need to reshape
+# summary_curves_data and map color to a variable.
+# Example for legend:
+summary_curves_long <- summary_curves_data %>%
+  pivot_longer(cols = c(mean_curve, median_curve), names_to = "curve_type", values_to = "value")
+
+# Then in ggplot, you would replace layers 3 & 4 with:
+# geom_line(
+#   data = summary_curves_long,
+#   aes(x = vacc_week, y = value, color = curve_type),
+#   linewidth = 1.2
+# ) +
+# scale_color_manual(
+#   name = "Summary Trend",
+#   values = c("mean_curve" = "black", "median_curve" = "firebrick"),
+#   labels = c("Mean", "Median")
+# )
+if (save_plot) {
+  fac <- 1.3
+  ggsave(paste0("plots/fig_3b_exp_decay_", tstamp(), ".pdf"), plt_exp_decay,
+         device = cairo_pdf, width = fgw1 * fac, 
+         height = fgw1 * fac, units = "mm")
+}
 
 ```
 
@@ -1980,6 +2223,15 @@ cea_ct %>%
 ```
 
 ### Right panel
+
+Plot decay
+```{r}
+# weekly decline
+res <- read_rds("outputs/fit_decay_model_20250903.rds")
+
+# res <- read_rds("outputs/fit_decay_model_case_trigger_cut_wk_5_20250822.rds")
+
+```
 
 ```{r}
 # across weeks for case thresholds of 1, 10, and 100
@@ -2727,7 +2979,206 @@ cea %>%
   filter(vacc_week == 9, vacc_cov == 0.9) %>%
   summarize_quantiles(cost_per_daly_averted) %>%
   format_median_iqr(row=1, digits=0)
+```
 
+```{r fig4, eval=FALSE}
+# Load subset analyses reflecting global OCV stockpile
+cea_stockpile_subsets_q1 <-
+  read_rds("outputs/cea_stockpile_0_onset_trigger_by_year_20250828.rds")
+cea_stockpile_ar_subsets <-
+  read_rds("outputs/cea_stockpile_ar_cutoff_onset_trigger_by_year_20250924.rds")
+# Reference values for individual assessment
+
+# subsets for plotting
+cea_stockpile_subsets_q1 %>% 
+  group_by(year_max) %>%
+  summarize(cumul_case_averted = median(s_ch_averted_tot))
+
+cea_stockpile_ar_subsets[["1"]] %>% 
+  group_by(year_max) %>%
+  summarize(cumul_case_averted = median(s_ch_averted_tot))
+
+cea_stockpile_ar_subsets[["2"]] %>% 
+  group_by(year_max) %>%
+  summarize(cumul_case_averted = median(s_ch_averted_tot))
+
+cea_stockpile_ar_subsets[["3"]] %>% 
+  group_by(year_max) %>%
+  summarize(cumul_case_averted = median(s_ch_averted_tot))
+
+d1 <- cea_stockpile_subsets_q1
+d1$group <- "AR0"
+d2 <- cea_stockpile_ar_subsets[["1"]]
+d2$group <- "AR1"
+d3 <- cea_stockpile_ar_subsets[["2"]]
+d3$group <- "AR2"
+d4 <- cea_stockpile_ar_subsets[["3"]]
+d4$group <- "AR3"
+rm(cea_stockpile_subsets_q1, cea_stockpile_ar_subsets)
+
+stockpile_impact_data <- rbindlist(list(d1,d2,d3,d4))
+rm(d1,d2,d3,d4)
+
+stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 9),] %>% 
+  filter(group == "AR0") %>% 
+  summarize_quantiles(variable=case_averted_per_1000_OCV) %>% 
+  format_median_interval(interval = "IQR", digits=2)
+
+stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 1),] %>% 
+  filter(group == "AR0") %>% 
+  summarize_quantiles(variable=case_averted_per_1000_OCV) %>% 
+  format_median_interval(interval = "IQR", digits=2)
+
+stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 9),] %>% 
+  filter(group == "AR3") %>% 
+  summarize_quantiles(variable=case_averted_per_1000_OCV) %>% 
+  format_median_interval(interval = "IQR", digits=4)
+
+# overall impact of 38M doses
+c(2.4524, 1.9078, 2.9837)*38000000/1000
+
+stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 5),] %>% 
+  filter(group == "AR3") %>% 
+  summarize_quantiles(variable=case_averted_per_1000_OCV) %>% 
+  format_median_interval(interval = "IQR", digits=4)
+c(4.7478, 3.7228, 5.7029)*38000000/1000
+
+stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 1),] %>% 
+  filter(group == "AR1") %>% 
+  summarize_quantiles(variable=case_averted_per_1000_OCV) %>% 
+  format_median_interval(interval = "IQR", digits=2)
+
+
+
+d1 <- stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 9 & group == "AR0"),] 
+d1$plot_grp <- "Baseline"
+d2 <- stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 9 & group == "AR3"),] 
+d2$plot_grp <- "Higher AR"
+d3 <- stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 1 & group == "AR0"),] 
+d3$plot_grp <- "Faster ORI"
+
+plot_data_all <- rbindlist(list(d1,d2,d3))
+rm(d1,d2,d3)
+
+# sample to speed up plotting  
+set.seed(42)
+id_sample <- sample(1:200, 30)
+plot_data <- plot_data_all[subset_id %in% id_sample, ]
+
+# grp_labels <- c("All", ">1 per 10,000", ">2 per 10,000", ">3 per 10,000")
+grp_labels <- c("Baseline", "Faster ORI", "Higher AR")
+# (A) OCV deployment over time# (A) Oq500CV deployment over time
+plt_a <- ocv_year |>
+  filter(year <= 2020) |> 
+  ggplot(aes(x = as.factor(year), y = cum_num_ocv)) +
+  geom_point() +
+  labs(x = "", y = "Cumulative\nOCVs deployed") +
+  theme_light() +
+  theme_tight() +
+  theme_x_blank() +
+  theme(plot.margin = margin(0,0,0,0))
+
+# (c) Cases averted per 1000 OCVs
+plt_b <- plot_data |>
+  ggplot(aes(x = as.factor(year_max), y = case_averted_per_1000_OCV, 
+             color = plot_grp)) +
+  ci_layers(
+    group = plot_grp, color = plot_grp,
+    dodge_width = line_interval,
+    lw95 = line_width_95,
+    lw50 = line_width_50,
+    pr_size = point_size,
+    mean_size = x_size,
+    mean_stroke = x_stroke
+  )+
+  scale_y_continuous(limits = c(0,3)) +
+  scale_color_manual(
+    name = "",
+    values = my_discrete_colors[c(4,5,7)],
+    labels = grp_labels) +
+  labs(x = NULL, y = "Cases averted\nper 1,000 OCVs") +
+  theme_light() +
+  theme_tight() +
+  # theme_x_blank() +
+  theme(plot.margin = margin(0,0,0,0))
+
+
+# Combine all panels into a single figure
+plt3 <- wrap_plots(list(plt_a, plt_b), ncol = 1, guides = "collect") &
+  theme(legend.position = "top")
+
+# Save figure
+if (save_plot) {
+  fac <- 1.3
+  ggsave(paste0("plots/stockpile_cumulative_impact_baseline1_", tstamp(), ".pdf"),
+         plt3, device = cairo_pdf, width=fgw1*fac, 
+         height=fgw1*fac*1.5, units="mm")
+}
+
+d1 <- stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 9 & group == "AR1"),] 
+d1$plot_grp <- "Baseline"
+d2 <- stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 9 & group == "AR3"),] 
+d2$plot_grp <- "Higher AR"
+d3 <- stockpile_impact_data[(vacc_cov == 0.75 & vacc_week == 1 & group == "AR1"),] 
+d3$plot_grp <- "Faster ORI"
+
+plot_data_all <- rbindlist(list(d1,d2,d3))
+rm(d1,d2,d3)
+
+# sample to speed up plotting  
+set.seed(42)
+id_sample <- sample(1:200, 30)
+plot_data <- plot_data_all[subset_id %in% id_sample, ]
+
+# grp_labels <- c("All", ">1 per 10,000", ">2 per 10,000", ">3 per 10,000")
+grp_labels <- c("Baseline", "Faster ORI", "Higher AR")
+# (A) OCV deployment over time# (A) Oq500CV deployment over time
+plt_a <- ocv_year |>
+  filter(year <= 2020) |> 
+  ggplot(aes(x = as.factor(year), y = cum_num_ocv)) +
+  geom_point() +
+  labs(x = "", y = "Cumulative\nOCVs deployed") +
+  theme_light() +
+  theme_tight() +
+  theme_x_blank() +
+  theme(plot.margin = margin(0,0,0,0))
+
+# (c) Cases averted per 1000 OCVs
+plt_b <- plot_data |>
+  ggplot(aes(x = as.factor(year_max), y = case_averted_per_1000_OCV, 
+             color = plot_grp)) +
+  ci_layers(
+    group = plot_grp, color = plot_grp,
+    dodge_width = line_interval,
+    lw95 = line_width_95,
+    lw50 = line_width_50,
+    pr_size = point_size,
+    mean_size = x_size,
+    mean_stroke = x_stroke
+  )+
+  scale_y_continuous(limits = c(0,3)) +
+  scale_color_manual(
+    name = "",
+    values = my_discrete_colors[c(4,5,7)],
+    labels = grp_labels) +
+  labs(x = NULL, y = "Cases averted\nper 1,000 OCVs") +
+  theme_light() +
+  theme_tight() +
+  # theme_x_blank() +
+  theme(plot.margin = margin(0,0,0,0))
+
+
+# Combine all panels into a single figure
+plt3 <- wrap_plots(list(plt_a, plt_b), ncol = 1, guides = "collect") &
+  theme(legend.position = "top")
+
+# Save figure
+if (save_plot) {
+  fac <- 1.3
+  ggsave(paste0("plots/stockpile_cumulative_impact_baseline2_", tstamp(), ".pdf"),
+         plt3, device = cairo_pdf, width=fgw1*fac, 
+         height=fgw1*fac*1.5, units="mm")
+}
 ```
 
 # Result Tables

@@ -282,10 +282,14 @@ IVE data come from a Bayesian beta regression fit
 ```{r}
 fit <- read_rds("outputs/fit_ive_matlab_20241008.rds")
 # print(fit, pars=c("beta","phi","lp__"), probs=c(0.025, 0.5, 0.975))
-ive_yrep <- list(yrep = as.data.frame(rstan::extract(fit)$yrep),
-                vacc_cov = round(expit(rstan::extract(fit)$new_X[1,,2]), digits=2))
-ive_yrep$vacc_cov
-saveRDS(ive_yrep, paste0("outputs/ive_yrep_", tstamp(), ".rds"))
+ive_yhat_yrep <- list(
+  yhat =  as.data.frame(rstan::extract(fit)$new_mu),
+  yrep = as.data.frame(rstan::extract(fit)$yrep),
+  vacc_cov = round(expit(rstan::extract(fit)$new_X[1,,2]), digits=2))
+
+ive_yhat_yrep$vacc_cov
+saveRDS(ive_yhat_yrep, paste0("outputs/ive_yhat_yrep_", tstamp(), ".rds"))
+# saveRDS(ive_yrep, paste0("outputs/ive_yrep_", tstamp(), ".rds"))#
 
 # plot(ive_yrep$eff_vacc_cov, ive_yrep$yrep[sample(1:nrow(ive_yrep$yrep),1), ], type="l", col='grey90')
 # for(i in 1:100){

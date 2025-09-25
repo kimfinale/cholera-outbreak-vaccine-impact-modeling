@@ -2,6 +2,8 @@
 title: "trash"
 output: html_document
 date: "2025-08-26"
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -437,6 +439,7 @@ paste0("Maximum percent case reduction from pre-emptive vaccination: ",
        "% for vaccine coverage rates of 60%, 75%, and 90%, respectively.")
 ```
 
+```{r}
 # Preemptive vaccination results
 cea_pe_vc60 <- read_rds("outputs/cea_0.6_preemptive_20250314.rds")
 cea_pe_vc75 <- read_rds("outputs/cea_0.75_preemptive_20250314.rds")
@@ -554,7 +557,7 @@ message(paste0("Median case reduction decreases with increasing number of cumula
 
 # Add fitted values to data
 svim_ct_med$fitted <- fitted(fit_ct)
-# ```
+```
 
 
 ## Figure 0
@@ -761,6 +764,7 @@ if (save_table) {
 }
 ```
 
+```{r}
 # Combine into a single table
 table5 <- data.frame(
   "Targeting Strategy" = c("Random", "Case-weighted"),
@@ -836,6 +840,8 @@ table5 <- data.frame(
 
 # Display table
 knitr::kable(table5, caption = "Comparison of OCV targeting strategies (2022 data, 75% coverage)")
+
+```
 
 
 This section visualizes the impact of vaccination on case reduction under different strategies and coverage levels.
@@ -3387,4 +3393,397 @@ if (save_plot) {
 }
 ```
 
+```{r}
+# packages
+library(ggplot2)
+library(patchwork)
+
+#--- 1) Build the inset legend (self-contained) -------------------------------
+make_uncertainty_inset <- function(
+  col = "black",
+  dot_size = 2.8,
+  x_size  = 3.2,
+  lwd_50  = 1.6,
+  lwd_95  = 0.6,
+  label_size = 3.2
+) {
+  # Coordinates are arbitrary; the inset is purely schematic
+  df_lines <- data.frame(
+    x0 = c(10, 35),   # 95% then 50%
+    x1 = c(90, 65),
+    y  = c(0,   0)
+  )
+  df_pts <- data.frame(
+    x  = c(50, 55),         # median, mean
+    y  = c(0.7, 0.7),
+    lab= c("Median", "Mean"),
+    shape = c(16, 4)        # 16=solid dot, 4= X
+  )
+
+  df_labs <- data.frame(
+    x = c(65, 92, 50, 55),
+    y = c(-0.25, -0.25, 0.7, 0.7),
+    lab = c("50% interval", "95% interval", "Median", "Mean")
+  )
+
+  ggplot() +
+    # 95% interval (thin)
+    geom_segment(
+      data = df_lines[1,],
+      aes(x = x0, xend = x1, y = y, yend = y),
+      linewidth = lwd_95, lineend = "round", colour = col
+    ) +
+    # 50% interval (thick, centered)
+    geom_segment(
+      data = df_lines[2,],
+      aes(x = x0, xend = x1, y = y, yend = y),
+      linewidth = lwd_50, lineend = "round", colour = col
+    ) +
+    # Points: dot (median) and X (mean)
+    geom_point(
+      data = df_pts,
+      aes(x = x, y = y, shape = factor(shape)),
+      size = c(dot_size, x_size), stroke = 0.8, colour = col, fill = col
+    ) +
+    # Text labels
+    geom_text(
+      data = df_labs[1:2,], aes(x = x, y = y, label = lab),
+      hjust = 0, vjust = 0.5, size = label_size
+    ) +
+    geom_text(
+      data = df_labs[3:4,], aes(x = x, y = y, label = lab),
+      nudge_y = 0.22, size = label_size, vjust = 0
+    ) +
+    scale_shape_manual(values = c("16" = 16, "4" = 4), guide = "none") +
+    coord_cartesian(xlim = c(5, 100), ylim = c(-0.6, 1.2), expand = FALSE) +
+    theme_void() +
+    theme(
+      plot.margin = margin(2, 2, 2, 2)
+    )
+}
+
+#--- 2) Helper: add the inset onto any ggplot --------------------------------
+# left, bottom, right, top are in NPC (0-1) relative to the plot panel
+add_uncertainty_inset <- function(p,
+                                  left = 0.6, bottom = 0.05,
+                                  right = 0.98, top = 0.32,
+                                  ...) {
+  inset <- make_uncertainty_inset(...)
+  p + inset_element(inset, left = left, bottom = bottom,
+                    right = right, top = top, align_to = "panel")
+}
+
+#--- 3) Minimal example -------------------------------------------------------
+# (Replace 'p' with your existing figure ggplot object.)
+if (interactive()) {
+  p <- ggplot(mtcars, aes(wt, mpg)) + geom_point() +
+    theme_minimal(base_size = 12)
+  p_inset <- add_uncertainty_inset(p)   # default placement
+  print(p_inset)
+}
+
+```
+
+```{r}
+# packages
+library(ggplot2)
+library(patchwork)   # install.packages("patchwork") if needed
+
+# Helper: add a curly brace made from four curves (no extra packages)
+# xmin..xmax: horizontal span of the interval
+# y: baseline y-position of the interval
+# h: brace height above the baseline
+# size: line width
+# col: color
+add_brace_layers <- function(xmin, xmax, y, h = 0.06, size = 0.6, col = "black") {
+  mid <- (xmin + xmax) / 2
+  dx  <- (xmax - xmin) * 0.12
+  list(
+    # left outside curl
+    geom_curve(aes(x = xmin,       y = y,     xend = xmin + dx, yend = y + h),
+               curvature = 0.6, linewidth = size, colour = col, inherit.aes = FALSE, lineend = "round"),
+    # left inner curl toward center
+    geom_curve(aes(x = xmin + dx,  y = y + h, xend = mid - dx,  yend = y + h/2),
+               curvature = -0.6, linewidth = size, colour = col, inherit.aes = FALSE, lineend = "round"),
+    # right outside curl (mirror)
+    geom_curve(aes(x = xmax,       y = y,     xend = xmax - dx, yend = y + h),
+               curvature = -0.6, linewidth = size, colour = col, inherit.aes = FALSE, lineend = "round"),
+    # right inner curl toward center
+    geom_curve(aes(x = xmax - dx,  y = y + h, xend = mid + dx,  yend = y + h/2),
+               curvature = 0.6, linewidth = size, colour = col, inherit.aes = FALSE, lineend = "round")
+  )
+}
+
+# Build the inset legend with braces for 95% and 50% intervals, plus mean (×) & median (●)
+make_uncertainty_inset_braces <- function(
+  col        = "black",
+  lwd_95     = 0.6,
+  lwd_50     = 1.2,
+  dot_size   = 2.8,
+  x_size     = 3.2,
+  label_size = 3.2
+) {
+  # x-span for intervals in inset coords
+  x95  <- c(-0.45,  0.45); y95 <- 1.50
+  x50  <- c(-0.28,  0.28); y50 <- 1.30
+  yX   <- 1.15
+  yMed <- 0.98
+
+  g <- ggplot() +
+    # intervals (thin=95%, thick=50%)
+    geom_segment(aes(x = x95[1], xend = x95[2], y = y95, yend = y95),
+                 linewidth = lwd_95, colour = col) +
+    geom_segment(aes(x = x50[1], xend = x50[2], y = y50, yend = y50),
+                 linewidth = lwd_50, colour = col, lineend = "round") +
+    # mean (X) and median (●)
+    geom_point(aes(x = 0, y = yX),   shape = 4, size = x_size,  stroke = 0.9, colour = col) +
+    geom_point(aes(x = 0, y = yMed), shape = 16, size = dot_size,               colour = col) +
+    # labels
+    geom_text(aes(x = 0.50, y = y95 + 0.02, label = "95% interval"),
+              hjust = 0, vjust = 0.5, size = label_size) +
+    geom_text(aes(x = 0.50, y = y50 + 0.02, label = "50% interval"),
+              hjust = 0, vjust = 0.5, size = label_size) +
+    geom_text(aes(x = 0.10, y = yX,   label = "Mean (×)"),
+              hjust = 0, vjust = 0.5, size = label_size) +
+    geom_text(aes(x = 0.10, y = yMed, label = "Median (●)"),
+              hjust = 0, vjust = 0.5, size = label_size) +
+    # braces (made from curves)
+    add_brace_layers(xmin = x95[1], xmax = x95[2], y = y95, h = 0.07, size = 0.6, col = col) +
+    add_brace_layers(xmin = x50[1], xmax = x50[2], y = y50, h = 0.07, size = 0.6, col = col) +
+    coord_cartesian(xlim = c(-0.55, 1.05), ylim = c(0.85, 1.65), expand = FALSE) +
+    theme_void() +
+    theme(plot.margin = margin(2, 2, 2, 2))
+  g
+}
+
+# Convenience: add the inset to any ggplot (panel-relative placement)
+add_uncertainty_inset_braces <- function(p,
+                                         left = 0.60, bottom = 0.05,
+                                         right = 0.98,  top    = 0.34,
+                                         ...) {
+  inset <- make_uncertainty_inset_braces(...)
+  p + inset_element(inset, left = left, bottom = bottom, right = right, top = top, align_to = "panel")
+}
+
+# --- Minimal example (replace `p` with your real figure) ---
+p <- ggplot(mtcars, aes(wt, mpg)) + geom_point() + theme_minimal(base_size = 12)
+p_inset <- add_uncertainty_inset_braces(p)
+p_inset
+
+
+```
+
+
+```{r}
+# Install the package if you haven't already
+# install.packages("pBrackets")
+
+library(pBrackets)
+
+# Example usage:
+par(mar=c(1,1,1,1))
+plot(0,0, type='n', xlim=c(0,20), ylim=c(0,20), axes=FALSE, xlab='', ylab='')
+
+# Draw a standard brace
+brackets(0, 18, 7, 20, lwd=2)
+text(8, 20, labels=expression(paste(bold('Braces:'), ' default')), adj=c(0,0))
+
+# Draw a brace with custom curvature
+brackets(0, 16, 7, 18, lwd=2, curvatur=1, type=2)
+text(8, 18, labels=expression(paste(bold('Braces 2:'), ' curvatur=1, type=2')), adj=c(0,0))
+```
+
+
+```{r}
+# Install the package if you haven't already
+# install.packages("ggbrace")
+
+library(ggplot2)
+library(ggbrace)
+
+# Example usage:
+df <- data.frame(x = 1:5, y = c(2, 4, 1, 5, 3), group = c("A", "A", "B", "B", "A"))
+
+ggplot(df, aes(x, y)) +
+  geom_point() +
+  stat_brace(aes(x = x, y = y, group = group), outside = FALSE)
+
+df <- data.frame(x=1:2, y=c(2.2,2))
+
+ymean <- 2850
+ymedian <- 2700
+y50 <- c(2600, 2800)
+y95 <- c(2400, 3000)
+  
+ggplot()+
+  geom_point(data = data.frame(x = 11), y = ymedian), aes(x,y), shape = 16, size = 2.8) +
+  geom_point(data = data.frame(x = 11), y = ymean), aes(x,y), shape = 4, size = 3.2, stroke = 0.9) +
+  stat_brace(data = data.frame(x = c(11, 12), y = c(y50[1], y50[2])),
+             aes(x,y), outside=FALSE, rotate=90, linewidth = 0.6) + 
+  stat_brace(data=data.frame(x=c(12, 13), y=c(y95[1], y95[2])),
+             aes(x,y), outside=FALSE, rotate=90, linewidth = 0.6) + 
+  geom_segment(aes(x=11, xend=1, y=y95[1], yend=y95[2]), linewidth=line_width_95)+
+  geom_segment(aes(x=11, xend=1, y=y50[1], yend=y50[2]), linewidth=line_width_50) +
+   # labels
+  annotate("text", x=1.05, y = ymean,   label = "mean",   
+           hjust = 0, vjust = 0.5, size = 3.2) +
+  annotate("text", x = 1.05, y = ymedian, label = "median", 
+           hjust = 0, vjust = 0.5, size = 3.2) +
+  annotate("text", x = 1.24, y = mean(y50), label = "50%", 
+           hjust = 0, vjust = 0.5, size = 3.2) +
+  annotate("text", x = 1.44, y = mean(y95), label = "95%", 
+           hjust = 0, vjust = 0.5, size = 3.2)
+  
+  
+
+# pkgs you need
+# install.packages("ggplot2")
+# install.packages("ggbrace")   # for stat_brace()
+library(ggplot2)
+library(ggbrace)
+
+# inputs
+ymean   <- 2.6
+ymedian <- 2.5
+y50     <- c(2.4, 2.7)
+y95     <- c(2.0, 3.0)
+
+brace_x <- 1.1
+line_width_50 <- 1.2
+line_width_95 <- 0.6
+
+# your df should exist; if not, a placeholder:
+# df <- data.frame(x = numeric(), y = numeric())
+
+p <- ggplot(df, aes(x, y)) +
+  # median (dot) and mean (x)
+  geom_point(data = data.frame(x = 1, y = ymedian), shape = 16, size = 2.8) +
+  geom_point(data = data.frame(x = 1, y = ymean),   shape = 4,  size = 3.2, stroke = 0.9) +
+
+  # vertical intervals
+  geom_segment(aes(x = 1, xend = 1, y = y95[1], yend = y95[2]),
+               linewidth = line_width_95) +
+  geom_segment(aes(x = 1, xend = 1, y = y50[1], yend = y50[2]),
+               linewidth = line_width_50, lineend = "round") +
+
+  # braces (rotated = vertical)
+  stat_brace(
+    data = data.frame(x = c(1.20, 1.20), y = c(y50[1], y50[2])),
+    aes(x, y), outside = FALSE, rotate = 90, linewidth = 0.6
+  ) +
+  stat_brace(
+    data = data.frame(x = c(1.40, 1.40), y = c(y95[1], y95[2])),
+    aes(x, y), outside = FALSE, rotate = 90, linewidth = 0.6
+  ) +
+  # labels
+  annotate("text", x = 1.05, y = ymean,   label = "mean",   hjust = 0, 
+           vjust = 0.5, size = 3.2) +
+  annotate("text", x = 1.05, y = ymedian, label = "median", hjust = 0, 
+           vjust = 0.5, size = 3.2) +
+  annotate("text", x = 1.24, y = mean(y50), label = "50%",  hjust = 0, 
+           vjust = 0.5, size = 3.2) +
+  annotate("text", x = 1.44, y = mean(y95), label = "95%",  hjust = 0, 
+           vjust = 0.5, size = 3.2)
+
+p
+```
+
+```{r}
+# requires: ggplot2, ggbrace (for stat_brace)
+library(ggplot2)
+
+add_summary_braces <- function(
+  x0,                      # anchor x for the points/whiskers (e.g., 11)
+  ymean, ymedian,          # scalars
+  y50, y95,                # length-2 vectors: c(lower, upper)
+  dx50 = 1, dx95 = 1,      # horizontal step sizes for the 50% and 95% braces
+  label_size = 3.2,
+  pt_size_median = 2.8,
+  pt_size_mean = 3.2,
+  pt_stroke_mean = 0.9,
+  lw_50 = 0.6, lw_95 = 0.6,# brace line widths
+  whisker_50 = 0.6, whisker_95 = 0.6,  # vertical segment widths
+  text_offset_mean = 0.1, # label offsets from x0
+  brace_offset = 0.24
+) {
+  # data frames for geoms (keeps inherit.aes = FALSE clean)
+  df_median <- data.frame(x = x0, y = ymedian)
+  df_mean   <- data.frame(x = x0, y = ymean)
+
+  df_w50 <- data.frame(x = x0, xend = x0, y = y50[1], yend = y50[2])
+  df_w95 <- data.frame(x = x0, xend = x0, y = y95[1], yend = y95[2])
+
+  df_b50 <- data.frame(x = c(x0 + brace_offset, x0 + dx50+ brace_offset), 
+                       y = c(y50[1], y50[2]))
+  df_b95 <- data.frame(x = c(x0 + dx50, x0 + dx50 + dx95), 
+                       y = c(y95[1], y95[2]))
+
+  list(
+    # points
+    geom_point(
+      data = df_median,
+      mapping = aes(x = x, y = y),
+      shape = 16, size = pt_size_median, inherit.aes = FALSE
+    ),
+    geom_point(
+      data = df_mean,
+      mapping = aes(x = x, y = y),
+      shape = 4, size = pt_size_mean, stroke = pt_stroke_mean, inherit.aes = FALSE
+    ),
+
+    # braces (ggbrace::stat_brace)
+    ggbrace::stat_brace(
+      data = df_b50,
+      mapping = aes(x, y),
+      outside = FALSE, rotate = 90, linewidth = lw_50, inherit.aes = FALSE
+    ),
+    ggbrace::stat_brace(
+      data = df_b95,
+      mapping = aes(x, y),
+      outside = FALSE, rotate = 90, linewidth = lw_95, inherit.aes = FALSE
+    ),
+
+    # vertical whiskers
+    geom_segment(
+      data = df_w95,
+      mapping = aes(x = x, xend = xend, y = y, yend = yend),
+      linewidth = whisker_95, inherit.aes = FALSE
+    ),
+    geom_segment(
+      data = df_w50,
+      mapping = aes(x = x, xend = xend, y = y, yend = yend),
+      linewidth = whisker_50, inherit.aes = FALSE
+    ),
+
+    # labels
+    annotate("text", x = x0 - text_offset_mean, y = ymean,   label = "mean",
+             hjust = 1, vjust = 0.5, size = label_size),
+    annotate("text", x = x0 - text_offset_mean, y = ymedian, label = "median",
+             hjust = 1, vjust = 0.5, size = label_size),
+    annotate("text", x = x0 + brace_offset + dx50/2, y = y50[2], label = "50%",
+             hjust = 0, vjust = 0.5, size = label_size),
+    annotate("text", x = x0 + dx50/2 + dx95/2, y = y95[2], label = "95%",
+             hjust = 0, vjust = 0.5, size = label_size)
+  )
+}
+
+ymean  <- 2850
+ymedian<- 2700
+y50    <- c(2600, 2800)
+y95    <- c(2400, 3000)
+
+ggplot() +
+  add_summary_braces(
+    x0 = 11,
+    ymean = ymean, ymedian = ymedian,
+    y50 = y50, y95 = y95,
+    dx50 = 0.6, dx95 = 1,
+    text_offset_mean = 0.1,
+    brace_offset = 0.1, 
+    lw_50 = 0.6, lw_95 = 0.6,
+    whisker_50 = 2, whisker_95 = 0.8
+  ) +
+  coord_cartesian(xlim = c(10.5, 13.5))
+
+```
 
