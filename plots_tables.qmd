@@ -1934,6 +1934,7 @@ plt_exp_decay_norm <- ggplot() +
     inherit.aes = FALSE,
     alpha = 0.20
   ) +
+  
   geom_line(
     data = summary_curves_norm,
     aes(x = vacc_week, y = med),
