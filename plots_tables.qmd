@@ -1703,6 +1703,12 @@ cat(sprintf("Piecewise model: breakpoint ≈ %.2f weeks; post-break slope ≈ %.
 fit_decay <- read_rds("outputs/fit_decay_model_20250923.rds")
 ```
 
+#### Decay panel
+
+```{r}
+fit_decay <- read_rds("outputs/fit_decay_model_20250923.rds")
+```
+
 Plot individual decay 
 
 ```{r}
@@ -1772,7 +1778,6 @@ equation_label <- bquote(
 )
 
 library(xdvir)
-
 # --- Create the final plot ---
 plt_exp_decay <- ggplot() +
   # Layer 1: Individual fitted curves (the "spaghetti")
@@ -1792,15 +1797,7 @@ plt_exp_decay <- ggplot() +
     alpha = 0.3, # Low alpha to show density
     size = 1
   ) +
-  # geom_jitter(data = raw_data_points,
-  #   aes(x = vacc_week, y = pct_reduc_case),
-  #   width = 0.2,   # How much to jitter horizontally
-  #   height = 0,    # No vertical jitter needed
-  #   alpha = 0.05,  # HIGHLY transparent to show density
-  #   color = "grey60",
-  #   size = 1.5,
-  #   shape = 16     # A solid circle
-  # ) +
+
   # Layer 3: The median summary curve
   geom_line(
     data = summary_curves_data,
@@ -1808,36 +1805,15 @@ plt_exp_decay <- ggplot() +
     color = "firebrick",
     linewidth = 1.2
   ) +
-
-  # Layer 4: The mean summary curve
-  # geom_line(
-  #   data = summary_curves_data,
-  #   aes(x = vacc_week, y = mean_curve),
-  #   color = "black",
-  #   linewidth = 1.2,
-  #   linetype = "dashed"
-  # ) +
-  # annotate(
-  #   geom = "text",
-  #   x = 4,          # X-coordinate for the label (choose an empty spot)
-  #   y = 100,         # Y-coordinate for the label (in % units)
-  #   label = as.character(as.expression(equation_label)), # Pass the bquote object
-  #   parse = TRUE,
-  #     # ESSENTIAL: Tells ggplot to render the label as an equation
-  #   size = 4,       # Adjust size as needed
-  #   hjust = 0,      # Horizontal justification (0=left, 0.5=center, 1=right)
-  #   vjust = 1, 
-  #   color = "black" # Match the color of the median curve
-  # ) +
   # 
   annotate(
-  "latex", 
-  x = 4, 
-  y = 100, 
-  label = paste0("$\\hat{y} = ", format_A0, "\\exp(-", format_k, "t)$"), 
-  size = 4, 
-  hjust = 0,   # left-align text
-  vjust = 1    # top-align text
+    "latex", 
+    x = 4, 
+    y = 100, 
+    label = paste0("$\\hat{y} = ", format_A0, "\\exp(-", format_k, "t)$"), 
+    size = 4.5, 
+    hjust = 0,   # left-align text
+    vjust = 1    # top-align text
   ) +
   # Formatting and labels
   scale_y_continuous(labels = scales::percent_format(scale = 1, accuracy = 1), 
@@ -1846,12 +1822,9 @@ plt_exp_decay <- ggplot() +
   # coord_cartesian(ylim = c(0, 100), xlim = c(1, 15)) +
   labs(
     x = "Delay in ORI implementation (weeks)",
-    y = "% Cases averted"
+    y = "% cases averted"
   ) +
-  # scale_color_manual(
-  #   name = "",
-  #   values = my_discrete_colors[1:20],
-  #   labels = NULL) +
+
   guides(color = "none") +
   theme_light() +
   theme_tight()
@@ -1865,25 +1838,133 @@ plt_exp_decay <- ggplot() +
 summary_curves_long <- summary_curves_data %>%
   pivot_longer(cols = c(mean_curve, median_curve), names_to = "curve_type", values_to = "value")
 
-# Then in ggplot, you would replace layers 3 & 4 with:
-# geom_line(
-#   data = summary_curves_long,
-#   aes(x = vacc_week, y = value, color = curve_type),
-#   linewidth = 1.2
-# ) +
-# scale_color_manual(
-#   name = "Summary Trend",
-#   values = c("mean_curve" = "black", "median_curve" = "firebrick"),
-#   labels = c("Mean", "Median")
-# )
 if (save_plot) {
   fac <- 1.3
   ggsave(paste0("plots/fig_3b_exp_decay_", tstamp(), ".pdf"), plt_exp_decay,
          device = cairo_pdf, width = fgw1 * fac, 
          height = fgw1 * fac, units = "mm")
 }
+```
+
+
+Plot on a normalized scale
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+library(xdvir)
+
+set.seed(42)
+
+## ---- sampling / filtering (unchanged except vacc_cov) ----
+runid_sample <- 1
+id_outbreak_sample <- sample(unique(fit_decay$`5`$id_outbreak), size = 20)
+
+
+fitted_models <- fit_decay$`5` %>% 
+  filter(runid %in% runid_sample,
+         id_outbreak %in% id_outbreak_sample,
+         vacc_cov == 0.75)
+
+# x-axis grid
+x_range <- seq(1, 15, by = 0.2)
+t0 <- 1  # baseline week for normalization
+
+## ---- normalized "spaghetti" using fitted params ----
+# On the normalized scale, A0 cancels; z_hat(t) = exp(-k * (t - t0))
+spaghetti_data_norm <- fitted_models %>%
+  mutate(vacc_week = list(x_range)) %>%
+  unnest(vacc_week) %>%
+  mutate(
+    z_hat = exp(-decay_rate_k * (vacc_week - t0))
+  )
+
+## ---- raw data, normalized by week-1 value per series ----
+# Expecting 'cea_ori' with columns: vacc_cov, ori_occurred, vacc_week, runid, id_outbreak, pct_reduc_case
+raw_data_points_norm <- cea_ori %>%
+  filter(vacc_cov == 0.75,
+         ori_occurred == TRUE,
+         vacc_week %in% VW_seq, 
+         runid %in% runid_sample,
+         id_outbreak %in% id_outbreak_sample) %>%
+  arrange(runid, id_outbreak, vacc_week) %>%
+  group_by(runid, id_outbreak) %>%
+  mutate(
+    y0 = first(pct_reduc_case),
+    z  = ifelse(y0 > 0, pct_reduc_case / y0, NA_real_)
+  ) %>%
+  ungroup()
+
+## ---- summary curves from k only (median + IQR) ----
+# Use the full data set
+k_q <- quantile(fit_decay$`5`$decay_rate_k, probs = c(.25, .5, .75), na.rm = TRUE)
+k_q25 <- k_q[[1]]; k_med <- k_q[[2]]; k_q75 <- k_q[[3]]
+
+summary_curves_norm <- tibble(
+  vacc_week = x_range,
+  med = exp(-k_med * (x_range - t0)),
+  lo  = exp(-k_q75 * (x_range - t0)),  # faster decay => lower envelope
+  hi  = exp(-k_q25 * (x_range - t0))   # slower decay => higher envelope
+)
+
+## ---- pretty label (normalized) ----
+format_k <- paste0(round(k_med, digits = 3))
+eq_label_norm <- paste0("$\\hat{z}(t)=\\exp\\{-", format_k, "(t-1)\\}$")
+
+## ---- plot (normalized scale 0-1) ----
+plt_exp_decay_norm <- ggplot() +
+  # Individual normalized fitted curves
+  geom_line(
+    data = spaghetti_data_norm,
+    aes(x = vacc_week, y = z_hat, group = id_outbreak, color = id_outbreak),
+    alpha = 0.30
+  ) +
+  # Raw points, normalized by their own week-1
+  geom_point(
+    data = raw_data_points_norm,
+    aes(x = vacc_week, y = z, color = id_outbreak),
+    alpha = 0.30, size = 1
+  ) +
+  # Median + IQR summary on normalized scale
+  geom_ribbon(
+    data = summary_curves_norm,
+    aes(x = vacc_week, ymin = lo, ymax = hi),
+    inherit.aes = FALSE,
+    alpha = 0.20
+  ) +
+  geom_line(
+    data = summary_curves_norm,
+    aes(x = vacc_week, y = med),
+    color = "firebrick",
+    linewidth = 1.2
+  ) +
+  annotate(
+    "latex",
+    x = 15, y = 1,
+    label = eq_label_norm,
+    size = 4.5, hjust = 1, vjust = 1
+  ) +
+  scale_y_continuous("Normalized reduction", limits = c(0, 1)) +
+  scale_x_continuous("Delay in ORI implementation (weeks)", 
+                     breaks = seq(1, 15, 2), labels = seq(1, 15, 2)) +
+  guides(color = "none") +
+  theme_light() +
+  theme_tight()
+
+plt_exp_decay_norm
+
+if (save_plot) {
+  fac <- 1.3
+  ggsave(paste0("plots/fig_3b_exp_decay_normal_", tstamp(), ".pdf"), 
+         plt_exp_decay_norm,
+         device = cairo_pdf, width = fgw1 * fac, 
+         height = fgw1 * fac, units = "mm")
+}
 
 ```
+
 
 #### Right panel
 % case averted and rate of decline in % case averted at
