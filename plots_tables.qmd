@@ -195,7 +195,7 @@ summary(outbk_data_summary$outbreak_pop)
 
 This section analyzes recent cholera data from WHO Global Cholera Dashboard.
 
-```{r recent-outbreaks}
+```{r eval=FALSE recent-outbreaks}
 # Load recent cholera data
 c2023 <- fread("data/cholera_adm0_public_2023.csv")
 c2024 <- fread("data/cholera_adm0_public_2024.csv")
@@ -238,23 +238,23 @@ chol |>
 
 ```{r load-results}
 # Outbreak onset-triggered vaccination results
-cea <- read_rds("outputs/cea_0.6_onset_trigger_20250716.rds")
-cea <- rbind(cea, read_rds("outputs/cea_0.75_onset_trigger_20250716.rds"))
-cea <- rbind(cea, read_rds("outputs/cea_0.9_onset_trigger_20250716.rds"))
+cea <- read_rds("outputs/paper/cea_0.6_onset_trigger_20250919.rds")
+cea <- rbind(cea, read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds"))
+cea <- rbind(cea, read_rds("outputs/paper/cea_0.9_onset_trigger_20250919.rds"))
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 # Case-triggered vaccination results
 # cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250716.rds")
-cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250810.rds")
+cea_ct <- read_rds("outputs/paper/cea_0.75_case_trigger_20250921.rds")
 cea_ct_ori <- cea_ct %>% filter(ori_occurred == TRUE)
 
 # excluded outbreaks for sensitivity analysis
-cea_excl <- read_rds("outputs/cea_0.6_onset_trigger_excl_20250716.rds")
-cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.75_onset_trigger_excl_20250716.rds"))
-cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.9_onset_trigger_excl_20250716.rds"))
-cea_ct_excl <- read_rds("outputs/cea_0.75_case_trigger_excl_20250716.rds")
+# cea_excl <- read_rds("outputs/cea_0.6_onset_trigger_excl_20250716.rds")
+# cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.75_onset_trigger_excl_20250716.rds"))
+# cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.9_onset_trigger_excl_20250716.rds"))
+# cea_ct_excl <- read_rds("outputs/cea_0.75_case_trigger_excl_20250716.rds")
 
 # weekly decline
-# fit_decay <- read_rds("outputs/fit_decay_model_20250903.rds")
+fit_decay <- read_rds("outputs/paper/fit_decay_model_20250923.rds")
 
 # Load subset analyses reflecting global OCV stockpile
 # cea_stockpile_subsets_q1 <-
@@ -302,16 +302,18 @@ format_median_iqr(onset_impact, digits=0, row=10)
 # weekly reduction rate
 fit_decay[["5"]] %>% 
   filter(vacc_cov == VC) %>% 
-  mutate(rate_reduc = 1 - exp(-k_hat)) %>% 
+  mutate(rate_reduc = 1 - exp(-decay_rate_k)) %>% 
   summarize_quantiles(rate_reduc*100) %>% 
   format_median_iqr(digits=1)
 
 # half_life                  
 fit_decay[["5"]] %>% 
   filter(vacc_cov == VC) %>%  
-  summarize_quantiles(half_life) %>% 
+  summarize_quantiles(half_life_weeks) %>% 
   format_median_iqr(digits=1)
 
+
+# stockpile impact
 stockpile_impact <- cea_stockpile_subsets_q1 %>%
   filter(vacc_cov %in% c(0.75), vacc_week %in% c(9)) %>%
   group_by(vacc_cov, vacc_week) %>%
@@ -944,7 +946,7 @@ ids_susp <- outbreak_data |>
 
 ```{r}
 # Load and prepare country-region mapping data
-country_region <- fread("data/africa_subregion_country_names.csv")
+country_region <- fread("data/paper/africa_subregion_country_names.csv")
 dt <- country_region
 country_region <- country_region[Subregion == "Middle Africa", Subregion := "Central Africa"]
 # change Middle to Central
@@ -1442,7 +1444,7 @@ fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
 rm(d, d1, d2, d3, d4, res, onset_impact)
 ```
 
-% cases averted across delay in ORI implementation
+Plots
 ```{r}
 # Calculate proportion of outbreaks included
 # outbreaks missed by delayed vaccination
@@ -1466,14 +1468,15 @@ n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
 n_outbreaks <- nrow(outbk_data_summary)
 prop_df <- data.frame(
   vacc_week = 1:15, 
-  prop_included_dur = 100 * (1- n_outbreaks_missed1 / n_outbreaks ),
-             prop_included_vax = 100 * (1- n_outbreaks_missed2 / n_outbreaks))
+  prop_included_dur = (1- n_outbreaks_missed1 / n_outbreaks ),
+  prop_included_vax = (1- n_outbreaks_missed2 / n_outbreaks))
 
 ymean  <- 91
 ymedian<- 85
 y50    <- c(82, 88)
 y95    <- c(75, 95)  
-# Middle panel 
+
+# percentage case averted 
 p1 <- cea_ori %>%
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
   ggplot(aes(x = as.factor(vacc_week), 
@@ -1518,7 +1521,7 @@ p1 <- cea_ori %>%
   labs(x = "Delay in ORI implementation (weeks)", y = "% cases averted") +
   theme_light() +
   theme_tight() +
-  # theme_x_blank() +
+  theme_x_blank() +
   theme(plot.margin = margin(0,0.1,0,0))
 
 # if (save_plot) {
@@ -1529,20 +1532,188 @@ p1 <- cea_ori %>%
 #          height = fgw1*fac, units = "mm")
 # }
 
+# exponential decay curve
+set.seed(42)
+
+## ---- sampling / filtering (unchanged except vacc_cov) ----
+runid_sample <- 1
+id_outbreak_sample <- sample(unique(fit_decay$`5`$id_outbreak), size = 20)
+
+fitted_models <- fit_decay$`5` %>% 
+  filter(runid %in% runid_sample,
+         id_outbreak %in% id_outbreak_sample,
+         vacc_cov == 0.75)
+# x-axis grid
+x_range <- seq(1, 15, by = 0.2)
+t0 <- 1  # baseline week for normalization
+
+## ---- normalized "spaghetti" using fitted params ----
+# On the normalized scale, A0 cancels; z_hat(t) = exp(-k * (t - t0))
+spaghetti_data_norm <- fitted_models %>%
+  mutate(vacc_week = list(x_range)) %>%
+  unnest(vacc_week) %>%
+  mutate(
+    z_hat = exp(-decay_rate_k * (vacc_week - t0))
+  )
+
+## ---- raw data, normalized by week-1 value per series ----
+# Expecting 'cea_ori' with columns: vacc_cov, ori_occurred, vacc_week, runid, id_outbreak, pct_reduc_case
+raw_data_points_norm <- cea_ori %>%
+  filter(vacc_cov == 0.75,
+         ori_occurred == TRUE,
+         vacc_week %in% VW_seq, 
+         runid %in% runid_sample,
+         id_outbreak %in% id_outbreak_sample) %>%
+  arrange(runid, id_outbreak, vacc_week) %>%
+  group_by(runid, id_outbreak) %>%
+  mutate(
+    y0 = first(pct_reduc_case),
+    z  = ifelse(y0 > 0, pct_reduc_case / y0, NA_real_)
+  ) %>%
+  ungroup()
+
+## ---- summary curves from k only (median + IQR) ----
+# Use the full data set
+k_q <- quantile(fit_decay$`5`$decay_rate_k, 
+                probs = c(0.025, .25, .5, .75, 0.975), na.rm = TRUE)
+k_q025 <- k_q[[1]]; k_q25 <- k_q[[2]]; k_med <- k_q[[3]]; 
+k_q75 <- k_q[[4]]; k_q975 <- k_q[[5]]
+
+summary_curves_norm <- tibble(
+  vacc_week = x_range,
+  med = exp(-k_med * (x_range - t0)),
+  lo  = exp(-k_q75 * (x_range - t0)),  # faster decay => lower envelope
+  hi  = exp(-k_q25 * (x_range - t0)),   # slower decay => higher envelope
+  q975   = exp(-k_q975 * (x_range - t0)),  # faster decay => lower envelope
+  q025  = exp(-k_q025 * (x_range - t0))   # slower decay => higher envelope
+)
+
+## ---- pretty label (normalized) ----
+format_k <- paste0(round(k_med, digits = 3))
+eq_label_norm <- paste0("$\\hat{z}(t)=\\exp\\{-", format_k, "(t-1)\\}$")
+
+## ---- plot (normalized scale 0-1) ----
+p2 <- ggplot() +
+  # Individual normalized fitted curves
+  geom_line(
+    data = spaghetti_data_norm,
+    aes(x = vacc_week, y = z_hat, group = id_outbreak, color = id_outbreak),
+    alpha = 0.60
+  ) +
+  # Raw points, normalized by their own week-1
+  geom_point(
+    data = raw_data_points_norm,
+    aes(x = vacc_week, y = z, color = id_outbreak),
+    alpha = 0.60, size = 1
+  ) +
+  # Median + IQR summary on normalized scale
+  geom_ribbon(
+    data = summary_curves_norm,
+    aes(x = vacc_week, ymin = lo, ymax = hi),
+    inherit.aes = FALSE,
+    fill = "firebrick",
+    alpha = 0.30
+  ) +
+  geom_ribbon(
+    data = summary_curves_norm,
+    aes(x = vacc_week, ymin = q025, ymax = q975),
+    inherit.aes = FALSE,
+    fill = "firebrick",
+    alpha = 0.20
+  ) +
+  geom_line(
+    data = summary_curves_norm,
+    aes(x = vacc_week, y = med),
+    color = "firebrick",
+    linewidth = 1.2
+  ) +
+  annotate(
+    "latex",
+    x = 15, y = 1,
+    label = eq_label_norm,
+    size = 4.5, hjust = 1, vjust = 1
+  ) +
+  scale_y_continuous("Normalized reduction", limits = c(0, 1)) +
+  scale_x_continuous("Delay in ORI implementation (weeks)", 
+                      breaks = seq(1, 15, 2)) +
+  guides(color = "none") +
+  theme_x_blank() +
+  theme_light() +
+  theme_tight()
+
 # Bottom plot: proportion of outbreaks included
-p3 <- prop_df %>% 
-  filter(vacc_week %in% VW_seq) %>%
-  ggplot(aes(x = as.factor(vacc_week), y = prop_included_dur, 
-             group = 1)) +
-  geom_line() +
-  geom_point() +
-  # geom_col(fill="steelblue") +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-  labs(x = "Delay in ORI implementation (weeks)",
-       y = "% included") +
+df <- prop_df %>%
+  select(vacc_week, prop_included_vax) %>%
+  filter(vacc_week >= 4)
+
+# --- fit linear model: percent-points per week ---
+m <- lm(prop_included_vax ~ vacc_week, data = df)
+co <- coef(m)
+alpha <- unname(co[1])   # intercept
+beta  <- unname(co[2])   # slope (expected to be negative)
+r2    <- summary(m)$r.squared
+
+# --- prediction grid & values ---
+x_grid <- seq(min(df$vacc_week), max(df$vacc_week), length.out = 200)
+pred   <- predict(m, newdata = data.frame(vacc_week = x_grid))
+
+# --- a tidy equation label using LaTeX (percent scale) ---
+# round for display
+alpha_lab <- format(round(alpha, 2), nsmall = 2)
+beta_lab  <- format(round(beta, 3), nsmall = 3)
+r2_lab    <- format(round(r2, 3), nsmall = 3)
+
+eq_label <- paste0(
+  "$\\hat{y}(t) = ", alpha_lab, beta_lab, "\\, t$"
+)
+
+p3 <- ggplot() +
+  # raw data (black)
+  geom_point(
+    data = prop_df,
+    aes(vacc_week, prop_included_vax),
+    color = "black", size = 2
+  ) +
+  # fitted line (firebrick)
+  geom_line(
+    aes(x_grid, pred),
+    color = "firebrick", linewidth = 1.2
+  ) +
+  # equation label (LaTeX)
+  annotate(
+    "latex",
+    x = 15, y = 1,
+    label = eq_label,
+    size = 4,
+    hjust = 1, vjust = 1
+  ) +
+  scale_x_continuous("Delay in ORI implementation (weeks)", 
+                     breaks = seq(1, 15, 2), limits=c(1,15)) +
+  scale_y_continuous("Proportion included") +
   theme_light() +
   theme_tight() +
   theme(plot.margin = margin(0,0.1,0,0))
+
+# p3
+```
+
+
+```{r}
+plt <- p1 / p2 / p3
+
+# Now bind the two columns side-by-side
+final_plot <- plt + plot_layout(ncol=1) +
+  plot_annotation(tag_levels = 'A') +
+  theme(plot.tag.position = c(0, 1),
+        plot.tag = element_text(size = 13))
+
+if (save_plot) {
+  fac <- 1.3
+  ggsave(paste0("plots/fig3_onset_triggered_", tstamp(), ".pdf"),
+         final_plot,
+         device = cairo_pdf, width = fgw1*fac,
+         height = fgw2*fac*fac, units = "mm")
+}
 ```
 
 ## (OLD) Figure 3. Outbreak Onset-Triggered Scenario
@@ -1921,264 +2092,6 @@ cat(sprintf("Piecewise model: breakpoint ≈ %.2f weeks; post-break slope ≈ %.
 
 ```
 
-#### Decay panel
-
-```{r}
-fit_decay <- read_rds("outputs/fit_decay_model_20250923.rds")
-```
-
-Plot individual decay 
-
-```{r}
-quantile(fit_decay$`5`$r_squared, probs=c(0.25, 0.5, 0.75), na.rm=T)
-quantile(fit_decay$`5`$decay_rate_k, probs=c(0.25, 0.5, 0.75), na.rm=T)
-rate_reduc  <-  1 - exp(-fit_decay$`5`$decay_rate_k) # weekly redction
-quantile(rate_reduc, probs=c(0.25, 0.5, 0.75), na.rm=T)
-quantile(fit_decay$`5`$half_life_weeks, probs=c(0.25, 0.5, 0.75), na.rm=T)
-
-set.seed(42)
-runid_sample <- 1
-# id_outbreak_sample <- sample(unique(fit_decay$`5`$id_outbreak), size=30)
-id_outbreak_sample <- sample(unique(fit_decay$`5`$id_outbreak), size=20)
-fitted_models <- fit_decay$`5` %>% 
-  filter(runid %in% runid_sample, id_outbreak %in% id_outbreak_sample,
-         vacc_cov == 0.75)
-
-# Define the x-axis range for plotting
-x_range <- seq(1, 15, by = 0.2) 
-
-# Use the fitted parameters to generate y-values for each curve
-spaghetti_data <- fitted_models %>%
-  # Create a list column containing the x_range for each fit
-  mutate(vacc_week = list(x_range)) %>%
-  unnest(vacc_week) %>%
-  mutate(
-    predicted_pct_averted = initial_impact_A0 * exp(-decay_rate_k * vacc_week)
-  )
-
-# --- Calculate the mean and median curves ---
-# This is done by first finding the median A0 and k, then applying the formula.
-summary_params <- fit_decay$`5` %>%
-  ungroup() %>%
-  summarise(
-    mean_A0 = mean(initial_impact_A0, na.rm = TRUE),
-    mean_k = mean(decay_rate_k, na.rm = TRUE),
-    median_A0 = median(initial_impact_A0, na.rm = TRUE),
-    median_k = median(decay_rate_k, na.rm = TRUE)
-  )
-
-summary_curves_data <- data.frame(vacc_week = x_range) %>%
-  mutate(
-    mean_curve = summary_params$mean_A0 * exp(-summary_params$mean_k * vacc_week),
-    median_curve = summary_params$median_A0 * exp(-summary_params$median_k * vacc_week)
-  )
-
-# --- Prepare the raw data points for plotting ---
-raw_data_points <- cea_ori %>%
-  filter(vacc_cov == 0.75,
-         ori_occurred == TRUE,
-         vacc_week %in% VW_seq, 
-         runid %in% runid_sample,
-         id_outbreak %in% id_outbreak_sample)
-
-# Format the numbers for clean presentation in the label
-# A0 as a percentage with one decimal place
-# format_A0 <- paste0(format(median_params$median_A0, nsmall = 1, digits = 1), "%") 
-format_A0 <- paste0(round(summary_params$median_A0/100, digits=3)) 
-# k with two decimal places
-format_k <- paste0(round(summary_params$median_k, digits = 3))
-
-# This is the typographically recommended version.
-equation_label <- bquote(
-  bold("Median:") ~ 
-    italic(y) == .(format_A0) * 
-    "exp" * group("(", -.(format_k) * italic(t), ")")
-)
-
-library(xdvir)
-# --- Create the final plot ---
-plt_exp_decay <- ggplot() +
-  # Layer 1: Individual fitted curves (the "spaghetti")
-  # These are plotted first so they are in the background.
-  geom_line(
-    data = spaghetti_data,
-    aes(x = vacc_week, y = predicted_pct_averted, group = id_outbreak, color=id_outbreak),
-    # color = "grey80",
-    alpha = 0.3 # Use very low alpha to see density
-  ) +
-  # Layer 2: Raw data points
-  # Plotting the original data on top helps ground the visualization.
-  geom_point(
-    data = raw_data_points,
-    aes(x = vacc_week, y = pct_reduc_case, color=id_outbreak),
-    # color = "steelblue",
-    alpha = 0.3, # Low alpha to show density
-    size = 1
-  ) +
-
-  # Layer 3: The median summary curve
-  geom_line(
-    data = summary_curves_data,
-    aes(x = vacc_week, y = median_curve),
-    color = "firebrick",
-    linewidth = 1.2
-  ) +
-  # 
-  annotate(
-    "latex", 
-    x = 4, 
-    y = 100, 
-    label = paste0("$\\hat{y} = ", format_A0, "\\exp(-", format_k, "t)$"), 
-    size = 4.5, 
-    hjust = 0,   # left-align text
-    vjust = 1    # top-align text
-  ) +
-  # Formatting and labels
-  scale_y_continuous(labels = scales::percent_format(scale = 1, accuracy = 1), 
-                     limits=c(0,100)) +
-  scale_x_continuous(labels = seq(1,15,2), breaks=seq(1,15,2)) +
-  # coord_cartesian(ylim = c(0, 100), xlim = c(1, 15)) +
-  labs(
-    x = "Delay in ORI implementation (weeks)",
-    y = "% cases averted"
-  ) +
-
-  guides(color = "none") +
-  theme_light() +
-  theme_tight()
-
-# Display the plot
-# print(final_plot)
-
-# To add a legend for the mean/median lines, you would need to reshape
-# summary_curves_data and map color to a variable.
-# Example for legend:
-summary_curves_long <- summary_curves_data %>%
-  pivot_longer(cols = c(mean_curve, median_curve), names_to = "curve_type", values_to = "value")
-
-if (save_plot) {
-  fac <- 1.3
-  ggsave(paste0("plots/fig_3b_exp_decay_", tstamp(), ".pdf"), plt_exp_decay,
-         device = cairo_pdf, width = fgw1 * fac, 
-         height = fgw1 * fac, units = "mm")
-}
-```
-
-
-Plot on a normalized scale
-
-```{r}
-
-
-set.seed(42)
-
-## ---- sampling / filtering (unchanged except vacc_cov) ----
-runid_sample <- 1
-id_outbreak_sample <- sample(unique(fit_decay$`5`$id_outbreak), size = 20)
-
-
-fitted_models <- fit_decay$`5` %>% 
-  filter(runid %in% runid_sample,
-         id_outbreak %in% id_outbreak_sample,
-         vacc_cov == 0.75)
-
-# x-axis grid
-x_range <- seq(1, 15, by = 0.2)
-t0 <- 1  # baseline week for normalization
-
-## ---- normalized "spaghetti" using fitted params ----
-# On the normalized scale, A0 cancels; z_hat(t) = exp(-k * (t - t0))
-spaghetti_data_norm <- fitted_models %>%
-  mutate(vacc_week = list(x_range)) %>%
-  unnest(vacc_week) %>%
-  mutate(
-    z_hat = exp(-decay_rate_k * (vacc_week - t0))
-  )
-
-## ---- raw data, normalized by week-1 value per series ----
-# Expecting 'cea_ori' with columns: vacc_cov, ori_occurred, vacc_week, runid, id_outbreak, pct_reduc_case
-raw_data_points_norm <- cea_ori %>%
-  filter(vacc_cov == 0.75,
-         ori_occurred == TRUE,
-         vacc_week %in% VW_seq, 
-         runid %in% runid_sample,
-         id_outbreak %in% id_outbreak_sample) %>%
-  arrange(runid, id_outbreak, vacc_week) %>%
-  group_by(runid, id_outbreak) %>%
-  mutate(
-    y0 = first(pct_reduc_case),
-    z  = ifelse(y0 > 0, pct_reduc_case / y0, NA_real_)
-  ) %>%
-  ungroup()
-
-## ---- summary curves from k only (median + IQR) ----
-# Use the full data set
-k_q <- quantile(fit_decay$`5`$decay_rate_k, probs = c(.25, .5, .75), na.rm = TRUE)
-k_q25 <- k_q[[1]]; k_med <- k_q[[2]]; k_q75 <- k_q[[3]]
-
-summary_curves_norm <- tibble(
-  vacc_week = x_range,
-  med = exp(-k_med * (x_range - t0)),
-  lo  = exp(-k_q75 * (x_range - t0)),  # faster decay => lower envelope
-  hi  = exp(-k_q25 * (x_range - t0))   # slower decay => higher envelope
-)
-
-## ---- pretty label (normalized) ----
-format_k <- paste0(round(k_med, digits = 3))
-eq_label_norm <- paste0("$\\hat{z}(t)=\\exp\\{-", format_k, "(t-1)\\}$")
-
-## ---- plot (normalized scale 0-1) ----
-plt_exp_decay_norm <- ggplot() +
-  # Individual normalized fitted curves
-  geom_line(
-    data = spaghetti_data_norm,
-    aes(x = vacc_week, y = z_hat, group = id_outbreak, color = id_outbreak),
-    alpha = 0.30
-  ) +
-  # Raw points, normalized by their own week-1
-  geom_point(
-    data = raw_data_points_norm,
-    aes(x = vacc_week, y = z, color = id_outbreak),
-    alpha = 0.30, size = 1
-  ) +
-  # Median + IQR summary on normalized scale
-  geom_ribbon(
-    data = summary_curves_norm,
-    aes(x = vacc_week, ymin = lo, ymax = hi),
-    inherit.aes = FALSE,
-    alpha = 0.20
-  ) +
-  
-  geom_line(
-    data = summary_curves_norm,
-    aes(x = vacc_week, y = med),
-    color = "firebrick",
-    linewidth = 1.2
-  ) +
-  annotate(
-    "latex",
-    x = 15, y = 1,
-    label = eq_label_norm,
-    size = 4.5, hjust = 1, vjust = 1
-  ) +
-  scale_y_continuous("Normalized reduction", limits = c(0, 1)) +
-  scale_x_continuous("Delay in ORI implementation (weeks)", 
-                     breaks = seq(1, 15, 2), labels = seq(1, 15, 2)) +
-  guides(color = "none") +
-  theme_light() +
-  theme_tight()
-
-plt_exp_decay_norm
-
-if (save_plot) {
-  fac <- 1.3
-  ggsave(paste0("plots/fig_3b_exp_decay_normal_", tstamp(), ".pdf"), 
-         plt_exp_decay_norm,
-         device = cairo_pdf, width = fgw1 * fac, 
-         height = fgw1 * fac, units = "mm")
-}
-
-```
 
 
 #### Right panel

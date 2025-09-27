@@ -1,0 +1,2 @@
+data/paper/* filter=lfs diff=lfs merge=lfs -text
+outputs/paper/* filter=lfs diff=lfs merge=lfs -text
