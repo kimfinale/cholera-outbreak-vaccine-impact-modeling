@@ -24,7 +24,7 @@ our cholera vaccine impact simulations. It processes results from different vacc
 #| message: false
 
 # Load required packages
-source("utils.R")  # utility functions
+source("R/utils.R")  # utility functions
 library(data.table)
 library(tidyverse)
 library(magrittr)

@@ -60,7 +60,7 @@ conflicts_prefer(data.table::first)
 conflicts_prefer(data.table::year)
 
 # Load utility functions
-source("utils.R")  # Custom utility functions for vaccine impact calculations
+source("R/utils.R")  # Custom utility functions for vaccine impact calculations
 
 # Global parameters
 VC3 <- c(0.6, 0.75, 0.9)      # Standard vaccine coverage values (60%, 75%, 90%)
