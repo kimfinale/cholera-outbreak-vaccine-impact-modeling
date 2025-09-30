@@ -14,14 +14,11 @@ trash.qmd
 # Ignore all outputs by default
 outputs/**
 # But keep "paper-ready" artifacts
-# !outputs/paper/
-# !outputs/paper/tables/**
-# !outputs/paper/figures/**
-# !outputs/paper/numbers/**
+!outputs/paper/
 
 # Ignore all data by default
 data/**
 # But keep curated small derived inputs & documentation
-# !data/paper/**
-# !data/registry.csv
-# !data/README.md
+!data/paper/**
+!data/registry.csv
+!data/README.md
