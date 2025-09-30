@@ -238,9 +238,13 @@ chol |>
 
 ```{r load-results}
 # Outbreak onset-triggered vaccination results
-cea <- read_rds("outputs/paper/cea_0.6_onset_trigger_20250919.rds")
-cea <- rbind(cea, read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds"))
-cea <- rbind(cea, read_rds("outputs/paper/cea_0.9_onset_trigger_20250919.rds"))
+cea_files <- c(
+  "outputs/paper/cea_0.6_onset_trigger_20250919.rds",
+  "outputs/paper/cea_0.75_onset_trigger_20250919.rds",
+  "outputs/paper/cea_0.9_onset_trigger_20250919.rds"
+)
+cea <- map_dfr(cea_files, read_rds)
+
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 # Case-triggered vaccination results
 # cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250716.rds")
@@ -1697,6 +1701,7 @@ p3 <- ggplot() +
 # p3
 ```
 
+Combine plots
 
 ```{r}
 plt <- p1 / p2 / p3
@@ -1715,6 +1720,161 @@ if (save_plot) {
          height = fgw2*fac*fac, units = "mm")
 }
 ```
+
+## Figure 4
+
+Heatmap of cases averted per 1,000 OCVs
+
+```{r}
+capd_files <- c(
+  "outputs/paper/cea_onset_trigger_10m_doses_ar_cutoff_20250922.rds",
+  "outputs/paper/cea_onset_trigger_10m_doses_size_cutoff_20250922.rd",
+  "outputs/paper/cea_onset_trigger_10m_doses_dur_cutoff_20250922.rds"
+)
+capd_data <- map(capd_files, read_rds)
+
+res <- read_rds("outputs/paper/cea_onset_trigger_10m_doses_ar_cutoff_20250922.rds")
+# res <- read_rds("outputs/cea_onset_trigger_10m_doses_size_cutoff_20250922.rds")
+# res <- read_rds("outputs/cea_onset_trigger_10m_doses_dur_cutoff_20250922.rds")
+# 1. Create the color palette function (your code was correct here)
+myPalette <- colorRampPalette(brewer.pal(9, "YlOrBr"))
+
+# 3. Build the complete, polished plot
+plts <- vector('list', length(capd_data))
+
+y_labs <- c("Attack rate percentile", "Outbreak duration percentile", 
+            "Outbreak size percentile")
+y_annotations <- c("Prioritizing high AR outbreaks", 
+                   "Prioritizing longer outbreaks",
+                   "Prioritizing larger outbreaks")
+  
+for (i in 1:length(capd_data)) {
+plts[[i]]  <- 
+  res %>% filter(vacc_cov == 0.75) %>%
+  ggplot(aes(x = vacc_week, y = size_prob_cutoff, 
+             fill = case_averted_per_1000_OCV_q500)) +
+  geom_tile(color = "white", linewidth = 0.25) +
+  scale_fill_gradientn(
+    trans = scales::pseudo_log_trans(),
+    colours = myPalette(100), # Generate a smooth ramp of 100 colors
+    breaks = c(1, 2, 5, 10),
+    limits = c(0.2, 15), 
+    # Handles values outside the limits gracefully
+    # oob = scales::squish, 
+    name = "Cases Averted\nper 1,000 OCVs" # Legend title
+  ) +
+  scale_y_continuous(
+    expand = c(0, 0), 
+    breaks = seq(0, 0.8, 0.2),
+    labels = c(expression(">="*P[0*"%"]),
+               expression(">="*P[20*"%"]),
+               expression(">="*P[40*"%"]),
+               expression(">="*P[60*"%"]),
+               expression(">="*P[80*"%"]))) +
+  
+  scale_x_continuous(expand = c(0, 0), breaks = seq(1, 15, 2)) +
+  # 1. Add the arrows
+  #    The origin point for all arrows is (x=9, y=0)
+  annotate(
+    "segment",
+    x = 9, y = 0,
+    xend = c(9, 1), # End points for the three arrows
+    yend = c(0.9, 0),
+    arrow = arrow(length = unit(0.3, "cm")),
+    color = "black",
+    linewidth = 0.4
+  ) +
+  # 2. Add the four points on top of the arrows
+  #    Using shape 21 allows for a fill and a border color
+  annotate(
+    "point",
+    x = c(9), # The four key coordinates
+    y = c(0),
+    size = 3,
+    shape = 21,
+    fill = "white",
+    color = "black",
+    stroke = 1.2
+  ) +
+  annotate(
+    "segment",
+    x = 8, y = 0.5,
+    xend = c(8, 1), # End points for the three arrows
+    yend = c(0.9, 0.5),
+    arrow = arrow(length = unit(0.3, "cm")),
+    color = "black",
+    linewidth = 0.4,
+    linetype = "dashed" # Changed to dashed lines
+  ) +
+  annotate(
+    "point",
+    x = c(8), # The four key coordinates
+    y = c(0.5),
+    size = 3,
+    shape = 21,
+    fill = "white",
+    color = "black",
+    stroke = 1.2
+  ) +
+  # 3. Add text labels next to the arrows
+  #    Coordinates are chosen to be midway along the arrow, with a slight offset
+  annotate(
+    "text",
+    x = c(9.5, 5), # x-positions for the two labels
+    y = c(0.5, 0.05), # y-positions for the two labels
+    label = c(y_annotations[i], "Reducing ORI delay"),
+    angle = c(90, 0), # Rotate the vertical label
+    color = "black",
+    # fontface = "bold",
+    size = 4,
+    hjust = 0.5
+  ) +
+  # labs(
+  #   x = "vaccination week<br>(*slower Implementation →*)",
+  #   y = "attack rate % cutoff<br>(*prioritizing high AR outbreaks →*)"
+  # ) +
+  labs(
+    x = "Delay in ORI implementation (weeks)",
+    y = y_labs[i]
+  ) +
+  theme_light() +
+  theme_tight() +
+  theme(
+    # axis.title.x = element_markdown(),
+    # axis.title.y = element_markdown(),
+    legend.position = "top",
+    plot.margin = margin(0,0.03,0,0)
+  )
+  
+# if (save_plot) {
+#   fac <- 1.3
+#   ggsave(paste0("plots/fig_ar_delay_2_", tstamp(), ".pdf"),
+#          heatmap_plot,
+#          device = cairo_pdf, width = fgw1*fac,
+#          height = fgw1*fac, units = "mm")
+}
+```
+
+Combine plots
+
+```{r}
+plt <- plts[[1]] / plts[[2]] / plts[[3]]
+
+# Now bind the two columns side-by-side
+final_plot <- plt + plot_layout(ncol=1) +
+  plot_annotation(tag_levels = 'A') +
+  theme(plot.tag.position = c(0, 1),
+        plot.tag = element_text(size = 13))
+
+if (save_plot) {
+  fac <- 1.3
+  ggsave(paste0("plots/fig4_capd_10m_prioritization_", tstamp(), ".pdf"),
+         final_plot,
+         device = cairo_pdf, width = fgw1*fac,
+         height = fgw2*fac*fac, units = "mm")
+}
+```
+
 
 ## (OLD) Figure 3. Outbreak Onset-Triggered Scenario
 
@@ -1986,115 +2146,8 @@ p3 <- prop_df %>%
   theme(plot.margin = margin(0,0.1,0,0))
 ```
 
-#### piece-wise regression
-```{r}
-library(segmented)
-#---- Data (assumes prop_df exists with columns: vacc_week, prop_included_vax) ----
-stopifnot(all(c("vacc_week","prop_included_vax") %in% names(prop_df)))
-prop_df <- prop_df %>% arrange(vacc_week)
-
-# Prediction grid
-pred_grid <- tibble(vacc_week = seq(min(prop_df$vacc_week), 
-                             max(prop_df$vacc_week), by = 0.1))
-
-#---- 1) Linear (absolute percentage-point decline) ----
-fit_lin <- lm(prop_included_vax ~ vacc_week, data = prop_df)
-pred_lin <- pred_grid %>%
-  mutate(
-    fitted = predict(fit_lin, newdata = nd),
-    model  = "Linear (pct-pts/wk)"
-  )
-
-#---- 2) Exponential decay (relative % decline per week) ----
-# Model on log proportion (0-1), then back-transform to %
-fit_exp <- lm(log(prop_included_vax/100) ~ vacc_week, data = prop_df)
-lambda  <- -coef(fit_exp)[["vacc_week"]]            # weekly decay rate
-half_life_wks <- log(2)/lambda                      # half-life in weeks
-rel_drop_per_week <- 100*(1 - exp(-lambda))        # % relative decline per week
-
-pred_exp <- pred_grid %>%
-  mutate(
-    fitted = exp(predict(fit_exp, newdata = nd)) * 100,  # back to %
-    model  = sprintf("Exponential (%.1f%% rel/wk, t½=%.2f wks)",
-                     rel_drop_per_week, half_life_wks)
-  )
-
-#---- 3) Piecewise linear (flat then decline) ----
-# Start with linear, then segment on vacc_week
-library(segmented)
-fit_seg <- segmented(fit_lin, seg.Z = ~ vacc_week, 
-                      psi = list(vacc_week = 4))
-bp_est <- fit_seg$psi[,"Est."]
-# slope_post <- slope(fit_seg)$vacc_week[,"Est."]  # slope after breakpoint (pct-pts/wk)
-
-slope_post <- as.numeric(slope(fit_seg)$vacc_week["slope2","Est."])
-
-pred_seg <- pred_grid %>%
-  mutate(
-    fitted = predict(fit_seg, newdata = nd),
-    model  = sprintf("Piecewise (break ~%.2f wk; slope %.2f pct-pt/wk)", bp_est, slope_post)
-  )
-
-#---- Bind predictions ----
-pred_all <- bind_rows(pred_lin, pred_exp, pred_seg)
-
-#---- Plot: observed vs fitted (all models) ----
-p_fit <- ggplot(prop_df, aes(x = vacc_week, y = prop_included_vax)) +
-  geom_point(size = 2, alpha = 0.85) +
-  geom_line(data = pred_all, aes(y = fitted, color = model), linewidth = 1) +
-  scale_x_continuous(breaks = seq(min(prop_df$vacc_week), max(prop_df$vacc_week), by = 1)) +
-  labs(
-    x = "Week of vaccination (delay)",
-    y = "Proportion of outbreaks included (%)",
-    color = NULL,
-    title = "Observed vs fitted curves: linear, exponential decay, and piecewise linear"
-  ) +
-  theme_minimal(base_size = 12) +
-  theme(legend.position = "bottom")
-
-p_fit
-
-#---- (Optional) Residual plots for each model ----
-res_lin <- prop_df %>%
-  mutate(model = "Linear (pct-pts/wk)",
-         fitted = predict(fit_lin),
-         resid  = prop_included_vax - fitted)
-
-res_exp <- prop_df %>%
-  mutate(model = "Exponential",
-         fitted = exp(predict(fit_exp, newdata = prop_df)) * 100,
-         resid  = prop_included_vax - fitted)
-
-res_seg <- prop_df %>%
-  mutate(model = "Piecewise",
-         fitted = predict(fit_seg, newdata = prop_df),
-         resid  = prop_included_vax - fitted)
-
-res_all <- bind_rows(res_lin, res_exp, res_seg)
-
-p_resid <- ggplot(res_all, aes(x = vacc_week, y = resid)) +
-  geom_hline(yintercept = 0, linetype = 2) +
-  geom_point() +
-  geom_line() +
-  facet_wrap(~ model, ncol = 1, scales = "free_y") +
-  labs(x = "Week of vaccination (delay)", y = "Residual (Observed − Fitted)",
-       title = "Residual diagnostics by model") +
-  theme_minimal(base_size = 12)
-
-# Print residual figure (optional)
-p_resid
-
-#---- Print key parameters to console ----
-cat(sprintf("\nExponential model: relative decline per week = %.2f%%; half-life = %.2f weeks\n",
-            rel_drop_per_week, half_life_wks))
-cat(sprintf("Piecewise model: breakpoint ≈ %.2f weeks; post-break slope ≈ %.2f percentage-points/week\n",
-            bp_est, slope_post))
-
-```
-
-
-
 #### Right panel
+
 % case averted and rate of decline in % case averted at
 weeks 1, 5, 9 with week 5 only for the rate of decline
 
@@ -2439,7 +2492,6 @@ Plot decay
 res <- read_rds("outputs/fit_decay_model_20250903.rds")
 
 # res <- read_rds("outputs/fit_decay_model_case_trigger_cut_wk_5_20250822.rds")
-
 ```
 
 ```{r}
