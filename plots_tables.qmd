@@ -1330,8 +1330,8 @@ if (save_plot) {
 }
 ```
 
+## Figure 3
 
-#### Figure 3
 ### Codes to produce the numbers used in the text
 ```{r fig3, eval=FALSE}
 onset_impact <- cea %>%
@@ -1452,7 +1452,7 @@ Plots
 ```{r}
 # Calculate proportion of outbreaks included
 # outbreaks missed by delayed vaccination
-wks_delay <- 1:15 
+wks_delay <- 1:15
 dur_missed_id <- vector('list', length(wks_delay))
 vax_missed_id <- vector('list', length(wks_delay))
 
@@ -1472,23 +1472,29 @@ n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
 n_outbreaks <- nrow(outbk_data_summary)
 prop_df <- data.frame(
   vacc_week = 1:15, 
-  prop_included_dur = (1- n_outbreaks_missed1 / n_outbreaks ),
-  prop_included_vax = (1- n_outbreaks_missed2 / n_outbreaks))
+  prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
+  prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
 
-ymean  <- 91
-ymedian<- 85
-y50    <- c(82, 88)
-y95    <- c(75, 95)  
+
+ymean  <- 95 
+ymedian<- 87.5
+y50    <- c(82, 93)
+y95    <- c(75, 100)
 
 # percentage case averted 
 p1 <- cea_ori %>%
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-  ggplot(aes(x = as.factor(vacc_week), 
+  ggplot(aes(x = as.factor(vacc_week),
              y = pct_reduc_case,
              color = as.factor(vacc_cov),
              group = as.factor(vacc_cov))) +
+  # ggplot(aes(x = vacc_week, 
+  #            y = pct_reduc_case,
+  #            color = as.factor(vacc_cov),
+  #            group = as.factor(vacc_cov))) +
   ci_layers(
     group = as.factor(vacc_cov), color = as.factor(vacc_cov),
+    # group = vacc_cov, color = vacc_cov,
     dodge_width = line_interval,
     lw95 = line_width_95,
     lw50 = line_width_50,
@@ -1496,7 +1502,7 @@ p1 <- cea_ori %>%
     mean_size = x_size,
     mean_stroke = x_stroke
   )+
-   add_summary_braces(
+  add_summary_braces(
     x0 = 7,
     ymean = ymean, ymedian = ymedian,
     y50 = y50, y95 = y95,
@@ -1506,35 +1512,31 @@ p1 <- cea_ori %>%
     dx50 = 0.3, dx95 = 0.6,
     text_50_x = 7.3,
     text_50_y = y50[2],
-    text_95_x = 8,
+    text_95_x = 7.9,
     text_95_y = y95[2],
     brace_50_x = 7.1,
     brace_95_x = 7.6,
-    text_offset_mean = 0.12,
+    text_offset_mean = 0.15,
     lw_50 = 0.6, lw_95 = 0.6,
     whisker_50 = line_width_50, 
     whisker_95 = line_width_95
   ) +
-  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+                     limits=c(0,100)) +
   scale_color_manual(
     name = "",
     values = my_discrete_colors[1:3],
     labels = c(paste0(format_num(VC3*100, 1), "%")))+
   # guides(color = "none") +   # <-- removes the legend
-  # labs(x = NULL, y = "% cases averted") +
-  labs(x = "Delay in ORI implementation (weeks)", y = "% cases averted") +
+  labs(x = NULL, y = "% cases averted") +
+  # labs(x = "Delay in ORI implementation (weeks)", y = "% cases averted") +
+  scale_y_continuous("% cases averted") +
+  # scale_x_continuous("Delay in ORI implementation (weeks)", 
+  #                    breaks = seq(1, 15, 2), limits=c(1,15)) +
   theme_light() +
   theme_tight() +
   theme_x_blank() +
-  theme(plot.margin = margin(0,0.1,0,0))
-
-# if (save_plot) {
-#   fac <- 1.3
-#   ggsave(paste0("plots/fig3_pct_case_averted_", tstamp(), ".pdf"),
-#          p2,
-#          device = cairo_pdf, width = fgw1*fac,
-#          height = fgw1*fac, units = "mm")
-# }
+  theme(plot.margin = margin(0,0,0,0))
 
 # exponential decay curve
 set.seed(42)
@@ -1637,13 +1639,15 @@ p2 <- ggplot() +
     label = eq_label_norm,
     size = 4.5, hjust = 1, vjust = 1
   ) +
-  scale_y_continuous("Normalized reduction", limits = c(0, 1)) +
+  # scale_y_continuous("Normalized reduction", limits = c(0, 1)) +
+  scale_y_continuous("Normalized reduction") +
   scale_x_continuous("Delay in ORI implementation (weeks)", 
-                      breaks = seq(1, 15, 2)) +
+                      breaks = seq(1, 15, 2), limits=c(1, 15)) +
   guides(color = "none") +
-  theme_x_blank() +
   theme_light() +
-  theme_tight()
+  theme_tight() +
+  theme_x_blank() +
+  theme(plot.margin = margin(0,0,0,0))
 
 # Bottom plot: proportion of outbreaks included
 df <- prop_df %>%
@@ -1696,30 +1700,143 @@ p3 <- ggplot() +
   scale_y_continuous("Proportion included") +
   theme_light() +
   theme_tight() +
-  theme(plot.margin = margin(0,0.1,0,0))
+  theme(plot.margin = margin(0,0,0,0))
 
 # p3
+```
+
+plot 1 aLternative
+```{r}
+# Calculate proportion of outbreaks included
+# outbreaks missed by delayed vaccination
+wks_delay <- 1:15
+dur_missed_id <- vector('list', length(wks_delay))
+vax_missed_id <- vector('list', length(wks_delay))
+
+for (i in 1:length(wks_delay)) {
+  outbk_data_summary %>% 
+    filter(duration_weeks <= wks_delay[i]) %>%
+    pull(id_outbreak) -> dur_missed_id[[i]]
+  
+  cea %>% 
+    filter(vacc_week == wks_delay[i] & runid == 1 & vacc_cov == 0.75) %>% 
+    filter(!ori_occurred) %>% 
+    pull(id_outbreak) -> vax_missed_id[[i]]
+}
+n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
+n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
+
+n_outbreaks <- nrow(outbk_data_summary)
+prop_df <- data.frame(
+  vacc_week = 1:15, 
+  prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
+  prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
+
+ymean  <- 95 
+ymedian<- 87.5
+y50    <- c(82, 93)
+y95    <- c(75, 100)
+
+# percentage case averted 
+p1_alt <- cea_ori %>%
+  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
+  # ggplot(aes(x = as.factor(vacc_week),
+  #            y = pct_reduc_case,
+  #            color = as.factor(vacc_cov),
+  #            group = as.factor(vacc_cov))) +
+  ggplot(aes(x = vacc_week,
+             y = pct_reduc_case,
+             color = as.factor(vacc_cov),
+             group = as.factor(vacc_cov))) +
+  ci_layers(
+    # group = as.factor(vacc_cov), color = as.factor(vacc_cov),
+    group = as.factor(vacc_cov), color = as.factor(vacc_cov),
+    dodge_width = line_interval,
+    lw95 = line_width_95,
+    lw50 = line_width_50,
+    pr_size = point_size,
+    mean_size = x_size,
+    mean_stroke = x_stroke
+  )+
+  add_summary_braces(
+    x0 = 13,
+    ymean = ymean, ymedian = ymedian,
+    y50 = y50, y95 = y95,
+    pt_size_median = 2,
+    pt_size_mean = x_size,
+    pt_stroke_mean = x_stroke,
+    dx50 = 0.3, dx95 = 0.6,
+    text_50_x = 13.5,
+    text_50_y = y50[2],
+    text_95_x = 14.2,
+    text_95_y = y95[2],
+    brace_50_x = 13.2,
+    brace_95_x = 13.9,
+    text_offset_mean = 0.2,
+    lw_50 = 0.6, lw_95 = 0.6,
+    whisker_50 = line_width_50, 
+    whisker_95 = line_width_95
+  ) +
+  scale_y_continuous("% cases averted",
+                     labels = scales::percent_format(scale = 1), 
+                     limits=c(0,100)) +
+  scale_color_manual(
+    name = "",
+    values = my_discrete_colors[1:3],
+    labels = c(paste0(format_num(VC3*100, 1), "%")))+
+  # limits extended to allow three error bars for one x value
+  scale_x_continuous(breaks = seq(1, 15, 2), limits=c(0.2,15.2)) +
+  theme_light() +
+  theme_tight() +
+  theme_x_blank() +
+  theme(plot.margin = margin(0,0,0,0))
 ```
 
 Combine plots
 
 ```{r}
-plt <- p1 / p2 / p3
+hj <- 3.4
+vj <- -0.3
+sz <- 5
 
-# Now bind the two columns side-by-side
-final_plot <- plt + plot_layout(ncol=1) +
-  plot_annotation(tag_levels = 'A') +
-  theme(plot.tag.position = c(0, 1),
-        plot.tag = element_text(size = 13))
+p1_tag <- p1 +
+  annotate("text", x = -Inf, y = Inf, label = "A",
+           hjust = hj, vjust = vj, size = sz) + 
+  coord_cartesian(clip = "off")
+
+# p1_alt_tag <- p1_alt +
+#   annotate("text", x = -Inf, y = Inf, label = "A",
+#            hjust = hj, vjust = vj, size = sz) + 
+#   coord_cartesian(clip = "off")
+
+p2_tag <- p2 +
+  annotate("text", x = -Inf, y = Inf, label = "B",
+           hjust = hj, vjust = vj, size = sz) + 
+  coord_cartesian(clip = "off")
+p3_tag <- p3 +
+  annotate("text", x = -Inf, y = Inf, label = "C",
+           hjust = hj, vjust = vj, size = sz) + 
+  coord_cartesian(clip = "off")
+
+final_plot <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
+
+final_alt_plot <- (p1_alt_tag / p2_tag / p3_tag) + plot_layout(ncol=1)   
 
 if (save_plot) {
-  fac <- 1.3
+  fac <- 1.35
   ggsave(paste0("plots/fig3_onset_triggered_", tstamp(), ".pdf"),
          final_plot,
          device = cairo_pdf, width = fgw1*fac,
          height = fgw2*fac*fac, units = "mm")
+  
+  # ggsave(paste0("plots/fig3_onset_triggered_alt_", tstamp(), ".pdf"),
+  #        final_alt_plot,
+  #        device = cairo_pdf, width = fgw1*fac,
+  #        height = fgw2*fac*fac, units = "mm")
+  
 }
 ```
+
 
 ## Figure 4
 
