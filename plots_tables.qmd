@@ -1740,18 +1740,13 @@ y95    <- c(75, 100)
 # percentage case averted 
 p1_alt <- cea_ori %>%
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-  # ggplot(aes(x = as.factor(vacc_week),
-  #            y = pct_reduc_case,
-  #            color = as.factor(vacc_cov),
-  #            group = as.factor(vacc_cov))) +
   ggplot(aes(x = vacc_week,
              y = pct_reduc_case,
              color = as.factor(vacc_cov),
              group = as.factor(vacc_cov))) +
   ci_layers(
-    # group = as.factor(vacc_cov), color = as.factor(vacc_cov),
     group = as.factor(vacc_cov), color = as.factor(vacc_cov),
-    dodge_width = line_interval,
+    dodge_width = line_interval + 0.3,
     lw95 = line_width_95,
     lw50 = line_width_50,
     pr_size = point_size,
@@ -1768,11 +1763,11 @@ p1_alt <- cea_ori %>%
     dx50 = 0.3, dx95 = 0.6,
     text_50_x = 13.5,
     text_50_y = y50[2],
-    text_95_x = 14.2,
+    text_95_x = 14.7,
     text_95_y = y95[2],
     brace_50_x = 13.2,
-    brace_95_x = 13.9,
-    text_offset_mean = 0.2,
+    brace_95_x = 14.4,
+    text_offset_mean = 0.25,
     lw_50 = 0.6, lw_95 = 0.6,
     whisker_50 = line_width_50, 
     whisker_95 = line_width_95
@@ -1799,15 +1794,11 @@ hj <- 3.4
 vj <- -0.3
 sz <- 5
 
+# A, B, and C annotations
 p1_tag <- p1 +
   annotate("text", x = -Inf, y = Inf, label = "A",
            hjust = hj, vjust = vj, size = sz) + 
   coord_cartesian(clip = "off")
-
-# p1_alt_tag <- p1_alt +
-#   annotate("text", x = -Inf, y = Inf, label = "A",
-#            hjust = hj, vjust = vj, size = sz) + 
-#   coord_cartesian(clip = "off")
 
 p2_tag <- p2 +
   annotate("text", x = -Inf, y = Inf, label = "B",
@@ -1820,23 +1811,51 @@ p3_tag <- p3 +
 
 final_plot <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
 
-final_alt_plot <- (p1_alt_tag / p2_tag / p3_tag) + plot_layout(ncol=1)   
-
 if (save_plot) {
   fac <- 1.35
   ggsave(paste0("plots/fig3_onset_triggered_", tstamp(), ".pdf"),
          final_plot,
          device = cairo_pdf, width = fgw1*fac,
          height = fgw2*fac*fac, units = "mm")
-  
-  # ggsave(paste0("plots/fig3_onset_triggered_alt_", tstamp(), ".pdf"),
-  #        final_alt_plot,
-  #        device = cairo_pdf, width = fgw1*fac,
-  #        height = fgw2*fac*fac, units = "mm")
-  
 }
 ```
 
+Combine plots
+
+```{r}
+hj <- 3.4
+vj <- -0.3
+sz <- 5
+
+# A, B, and C annotations
+p1_tag <- p1_alt +
+  annotate("text", x = -Inf, y = Inf, label = "A",
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2), limits=c(0.3, 15.3))+
+  coord_cartesian(clip = "off")
+
+p2_tag <- p2 +
+  annotate("text", x = -Inf, y = Inf, label = "B",
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2), limits=c(0.3, 15.3))+
+  coord_cartesian(clip = "off")
+
+p3_tag <- p3 +
+  annotate("text", x = -Inf, y = Inf, label = "C",
+           hjust = hj, vjust = vj, size = sz) + 
+  scale_x_continuous(breaks=seq(1,15,2), limits=c(0.3, 15.3))+
+  coord_cartesian(clip = "off")
+
+final_plot <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
+
+if (save_plot) {
+  fac <- 1.35
+  ggsave(paste0("plots/fig3_onset_triggered_alt_", tstamp(), ".pdf"),
+         final_plot,
+         device = cairo_pdf, width = fgw1*fac,
+         height = fgw2*fac*fac, units = "mm")
+}
+```
 
 ## Figure 4
 
