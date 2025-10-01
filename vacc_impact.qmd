@@ -1096,6 +1096,8 @@ plan(sequential)
 
 ## Create Outbreak Subsets: sample until the target number of OCV doses is reached.
 
+
+
 ```{r}
 outbk_dat <- outbreaks_filtered |>
   summarize(
@@ -2039,7 +2041,6 @@ saveRDS(res, paste0("outputs/fit_decay_model_case_trigger_vw_9_", tstamp(), ".rd
 VC3    <- c(0.6, 0.75, 0.9)
 VW_seq <- 1:15
 
-
 build_plot_summary <- function(data, value_col,
                                by = c("vacc_cov", "vacc_week"),
                                round_digits = 3) {
@@ -2071,5 +2072,105 @@ cea_sum <- cea_ori %>%
   build_plot_summary(pct_reduc_case, by = c("vacc_cov", "vacc_week"))
 
 saveRDS(cea_sum, paste0("outputs/paper/cea_ori_plot_summary_", tstamp(), ".rds"))
+```
+
+## cea summary by attack rate, duration, and size percentile
+
+```{r}
+outbk_dat <- outbreaks_filtered |>
+  summarize(
+    year = first(data.table::year(start_date)),
+    rural_urban = first(rural_urban),
+    ar = first(ar_per_10e3),
+    cfr = first(cfr_per_100percent),
+    spatial_scale = first(spatial_scale),
+    pop = first(outbreak_pop),
+    duration = first(duration_weeks),
+    size = first(total_s_ch),
+    .by = id_outbreak
+  )
+
+# Percentile grid (edit as you like; for full 0–1 include 1)
+probs <- seq(0, 0.9, by = 0.1)
+
+# ---- Helpers ----
+# 1) IDs in the top p-quantile (e.g., p=0.9 for top 10%)
+top_p_ids <- function(data, var, p = 0.9) {
+  thr <- stats::quantile(dplyr::pull(data, {{ var }}), probs = p, na.rm = TRUE)
+  data %>%
+    filter({{ var }} >= thr) %>%
+    pull(id_outbreak) %>%
+    unique()
+}
+
+# lapply(probs, function(p) top_p_ids(outbk_dat, ar, p = p))
+ids_list_ar <- map(probs, ~ top_p_ids(outbk_dat, ar, p = .x))
+ids_list_dur <- map(probs, ~ top_p_ids(outbk_dat, duration, p = .x))
+ids_list_size <- map(probs, ~ top_p_ids(outbk_dat, size, p = .x))
+```
+
+```{r}
+# -------- configurable inputs --------
+# Metrics you want medians for (edit as needed)
+
+
+# (Assumes you already have: probs, ids_list_ar, ids_list_dur, ids_list_size)
+
+# -------- helper: summarize medians over an ids list --------
+summarize_by_ids <- function(cea, ids_list, probs, metrics = cea_metrics,
+                             id_col = "id_outbreak") {
+  stopifnot(length(ids_list) == length(probs))
+
+  map2_dfr(probs, ids_list, function(p, ids) {
+    if (length(ids) == 0L) {
+      # Return an empty tibble with expected columns (so bind_rows works)
+      return(tibble(
+        prob = numeric(0),
+        vacc_cov = numeric(0),
+        vacc_week = numeric(0)
+      ))
+    }
+
+    cea %>%
+      filter(.data[[id_col]] %in% ids) %>%
+      group_by(vacc_cov, vacc_week) %>%
+      summarise(
+        across(
+          all_of(metrics),
+          ~ median(.x, na.rm = TRUE),
+          .names = "med_{.col}"
+        ),
+        # n = n(),                     # how many rows contributed
+        n = length(ids),                     # how many rows contributed
+        .groups = "drop"
+      ) %>%
+      mutate(prob = p, .before = 1)
+  })
+}
+
+# cea_metrics <- c("case_averted_per_1000_OCV")  # add more if you like
+cea_metrics <- c("pct_reduc_case")  # add more if you like
+# -------- run for each percentile definition --------
+med_ar   <- summarize_by_ids(cea_ori, ids_list_ar,   probs, metrics = cea_metrics)
+med_dur  <- summarize_by_ids(cea_ori, ids_list_dur,  probs, metrics = cea_metrics)
+med_size <- summarize_by_ids(cea_ori, ids_list_size, probs, metrics = cea_metrics)
+
+# Optional: label and combine into one tidy table
+med_all <- bind_rows(
+  mutate(med_ar,   percentile_by = "ar"),
+  mutate(med_dur,  percentile_by = "duration"),
+  mutate(med_size, percentile_by = "size")
+) %>%
+  relocate(percentile_by, prob, vacc_cov, vacc_week)
+
+# -------- optional: long format (nice for plotting faceted heatmaps, etc.) --------
+med_all_long <- med_all %>%
+  pivot_longer(
+    cols = starts_with("med_"),
+    names_to = "metric",
+    values_to = "median_value"
+  )
+
+saveRDS(med_all_long, paste0("outputs/paper/summary_", cea_metrics, "_", tstamp(), ".rds"))
 ```
 
