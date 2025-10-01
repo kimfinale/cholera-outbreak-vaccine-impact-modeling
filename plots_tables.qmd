@@ -1700,6 +1700,31 @@ prop_df <- data.frame(
   prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
   prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
 
+df <- prop_df %>%
+  select(vacc_week, prop_included_vax) %>%
+  filter(vacc_week >= 4)
+
+# --- fit linear model: percent-points per week ---
+m <- lm(prop_included_vax ~ vacc_week, data = df)
+co <- coef(m)
+alpha <- unname(co[1])   # intercept
+beta  <- unname(co[2])   # slope (expected to be negative)
+r2    <- summary(m)$r.squared
+
+# --- prediction grid & values ---
+x_grid <- seq(min(df$vacc_week), max(df$vacc_week), length.out = 200)
+pred   <- predict(m, newdata = data.frame(vacc_week = x_grid))
+
+# --- a tidy equation label using LaTeX (percent scale) ---
+# round for display
+alpha_lab <- format(round(alpha, 2), nsmall = 2)
+beta_lab  <- format(round(beta, 3), nsmall = 3)
+r2_lab    <- format(round(r2, 3), nsmall = 3)
+
+eq_label <- paste0(
+  "$\\hat{y}(t) = ", alpha_lab, beta_lab, "\\, t$"
+)
+
 p3 <- ggplot() +
   # raw data (black)
   geom_point(
@@ -1720,8 +1745,8 @@ p3 <- ggplot() +
     size = 4,
     hjust = 1, vjust = 1
   ) +
-  scale_x_continuous("Delay in ORI implementation (weeks)", 
-                     breaks = seq(1, 15, 2), limits=c(1,15)) +
+  # scale_x_continuous("Delay in ORI implementation (weeks)", 
+  #                    breaks = seq(1, 15, 2), limits=c(1,15)) +
   scale_y_continuous("Proportion included") +
   theme_light() +
   theme_tight() +
@@ -1989,19 +2014,44 @@ if (save_plot) {
 }
 ```
 
-
-
 ## Figures 3 & 4
 
 ```{r}
-plts_3_4 <- (plt3 + plt4) + plot_layout(ncol=2) + 
+hj <- 3.4
+vj <- -0.3
+sz <- 5
+
+# A, B, and C annotations
+p1_tag <- p1 +
+  annotate("text", x = -Inf, y = Inf, label = "D",
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+p2_tag <- p2 +
+  annotate("text", x = -Inf, y = Inf, label = "E",
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+p3_tag <- p3 +
+  annotate("text", x = -Inf, y = Inf, label = "F",
+           hjust = hj, vjust = vj, size = sz) + 
+  scale_x_continuous("Delay in ORI implementation (weeks)",
+                     breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+plt4 <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
+
+
+plts_3_4 <- (plt3 | plt4) + plot_layout(ncol=2) + 
   plot_layout(axis_titles = "collect_x")
 
 if (save_plot) {
   fac <- 1.35
-  ggsave(paste0("plots/fig4_capd_10m_prioritization_", tstamp(), ".pdf"),
+  ggsave(paste0("plots/figs_3_4_pcr_capd_", tstamp(), ".pdf"),
          plts_3_4,
-         device = cairo_pdf, width = fgw1*fac,
+         device = cairo_pdf, width = fgw2*fac*fac,
          height = fgw2*fac*fac, units = "mm")
 }
 ```
