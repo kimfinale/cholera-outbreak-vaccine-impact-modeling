@@ -92,7 +92,7 @@ fgw2 <- figure_size[figure_size$journal == "Lancet",]$double
 
 ```{r params-sample}
 # Load parameter definitions
-dat_params <- data.table::fread("data/parameters.csv")
+dat_params <- data.table::fread("data/paper/parameters.csv")
 
 # Draw parameter samples for multiple simulation runs
 nruns <- 200  # Number of simulation runs
@@ -136,7 +136,7 @@ vacc_cov_data |>
 # ive_data2 <- ive_fit$yrep
 # rm(ive_fit)  # Remove large object to save memory
 
-ive_fit <- readRDS("outputs/ive_yhat_yrep_20250919.rds")
+ive_fit <- readRDS("outputs/paper/ive_yhat_yrep_20250919.rds")
 
 # 50 colums from 0 to 0.98 with the increment of 0.2
 # 60% coverage
@@ -166,15 +166,15 @@ rm(ive_fit)
 ```{r load-data}
 #| warning: false
 # Load outbreak time series data
-outbreak_data_all <- as.data.frame(fread("outputs/outbreak_data_all_20250228.csv"))
+outbreak_data_all <- as.data.frame(fread("outputs/paper/outbreak_data_all_20250228.csv"))
 
 # Load outbreaks not affected by OCVs (for modeling)
-outbreak_data <- fread("outputs/outbreak_data_20250228.csv") 
+outbreak_data <- fread("outputs/paper/outbreak_data_20250228.csv") 
 outbreaks_filtered <-
-  readRDS("outputs/outbreak_summary_filtered_20250418.rds")
+  readRDS("outputs/paper/outbreak_summary_filtered_20250418.rds")
 
 # Load OCV usage data
-ocv_campaign_events <- fread("data/GTFCC_Dashboard_23April2025.csv")
+ocv_campaign_events <- fread("data/paper/GTFCC_Dashboard_23April2025.csv")
 # Filter outbreak-response (i.e., ICG-approved) events
 ocv_campaign_events %>% 
   filter(APPROVED_BY == "ICG") %>% 
@@ -190,7 +190,7 @@ delay_req_r1 <- as.integer(ocv_campaign_events$DATE_ROUND_ONE - ocv_campaign_eve
 ocv_delay <- quantile(delay_req_r1, probs=c(0.25,0.5,0.75,0.9), na.rm=TRUE)
 
 # Historical OCV doses deployed by year
-d <- clean_names(fread("data/OCV_Use_GTFCC_Dashboard.csv"))
+d <- clean_names(fread("data/paper/OCV_Use_GTFCC_Dashboard.csv"))
 d |> 
   filter(shipped == "Shipped", type == "Reactive") |> 
   group_by(year) |> 
@@ -200,12 +200,12 @@ d |>
 ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
 
 # OCV campaign data
-docv_ <- clean_names(fread("data/outbreak_files_Oct2024/ocv_long_dataset.csv"))
+docv_ <- clean_names(fread("data/paper/outbreak_files_Oct2024/ocv_long_dataset.csv"))
 docv <- docv_[(ocv_before_1 == TRUE | ocv_before_2 == TRUE | 
               ocv_before_3 == TRUE | ocv_during == TRUE)]
 
 # Get outbreak summary data
-ds <- clean_names(as.data.frame(fread("data/outbreak_files_Oct2024/outbreak_summary.csv")))
+ds <- clean_names(as.data.frame(fread("data/paper/outbreak_files_Oct2024/outbreak_summary.csv")))
 
 # Create unique IDs for each outbreak
 ds |>
@@ -233,7 +233,7 @@ sum(is.na(outbreaks_filtered$total_deaths))
 
 ```{r econ-demo-data}
 # Load life expectancy and GDP data
-life_exp_data <- as.data.frame(fread("outputs/wpp_life_expectancy_20241022.csv"))
+life_exp_data <- as.data.frame(fread("outputs/paper/wpp_life_expectancy_20241022.csv"))
 life_exp_data %>% 
   filter(Year >= 2010, Year <= 2020, `Region, subregion, country or area *` == "Sub-Saharan Africa") %>% 
   pull(`25`) %>%  
@@ -242,14 +242,14 @@ life_exp_data %>%
 summary(life_exp_25)
 
 # Load population by age data 
-age_dist <- as.data.frame(fread("outputs/wpp_pop_by_age_20241022.csv"))
+age_dist <- as.data.frame(fread("outputs/paper/wpp_pop_by_age_20241022.csv"))
 age_dist %>% 
   filter(Year >= 2010, Year <= 2020, `Region, subregion, country or area *` == "Sub-Saharan Africa") %>% 
   pull(prop_u5) -> prop_U5
 
 summary(prop_U5)
 
-gdp_data <- read_xls("data/GDP_WorldBank.xls")
+gdp_data <- read_xls("data/paper/GDP_WorldBank.xls")
 gdp_data %>% 
   filter(`Country Name` == "Sub-Saharan Africa (IDA & IBRD countries)") %>%
   select(c(`2010`:`2020`)) |> 
@@ -257,7 +257,7 @@ gdp_data %>%
 
 summary(gdp_ssa)
 
-workforce_data <- read_xls("data/Workforce_Worldbank.xls")
+workforce_data <- read_xls("data/paper/Workforce_Worldbank.xls")
 workforce_data %>% 
   filter(`Country Name` == "Sub-Saharan Africa (excluding high income)")%>%
   select(c(`2010`:`2020`)) |> 
@@ -266,7 +266,7 @@ workforce_data %>%
 summary(wf_ssa)
 
 # Consumer price index for cost adjustment (2015 to 2023)
-dis_params <- as.data.frame(data.table::fread("data/parameters.csv"))
+dis_params <- as.data.frame(data.table::fread("data/paper/parameters.csv"))
 
 # Standardize country code variable names
 names(life_exp_data)[names(life_exp_data) == "ISO3 Alpha-code"] <- "country"
@@ -294,7 +294,7 @@ gdp_long$year <- as.integer(gdp_long$year)
 ```{r cost-params}
 # Disease-specific parameters
 # convert to data.frame because extracting a column of the data.table as numbers gives me troubles
-parms <- as.data.frame(fread("data/parameters.csv"))
+parms <- as.data.frame(fread("data/paper/parameters.csv"))
 parms <- filter(parms, Disease == "Cholera")
 # GBD data deleted and replaced with Mbewe (2025) Open Forum Infect Dis data
 parms <- filter(parms, !(Parameter == "Prop_Moderate" & Value == 0.289))
@@ -338,7 +338,7 @@ coi_per_patient <-
     pr_severe / pr_tot * (patient_cost_hosp + public_cost_hosp)
 
 # Adjust costs for inflation (2015 to 2023)
-cpi_percent <- read_xls("data/imf-dm-export-20241028.xls")
+cpi_percent <- read_xls("data/paper/imf-dm-export-20241028.xls")
 cpi_percent <- cpi_percent %>%
   pivot_longer(cols = `2015`:`2029`, names_to = "year", values_to = "value")
 cpi_percent$year <- as.numeric(cpi_percent$year)

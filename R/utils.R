@@ -1822,7 +1822,7 @@ draw_parameter_samples <- function(nruns = 200, parameter_data = NULL) {
 
   # Load parameter data if not provided
   if (is.null(parameter_data)) {
-    parameter_data <- data.table::fread("data/parameters.csv")
+    parameter_data <- data.table::fread("data/paper/parameters.csv")
   }
   dat <- parameter_data
 
@@ -1871,8 +1871,9 @@ draw_parameter_samples <- function(nruns = 200, parameter_data = NULL) {
   }
 
   # Get pre-calculated indirect effectiveness data
-  ive_data <- readRDS("outputs/ive_yrep_20241010.rds")
-  n_ive_sample <- nrow(ive_data$yrep)
+  # ive_data <- readRDS("outputs/ive_yrep_20241010.rds")
+  ive_data <- readRDS("outputs/paper/ive_yhat_yrep_20250919.rds")
+  n_ive_sample <- nrow(ive_data$yhat)
 
   # Combine all parameters
   p_trans <- list(
