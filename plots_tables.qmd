@@ -1332,7 +1332,7 @@ if (save_plot) {
 
 ## Figure 3
 
-### Codes to produce the numbers used in the text
+### Summary values referred in main text
 ```{r fig3, eval=FALSE}
 onset_impact <- cea %>%
   filter(ori_occurred) %>%
@@ -1436,118 +1436,94 @@ for (i in 5:8) print(format_median_iqr(res, digits=3, row=i))
 names(fit_decay)
 fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
   filter(vacc_cov == VC) %>% 
-  mutate(rate_reduc = 100*(1 - exp(-k_hat))) %>% 
+  mutate(rate_reduc = 100*(1 - exp(- decay_rate_k))) %>% 
   summarize_group(vars=c("rate_reduc"), group_name="> 5 weeks") %>% 
   format_median_iqr(digits=1)
 
-fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
+fit_decay[["9"]] %>%  # outbreaks 5 weeks or longer
   filter(vacc_cov == VC) %>% 
-  summarize_group(vars=c("half_life"), group_name="> 5 weeks") %>% 
+  mutate(rate_reduc = 100*(1 - exp(- decay_rate_k))) %>% 
+  summarize_group(vars=c("rate_reduc"), group_name="> 9 weeks") %>% 
+  format_median_iqr(digits=1)
+
+fit_decay[["13"]] %>%  # outbreaks 5 weeks or longer
+  filter(vacc_cov == VC) %>% 
+  mutate(rate_reduc = 100*(1 - exp(- decay_rate_k))) %>% 
+  summarize_group(vars=c("rate_reduc"), group_name="> 13 weeks") %>% 
   format_median_iqr(digits=1)
 
 rm(d, d1, d2, d3, d4, res, onset_impact)
 ```
 
-Plots
+### Plots 
 ```{r}
-# Calculate proportion of outbreaks included
-# outbreaks missed by delayed vaccination
-wks_delay <- 1:15
-dur_missed_id <- vector('list', length(wks_delay))
-vax_missed_id <- vector('list', length(wks_delay))
-
-for (i in 1:length(wks_delay)) {
-  outbk_data_summary %>% 
-    filter(duration_weeks <= wks_delay[i]) %>%
-    pull(id_outbreak) -> dur_missed_id[[i]]
-  
-  cea %>% 
-    filter(vacc_week == wks_delay[i] & runid == 1 & vacc_cov == 0.75) %>% 
-    filter(!ori_occurred) %>% 
-    pull(id_outbreak) -> vax_missed_id[[i]]
-}
-n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
-n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
-
-n_outbreaks <- nrow(outbk_data_summary)
-prop_df <- data.frame(
-  vacc_week = 1:15, 
-  prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
-  prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
-
+cea_ori_sum <- read_rds("outputs/paper/cea_ori_plot_summary_20251001.rds")
 
 ymean  <- 95 
 ymedian<- 87.5
 y50    <- c(82, 93)
 y95    <- c(75, 100)
 
+VW_plot_seq <- seq(1,15,2)
 # percentage case averted 
-p1 <- cea_ori %>%
-  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-  ggplot(aes(x = as.factor(vacc_week),
-             y = pct_reduc_case,
-             color = as.factor(vacc_cov),
+p1 <- cea_ori_sum %>%
+  filter(vacc_week %in% VW_plot_seq) %>%
+  ggplot(aes(x = vacc_week, color = as.factor(vacc_cov), 
              group = as.factor(vacc_cov))) +
-  # ggplot(aes(x = vacc_week, 
-  #            y = pct_reduc_case,
-  #            color = as.factor(vacc_cov),
-  #            group = as.factor(vacc_cov))) +
-  ci_layers(
-    group = as.factor(vacc_cov), color = as.factor(vacc_cov),
-    # group = vacc_cov, color = vacc_cov,
-    dodge_width = line_interval,
+  ci_layers_from_summary(
+    dodge_width = 1.4,
     lw95 = line_width_95,
     lw50 = line_width_50,
-    pr_size = point_size,
+    pr_size = 2.4,
     mean_size = x_size,
     mean_stroke = x_stroke
   )+
   add_summary_braces(
-    x0 = 7,
+    x0 = 13,
     ymean = ymean, ymedian = ymedian,
     y50 = y50, y95 = y95,
-    pt_size_median = 2,
+    pt_size_median = 3,
     pt_size_mean = x_size,
     pt_stroke_mean = x_stroke,
-    dx50 = 0.3, dx95 = 0.6,
-    text_50_x = 7.3,
+    dx50 = 0.5, dx95 = 0.8,
+    text_50_x = 13.6,
     text_50_y = y50[2],
-    text_95_x = 7.9,
+    text_95_x = 14.85,
     text_95_y = y95[2],
-    brace_50_x = 7.1,
-    brace_95_x = 7.6,
-    text_offset_mean = 0.15,
+    brace_50_x = 13.2,
+    brace_95_x = 14.4,
+    text_offset_mean = 0.3,
     lw_50 = 0.6, lw_95 = 0.6,
     whisker_50 = line_width_50, 
     whisker_95 = line_width_95
   ) +
-  scale_y_continuous(labels = scales::percent_format(scale = 1), 
+  scale_y_continuous("% cases averted",
+                     labels = scales::percent_format(scale = 1), 
                      limits=c(0,100)) +
   scale_color_manual(
     name = "",
     values = my_discrete_colors[1:3],
     labels = c(paste0(format_num(VC3*100, 1), "%")))+
-  # guides(color = "none") +   # <-- removes the legend
-  labs(x = NULL, y = "% cases averted") +
-  # labs(x = "Delay in ORI implementation (weeks)", y = "% cases averted") +
-  scale_y_continuous("% cases averted") +
-  # scale_x_continuous("Delay in ORI implementation (weeks)", 
-  #                    breaks = seq(1, 15, 2), limits=c(1,15)) +
   theme_light() +
   theme_tight() +
   theme_x_blank() +
   theme(plot.margin = margin(0,0,0,0))
 
+# plot 2
 # exponential decay curve
 set.seed(42)
-
 ## ---- sampling / filtering (unchanged except vacc_cov) ----
 runid_sample <- 1
-id_outbreak_sample <- sample(unique(fit_decay$`5`$id_outbreak), size = 20)
+# decay model was fit using the first 5, 9, 13 points and they 
+ids_wk_5 <- fit_decay$`5` %>% 
+  filter(!(id_outbreak %in% unique(fit_decay$`9`$id_outbreak))) %>%
+  pull(id_outbreak) %>% unique()
+
+id_outbreak_sample_wk_5 <- sample(ids_wk_5, size = 10)
 
 fitted_models <- fit_decay$`5` %>% 
   filter(runid %in% runid_sample,
-         id_outbreak %in% id_outbreak_sample,
+         id_outbreak %in% id_outbreak_sample_wk_5,
          vacc_cov == 0.75)
 # x-axis grid
 x_range <- seq(1, 15, by = 0.2)
@@ -1555,19 +1531,67 @@ t0 <- 1  # baseline week for normalization
 
 ## ---- normalized "spaghetti" using fitted params ----
 # On the normalized scale, A0 cancels; z_hat(t) = exp(-k * (t - t0))
-spaghetti_data_norm <- fitted_models %>%
+spaghetti_data_norm_wk_5 <- fitted_models %>%
   mutate(vacc_week = list(x_range)) %>%
   unnest(vacc_week) %>%
   mutate(
     z_hat = exp(-decay_rate_k * (vacc_week - t0))
   )
 
+ids_wk_9 <- fit_decay$`9` %>% 
+  filter(!(id_outbreak %in% unique(fit_decay$`13`$id_outbreak))) %>%
+  pull(id_outbreak) %>% unique()
+
+id_outbreak_sample_wk_9 <- sample(ids_wk_9, size = 10)
+
+fitted_models <- fit_decay$`9` %>% 
+  filter(runid %in% runid_sample,
+         id_outbreak %in% id_outbreak_sample_wk_9,
+         vacc_cov == 0.75)
+
+## ---- normalized "spaghetti" using fitted params ----
+# On the normalized scale, A0 cancels; z_hat(t) = exp(-k * (t - t0))
+spaghetti_data_norm_wk_9 <- fitted_models %>%
+  mutate(vacc_week = list(x_range)) %>%
+  unnest(vacc_week) %>%
+  mutate(
+    z_hat = exp(-decay_rate_k * (vacc_week - t0))
+  )
+
+ids_wk_13 <- unique(fit_decay$`13`$id_outbreak)
+id_outbreak_sample_wk_13 <- sample(ids_wk_13, size = 10)
+
+fitted_models <- fit_decay$`13` %>% 
+  filter(runid %in% runid_sample,
+         id_outbreak %in% id_outbreak_sample_wk_13,
+         vacc_cov == 0.75)
+
+## ---- normalized "spaghetti" using fitted params ----
+# On the normalized scale, A0 cancels; z_hat(t) = exp(-k * (t - t0))
+spaghetti_data_norm_wk_13 <- fitted_models %>%
+  mutate(vacc_week = list(x_range)) %>%
+  unnest(vacc_week) %>%
+  mutate(
+    z_hat = exp(-decay_rate_k * (vacc_week - t0))
+  )
+
+# k_hat and half_life colums are generated during fitting
+# It, however, occurs only for the first 5 weeks (weeks 1-5) 
+# and therefore set to NULL. before joining with weeks 1-9 and weeks 1-13 
+# results
+spaghetti_data_norm_wk_5$k_hat <- NULL
+spaghetti_data_norm_wk_5$half_life <- NULL 
+ 
+spaghetti_data_norm <- rbindlist(list(spaghetti_data_norm_wk_5, 
+                                      spaghetti_data_norm_wk_9,
+                                      spaghetti_data_norm_wk_13))
+id_outbreak_sample <- c(id_outbreak_sample_wk_5, id_outbreak_sample_wk_9, 
+                        id_outbreak_sample_wk_13)
 ## ---- raw data, normalized by week-1 value per series ----
 # Expecting 'cea_ori' with columns: vacc_cov, ori_occurred, vacc_week, runid, id_outbreak, pct_reduc_case
 raw_data_points_norm <- cea_ori %>%
   filter(vacc_cov == 0.75,
-         ori_occurred == TRUE,
-         vacc_week %in% VW_seq, 
+         vacc_week %in% 1:15, 
          runid %in% runid_sample,
          id_outbreak %in% id_outbreak_sample) %>%
   arrange(runid, id_outbreak, vacc_week) %>%
@@ -1580,7 +1604,9 @@ raw_data_points_norm <- cea_ori %>%
 
 ## ---- summary curves from k only (median + IQR) ----
 # Use the full data set
-k_q <- quantile(fit_decay$`5`$decay_rate_k, 
+# k_q <- quantile(fit_decay$`5`$decay_rate_k, 
+#                 probs = c(0.025, .25, .5, .75, 0.975), na.rm = TRUE)
+k_q <- quantile(fit_decay$`9`$decay_rate_k, 
                 probs = c(0.025, .25, .5, .75, 0.975), na.rm = TRUE)
 k_q025 <- k_q[[1]]; k_q25 <- k_q[[2]]; k_med <- k_q[[3]]; 
 k_q75 <- k_q[[4]]; k_q975 <- k_q[[5]]
@@ -1641,39 +1667,38 @@ p2 <- ggplot() +
   ) +
   # scale_y_continuous("Normalized reduction", limits = c(0, 1)) +
   scale_y_continuous("Normalized reduction") +
-  scale_x_continuous("Delay in ORI implementation (weeks)", 
-                      breaks = seq(1, 15, 2), limits=c(1, 15)) +
   guides(color = "none") +
   theme_light() +
   theme_tight() +
   theme_x_blank() +
   theme(plot.margin = margin(0,0,0,0))
 
-# Bottom plot: proportion of outbreaks included
-df <- prop_df %>%
-  select(vacc_week, prop_included_vax) %>%
-  filter(vacc_week >= 4)
 
-# --- fit linear model: percent-points per week ---
-m <- lm(prop_included_vax ~ vacc_week, data = df)
-co <- coef(m)
-alpha <- unname(co[1])   # intercept
-beta  <- unname(co[2])   # slope (expected to be negative)
-r2    <- summary(m)$r.squared
+# plot 3
+# Calculate proportion of outbreaks included
+# outbreaks missed by delayed vaccination
+wks_delay <- 1:15
+dur_missed_id <- vector('list', length(wks_delay))
+vax_missed_id <- vector('list', length(wks_delay))
 
-# --- prediction grid & values ---
-x_grid <- seq(min(df$vacc_week), max(df$vacc_week), length.out = 200)
-pred   <- predict(m, newdata = data.frame(vacc_week = x_grid))
+for (i in 1:length(wks_delay)) {
+  outbk_data_summary %>% 
+    filter(duration_weeks <= wks_delay[i]) %>%
+    pull(id_outbreak) -> dur_missed_id[[i]]
+  
+  cea %>% 
+    filter(vacc_week == wks_delay[i] & runid == 1 & vacc_cov == 0.75) %>% 
+    filter(!ori_occurred) %>% 
+    pull(id_outbreak) -> vax_missed_id[[i]]
+}
+n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
+n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
 
-# --- a tidy equation label using LaTeX (percent scale) ---
-# round for display
-alpha_lab <- format(round(alpha, 2), nsmall = 2)
-beta_lab  <- format(round(beta, 3), nsmall = 3)
-r2_lab    <- format(round(r2, 3), nsmall = 3)
-
-eq_label <- paste0(
-  "$\\hat{y}(t) = ", alpha_lab, beta_lab, "\\, t$"
-)
+n_outbreaks <- nrow(outbk_data_summary)
+prop_df <- data.frame(
+  vacc_week = 1:15, 
+  prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
+  prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
 
 p3 <- ggplot() +
   # raw data (black)
@@ -1702,89 +1727,6 @@ p3 <- ggplot() +
   theme_tight() +
   theme(plot.margin = margin(0,0,0,0))
 
-# p3
-```
-
-plot 1 aLternative
-```{r}
-# Calculate proportion of outbreaks included
-# outbreaks missed by delayed vaccination
-wks_delay <- 1:15
-dur_missed_id <- vector('list', length(wks_delay))
-vax_missed_id <- vector('list', length(wks_delay))
-
-for (i in 1:length(wks_delay)) {
-  outbk_data_summary %>% 
-    filter(duration_weeks <= wks_delay[i]) %>%
-    pull(id_outbreak) -> dur_missed_id[[i]]
-  
-  cea %>% 
-    filter(vacc_week == wks_delay[i] & runid == 1 & vacc_cov == 0.75) %>% 
-    filter(!ori_occurred) %>% 
-    pull(id_outbreak) -> vax_missed_id[[i]]
-}
-n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
-n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
-
-n_outbreaks <- nrow(outbk_data_summary)
-prop_df <- data.frame(
-  vacc_week = 1:15, 
-  prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
-  prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
-
-ymean  <- 95 
-ymedian<- 87.5
-y50    <- c(82, 93)
-y95    <- c(75, 100)
-
-# percentage case averted 
-p1_alt <- cea_ori %>%
-  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-  ggplot(aes(x = vacc_week,
-             y = pct_reduc_case,
-             color = as.factor(vacc_cov),
-             group = as.factor(vacc_cov))) +
-  ci_layers(
-    group = as.factor(vacc_cov), color = as.factor(vacc_cov),
-    dodge_width = line_interval + 0.3,
-    lw95 = line_width_95,
-    lw50 = line_width_50,
-    pr_size = point_size,
-    mean_size = x_size,
-    mean_stroke = x_stroke
-  )+
-  add_summary_braces(
-    x0 = 13,
-    ymean = ymean, ymedian = ymedian,
-    y50 = y50, y95 = y95,
-    pt_size_median = 2,
-    pt_size_mean = x_size,
-    pt_stroke_mean = x_stroke,
-    dx50 = 0.3, dx95 = 0.6,
-    text_50_x = 13.5,
-    text_50_y = y50[2],
-    text_95_x = 14.7,
-    text_95_y = y95[2],
-    brace_50_x = 13.2,
-    brace_95_x = 14.4,
-    text_offset_mean = 0.25,
-    lw_50 = 0.6, lw_95 = 0.6,
-    whisker_50 = line_width_50, 
-    whisker_95 = line_width_95
-  ) +
-  scale_y_continuous("% cases averted",
-                     labels = scales::percent_format(scale = 1), 
-                     limits=c(0,100)) +
-  scale_color_manual(
-    name = "",
-    values = my_discrete_colors[1:3],
-    labels = c(paste0(format_num(VC3*100, 1), "%")))+
-  # limits extended to allow three error bars for one x value
-  scale_x_continuous(breaks = seq(1, 15, 2), limits=c(0.2,15.2)) +
-  theme_light() +
-  theme_tight() +
-  theme_x_blank() +
-  theme(plot.margin = margin(0,0,0,0))
 ```
 
 Combine plots
@@ -1797,16 +1739,21 @@ sz <- 5
 # A, B, and C annotations
 p1_tag <- p1 +
   annotate("text", x = -Inf, y = Inf, label = "A",
-           hjust = hj, vjust = vj, size = sz) + 
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2), limits=c(0.2,15.5))+
   coord_cartesian(clip = "off")
 
 p2_tag <- p2 +
   annotate("text", x = -Inf, y = Inf, label = "B",
-           hjust = hj, vjust = vj, size = sz) + 
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2), limits=c(0.2,15.5))+
   coord_cartesian(clip = "off")
+
 p3_tag <- p3 +
   annotate("text", x = -Inf, y = Inf, label = "C",
            hjust = hj, vjust = vj, size = sz) + 
+  scale_x_continuous("Delay in ORI implementation (weeks)",
+                     breaks=seq(1,15,2), limits=c(0.2,15.5))+
   coord_cartesian(clip = "off")
 
 final_plot <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
@@ -1814,43 +1761,6 @@ final_plot <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1)
 if (save_plot) {
   fac <- 1.35
   ggsave(paste0("plots/fig3_onset_triggered_", tstamp(), ".pdf"),
-         final_plot,
-         device = cairo_pdf, width = fgw1*fac,
-         height = fgw2*fac*fac, units = "mm")
-}
-```
-
-Combine plots
-
-```{r}
-hj <- 3.4
-vj <- -0.3
-sz <- 5
-
-# A, B, and C annotations
-p1_tag <- p1_alt +
-  annotate("text", x = -Inf, y = Inf, label = "A",
-           hjust = hj, vjust = vj, size = sz) +
-  scale_x_continuous(breaks=seq(1,15,2), limits=c(0.3, 15.4))+
-  coord_cartesian(clip = "off")
-
-p2_tag <- p2 +
-  annotate("text", x = -Inf, y = Inf, label = "B",
-           hjust = hj, vjust = vj, size = sz) +
-  scale_x_continuous(breaks=seq(1,15,2), limits=c(0.3, 15.4))+
-  coord_cartesian(clip = "off")
-
-p3_tag <- p3 +
-  annotate("text", x = -Inf, y = Inf, label = "C",
-           hjust = hj, vjust = vj, size = sz) + 
-  scale_x_continuous(breaks=seq(1,15,2), limits=c(0.3, 15.4))+
-  coord_cartesian(clip = "off")
-
-final_plot <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
-
-if (save_plot) {
-  fac <- 1.35
-  ggsave(paste0("plots/fig3_onset_triggered_alt_", tstamp(), ".pdf"),
          final_plot,
          device = cairo_pdf, width = fgw1*fac,
          height = fgw2*fac*fac, units = "mm")

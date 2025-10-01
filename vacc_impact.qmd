@@ -2033,3 +2033,43 @@ for (ct_val in ct_values) {
 saveRDS(res, paste0("outputs/fit_decay_model_case_trigger_vw_9_", tstamp(), ".rds"))
 ```
 
+## Build plot summary
+```{r}
+# If you already define these elsewhere, remove/adjust here
+VC3    <- c(0.6, 0.75, 0.9)
+VW_seq <- 1:15
+
+
+build_plot_summary <- function(data, value_col,
+                               by = c("vacc_cov", "vacc_week"),
+                               round_digits = 3) {
+  val <- rlang::enquo(value_col)
+  
+  data %>%
+    group_by(across(all_of(by))) %>%
+    summarise(
+      mean = mean(!!val, na.rm = TRUE),
+      q025 = quantile(!!val, 0.025, na.rm = TRUE),
+      q250 = quantile(!!val, 0.25,  na.rm = TRUE),
+      q500 = quantile(!!val, 0.50,  na.rm = TRUE),
+      q750 = quantile(!!val, 0.75,  na.rm = TRUE),
+      q975 = quantile(!!val, 0.975, na.rm = TRUE),
+      n    = sum(!is.na(!!val)),
+      .groups = "drop"
+    ) %>%
+    mutate(across(c(mean, q025, q250, q500, q750, q975),
+                  ~ round(.x, round_digits)))
+}
+
+# =============================================================================
+# 1) BUILD & SAVE SUMMARIES  (tiny files you can track in Git instead of cea_ori)
+# =============================================================================
+
+# Example: summarize % cases averted by week & coverage
+cea_sum <- cea_ori %>%
+  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
+  build_plot_summary(pct_reduc_case, by = c("vacc_cov", "vacc_week"))
+
+saveRDS(cea_sum, paste0("outputs/paper/cea_ori_plot_summary_", tstamp(), ".rds"))
+```
+

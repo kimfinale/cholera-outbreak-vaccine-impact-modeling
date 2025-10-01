@@ -1413,6 +1413,36 @@ ci_layers <- function(group = NULL, color = NULL,
 
 
 
+#' Quantile whiskers + median + mean "X" for PRE-SUMMARIZED data
+#' Expects columns: q025,q250,q500,q750,q975,mean
+#' Assumes aesthetics are mapped in ggplot(), e.g.,
+#'   ggplot(df, aes(x = vacc_week, color = factor(vacc_cov), group = factor(vacc_cov)))
+ci_layers_from_summary <- function(dodge_width = 0.5,
+                                   lw95 = 0.6,
+                                   lw50 = 0.9,
+                                   pr_size = 1.5,
+                                   mean_size = 3,
+                                   mean_stroke = 0.8) {
+  list(
+    # 95% central interval
+    geom_linerange(aes(ymin = q025, ymax = q975),
+                   position = position_dodge(width = dodge_width),
+                   linewidth = lw95),
+    # 50% IQR
+    geom_linerange(aes(ymin = q250, ymax = q750),
+                   position = position_dodge(width = dodge_width),
+                   linewidth = lw50),
+    # median (dot)
+    geom_point(aes(y = q500),
+               position = position_dodge(width = dodge_width),
+               size = pr_size),
+    # mean as "X"
+    geom_point(aes(y = mean),
+               position = position_dodge(width = dodge_width),
+               shape = 4, size = mean_size, stroke = mean_stroke)
+  )
+}
+
 #' Add summary braces and markers for mean/median with uncertainty ranges
 #'
 #' This function creates a list of ggplot2 layers showing mean and median points,
