@@ -1332,7 +1332,7 @@ if (save_plot) {
 
 ## Figure 3
 
-### Summary values referred in main text
+### Summary values referred in the main text
 ```{r fig3, eval=FALSE}
 onset_impact <- cea %>%
   filter(ori_occurred) %>%
@@ -1506,8 +1506,7 @@ p1 <- cea_ori_sum %>%
     labels = c(paste0(format_num(VC3*100, 1), "%")))+
   theme_light() +
   theme_tight() +
-  theme_x_blank() +
-  theme(plot.margin = margin(0,0,0,0))
+  theme_x_blank()
 
 # plot 2
 # exponential decay curve
@@ -1670,8 +1669,7 @@ p2 <- ggplot() +
   guides(color = "none") +
   theme_light() +
   theme_tight() +
-  theme_x_blank() +
-  theme(plot.margin = margin(0,0,0,0))
+  theme_x_blank()
 
 
 # plot 3
@@ -1749,8 +1747,7 @@ p3 <- ggplot() +
   #                    breaks = seq(1, 15, 2), limits=c(1,15)) +
   scale_y_continuous("Proportion included") +
   theme_light() +
-  theme_tight() +
-  theme(plot.margin = margin(0,0,0,0))
+  theme_tight()
 
 ```
 
@@ -2051,7 +2048,7 @@ if (save_plot) {
   fac <- 1.35
   ggsave(paste0("plots/figs_3_4_pcr_capd_", tstamp(), ".pdf"),
          plts_3_4,
-         device = cairo_pdf, width = fgw2*fac*fac,
+         device = cairo_pdf, width = fgw2*fac,
          height = fgw2*fac*fac, units = "mm")
 }
 ```
