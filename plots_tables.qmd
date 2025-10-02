@@ -1455,7 +1455,10 @@ fit_decay[["13"]] %>%  # outbreaks 5 weeks or longer
 rm(d, d1, d2, d3, d4, res, onset_impact)
 ```
 
-### Plots 
+### Left panel
+
+Percent cases averted
+
 ```{r}
 cea_ori_sum <- read_rds("outputs/paper/cea_ori_plot_summary_20251001.rds")
 
@@ -1778,47 +1781,50 @@ p3_tag <- p3 +
                      breaks=seq(1,15,2), limits=c(0.2,15.5))+
   coord_cartesian(clip = "off")
 
-plt3 <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
+plt_pca <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
 
 if (save_plot) {
   fac <- 1.35
   ggsave(paste0("plots/fig3_onset_triggered_", tstamp(), ".pdf"),
-         plt3,
+         plt_pca,
          device = cairo_pdf, width = fgw1*fac,
          height = fgw2*fac*fac, units = "mm")
 }
 ```
 
-## Figure 4
+### Right panel
 
-
-### Plots
-
-Case averted per 1,000 OCVs
+Heatmap of cases averted per 1,000 OCVs a
 
 ```{r}
+capd_data <- 
+  read_rds("outputs/paper/summary_case_averted_per_1000_OCV_20251001.rds")
+
 # 1. Create the color palette function (your code was correct here)
 myPalette <- colorRampPalette(brewer.pal(9, "YlOrBr"))
 
 # 3. Build the complete, polished plot
-plts <- vector('list', length(capd_data))
 
 y_labs <- c("Attack rate percentile", "Outbreak duration percentile", 
             "Outbreak size percentile")
 y_annotations <- c("Prioritizing high AR outbreaks", 
                    "Prioritizing longer outbreaks",
                    "Prioritizing larger outbreaks")
-  
-p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
-  
-  ggplot(aes(x = vacc_week, y = size_prob_cutoff, 
-               fill = case_averted_per_1000_OCV_q500)) +
+
+
+fill_limits <- c(0.1, 12)
+brks <- c(1, 2, 5, 10)
+ 
+p1  <- capd_data %>% 
+  filter(percentile_by == "ar", vacc_cov == 0.75) %>%
+  ggplot(aes(x = vacc_week, y = prob, 
+               fill = median_value)) +
   geom_tile(color = "white", linewidth = 0.25) +
   scale_fill_gradientn(
     trans = scales::pseudo_log_trans(),
     colours = myPalette(100), # Generate a smooth ramp of 100 colors
-    breaks = c(1, 2, 5, 10),
-    limits = c(0.2, 15), 
+    breaks = brks,
+    limits = fill_limits, 
     name = "Cases Averted\nper 1,000 OCVs" # Legend title
   ) +
   scale_y_continuous(y_labs[1],
@@ -1831,8 +1837,6 @@ p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
                expression(">="*P[80*"%"]))) +
     
   scale_x_continuous(expand = c(0, 0), breaks = seq(1, 15, 2)) +
-    # 1. Add the arrows
-    #    The origin point for all arrows is (x=9, y=0)
   annotate(
     "segment",
     x = 9, y = 0,
@@ -1842,8 +1846,6 @@ p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
     color = "black",
     linewidth = 0.4
   ) +
-  # 2. Add the four points on top of the arrows
-  #    Using shape 21 allows for a fill and a border color
   annotate(
     "point",
     x = c(9), # The four key coordinates
@@ -1874,8 +1876,6 @@ p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
     color = "black",
     stroke = 1.2
   ) +
-  # 3. Add text labels next to the arrows
-  #    Coordinates are chosen to be midway along the arrow, with a slight offset
   annotate(
     "text",
     x = c(9.5, 5), # x-positions for the two labels
@@ -1887,33 +1887,27 @@ p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
     size = 4,
     hjust = 0.5
   ) +
-  # labs(
-  #   x = "vaccination week<br>(*slower Implementation →*)",
-  #   y = "attack rate % cutoff<br>(*prioritizing high AR outbreaks →*)"
-  # ) +
   labs(
     x = NULL,
-    y = y_labs[i]
+    y = y_labs[1]
   ) +
   theme_light() +
   theme_tight() +
   theme(
     legend.position = "top",
-    # plot.margin = margin(0,0.03,0,0)
   ) + 
   theme_x_blank()
  
 
-p2  <- 
-    capd_data[[2]] %>% filter(vacc_cov == 0.75) %>%
-    ggplot(aes(x = vacc_week, y = size_prob_cutoff, 
-               fill = case_averted_per_1000_OCV_q500)) +
+p2 <- capd_data %>% 
+  filter(percentile_by == "duration", vacc_cov == 0.75) %>%
+  ggplot(aes(x = vacc_week, y = prob, fill = median_value)) +
     geom_tile(color = "white", linewidth = 0.25) +
     scale_fill_gradientn(
       trans = scales::pseudo_log_trans(),
       colours = myPalette(100), # Generate a smooth ramp of 100 colors
-      breaks = c(1, 2, 5, 10),
-      limits = c(0.2, 15), 
+      breaks = brks,
+      limits = fill_limits, 
       name = "Cases Averted\nper 1,000 OCVs" # Legend title
     ) +
     scale_y_continuous(y_labs[2], 
@@ -1935,15 +1929,15 @@ p2  <-
     theme_x_blank()
    
 
-p3  <- capd_data[[3]] %>% filter(vacc_cov == 0.75) %>%
-  ggplot(aes(x = vacc_week, y = size_prob_cutoff, 
-             fill = case_averted_per_1000_OCV_q500)) +
+p3  <- capd_data %>% 
+  filter(percentile_by == "size", vacc_cov == 0.75) %>%
+  ggplot(aes(x = vacc_week, y = prob, fill = median_value)) +
   geom_tile(color = "white", linewidth = 0.25) +
   scale_fill_gradientn(
     trans = scales::pseudo_log_trans(),
     colours = myPalette(100), # Generate a smooth ramp of 100 colors
-    breaks = c(1, 2, 5, 10),
-    limits = c(0.2, 15), 
+    breaks = brks,
+    limits = fill_limits, 
     # Handles values outside the limits gracefully
     # oob = scales::squish, 
     name = "Cases Averted\nper 1,000 OCVs" # Legend title
@@ -1967,39 +1961,119 @@ p3  <- capd_data[[3]] %>% filter(vacc_cov == 0.75) %>%
   theme_tight()
 ```
 
-Heatmap of cases averted per 1,000 OCVs
+Combine plots
 
 ```{r}
-capd_files <- c(
-  "outputs/paper/cea_onset_trigger_10m_doses_ar_cutoff_20250922.rds",
-  "outputs/paper/cea_onset_trigger_10m_doses_size_cutoff_20250922.rds",
-  "outputs/paper/cea_onset_trigger_10m_doses_dur_cutoff_20250922.rds"
-)
-capd_data <- map(capd_files, read_rds)
+hj <- 3.4
+vj <- -0.3
+sz <- 5
+
+# A, B, and C annotations
+p1_tag <- p1 +
+  annotate("text", x = -Inf, y = Inf, label = "A",
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+p2_tag <- p2 +
+  annotate("text", x = -Inf, y = Inf, label = "B",
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+p3_tag <- p3 +
+  annotate("text", x = -Inf, y = Inf, label = "C",
+           hjust = hj, vjust = vj, size = sz) + 
+  scale_x_continuous("Delay in ORI implementation (weeks)",
+                     breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+plt_capd <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
+
+if (save_plot) {
+  fac <- 1.35
+  ggsave(paste0("plots/fig4_capd_delay_prioritization_", tstamp(), ".pdf"),
+         plt4,
+         device = cairo_pdf, width = fgw1*fac*fac,
+         height = fgw2*fac*fac, units = "mm")
+}
+```
+
+### Combine left and right
+
+```{r}
+hj <- 3.4
+vj <- -0.3
+sz <- 5
+
+# A, B, and C annotations
+p1_tag <- p1 +
+  annotate("text", x = -Inf, y = Inf, label = "D",
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+p2_tag <- p2 +
+  annotate("text", x = -Inf, y = Inf, label = "E",
+           hjust = hj, vjust = vj, size = sz) +
+  scale_x_continuous(breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+p3_tag <- p3 +
+  annotate("text", x = -Inf, y = Inf, label = "F",
+           hjust = hj, vjust = vj, size = sz) + 
+  scale_x_continuous("Delay in ORI implementation (weeks)",
+                     breaks=seq(1,15,2))+
+  coord_cartesian(clip = "off")
+
+plt_capd <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
+
+plts_pca_capd <- (plt_pca | plt_capd) + plot_layout(ncol=2) + 
+  plot_layout(axis_titles = "collect_x")
+
+if (save_plot) {
+  fac <- 1.35
+  ggsave(paste0("plots/pca_capd_", tstamp(), ".pdf"),
+         plts_pca_capd,
+         device = cairo_pdf, width = fgw2*fac,
+         height = fgw2*fac*fac, units = "mm")
+}
+```
+
+
+## Figure SX
+
+Heatmap of percentage cases averted 
+
+```{r}
+# percent case averted data
+pca_data <- read_rds("outputs/paper/summary_pct_reduc_case_20251001.rds")
 
 # 1. Create the color palette function (your code was correct here)
 myPalette <- colorRampPalette(brewer.pal(9, "YlOrBr"))
 
 # 3. Build the complete, polished plot
-plts <- vector('list', length(capd_data))
 
 y_labs <- c("Attack rate percentile", "Outbreak duration percentile", 
             "Outbreak size percentile")
 y_annotations <- c("Prioritizing high AR outbreaks", 
                    "Prioritizing longer outbreaks",
                    "Prioritizing larger outbreaks")
-  
-p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
-  
-  ggplot(aes(x = vacc_week, y = size_prob_cutoff, 
-               fill = case_averted_per_1000_OCV_q500)) +
+
+range(pca_data$median_value)
+fill_limits <- c(5, 90)
+brks <- c(10, 30, 50, 70)
+ 
+p1  <- pca_data %>% 
+  filter(percentile_by == "ar", vacc_cov == 0.75) %>%
+  ggplot(aes(x = vacc_week, y = prob, 
+               fill = median_value)) +
   geom_tile(color = "white", linewidth = 0.25) +
   scale_fill_gradientn(
-    trans = scales::pseudo_log_trans(),
     colours = myPalette(100), # Generate a smooth ramp of 100 colors
-    breaks = c(1, 2, 5, 10),
-    limits = c(0.2, 15), 
-    name = "Cases Averted\nper 1,000 OCVs" # Legend title
+    breaks = brks,
+    limits = fill_limits, 
+    name = "% cases averted " # Legend title
   ) +
   scale_y_continuous(y_labs[1],
     expand = c(0, 0), 
@@ -2011,8 +2085,6 @@ p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
                expression(">="*P[80*"%"]))) +
     
   scale_x_continuous(expand = c(0, 0), breaks = seq(1, 15, 2)) +
-    # 1. Add the arrows
-    #    The origin point for all arrows is (x=9, y=0)
   annotate(
     "segment",
     x = 9, y = 0,
@@ -2022,8 +2094,6 @@ p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
     color = "black",
     linewidth = 0.4
   ) +
-  # 2. Add the four points on top of the arrows
-  #    Using shape 21 allows for a fill and a border color
   annotate(
     "point",
     x = c(9), # The four key coordinates
@@ -2054,8 +2124,6 @@ p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
     color = "black",
     stroke = 1.2
   ) +
-  # 3. Add text labels next to the arrows
-  #    Coordinates are chosen to be midway along the arrow, with a slight offset
   annotate(
     "text",
     x = c(9.5, 5), # x-positions for the two labels
@@ -2067,34 +2135,27 @@ p1  <- capd_data[[1]] %>% filter(vacc_cov == 0.75) %>%
     size = 4,
     hjust = 0.5
   ) +
-  # labs(
-  #   x = "vaccination week<br>(*slower Implementation →*)",
-  #   y = "attack rate % cutoff<br>(*prioritizing high AR outbreaks →*)"
-  # ) +
   labs(
     x = NULL,
-    y = y_labs[i]
+    y = y_labs[1]
   ) +
   theme_light() +
   theme_tight() +
   theme(
     legend.position = "top",
-    # plot.margin = margin(0,0.03,0,0)
   ) + 
   theme_x_blank()
  
 
-p2  <- 
-    capd_data[[2]] %>% filter(vacc_cov == 0.75) %>%
-    ggplot(aes(x = vacc_week, y = size_prob_cutoff, 
-               fill = case_averted_per_1000_OCV_q500)) +
+p2 <- pca_data %>% 
+  filter(percentile_by == "duration", vacc_cov == 0.75) %>%
+  ggplot(aes(x = vacc_week, y = prob, fill = median_value)) +
     geom_tile(color = "white", linewidth = 0.25) +
     scale_fill_gradientn(
-      trans = scales::pseudo_log_trans(),
       colours = myPalette(100), # Generate a smooth ramp of 100 colors
-      breaks = c(1, 2, 5, 10),
-      limits = c(0.2, 15), 
-      name = "Cases Averted\nper 1,000 OCVs" # Legend title
+      breaks = brks,
+      limits = fill_limits, 
+      name = "% cases averted" # Legend title
     ) +
     scale_y_continuous(y_labs[2], 
       expand = c(0, 0), 
@@ -2115,18 +2176,15 @@ p2  <-
     theme_x_blank()
    
 
-p3  <- capd_data[[3]] %>% filter(vacc_cov == 0.75) %>%
-  ggplot(aes(x = vacc_week, y = size_prob_cutoff, 
-             fill = case_averted_per_1000_OCV_q500)) +
+p3  <- pca_data %>% 
+  filter(percentile_by == "size", vacc_cov == 0.75) %>%
+  ggplot(aes(x = vacc_week, y = prob, fill = median_value)) +
   geom_tile(color = "white", linewidth = 0.25) +
   scale_fill_gradientn(
-    trans = scales::pseudo_log_trans(),
     colours = myPalette(100), # Generate a smooth ramp of 100 colors
-    breaks = c(1, 2, 5, 10),
-    limits = c(0.2, 15), 
-    # Handles values outside the limits gracefully
-    # oob = scales::squish, 
-    name = "Cases Averted\nper 1,000 OCVs" # Legend title
+    breaks = brks,
+    limits = fill_limits, 
+    name = "% cases averted" # Legend title
   ) +
   scale_y_continuous(y_labs[3],
     expand = c(0, 0), 
@@ -2178,54 +2236,13 @@ plt4 <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1)
 
 if (save_plot) {
   fac <- 1.35
-  ggsave(paste0("plots/fig4_capd_10m_prioritization_", tstamp(), ".pdf"),
+  ggsave(paste0("plots/fig4_pca_delay_prioritization_", tstamp(), ".pdf"),
          plt4,
-         device = cairo_pdf, width = fgw1*fac,
+         device = cairo_pdf, width = fgw1*fac*fac,
          height = fgw2*fac*fac, units = "mm")
 }
 ```
 
-## Figures 3 & 4
-
-```{r}
-hj <- 3.4
-vj <- -0.3
-sz <- 5
-
-# A, B, and C annotations
-p1_tag <- p1 +
-  annotate("text", x = -Inf, y = Inf, label = "D",
-           hjust = hj, vjust = vj, size = sz) +
-  scale_x_continuous(breaks=seq(1,15,2))+
-  coord_cartesian(clip = "off")
-
-p2_tag <- p2 +
-  annotate("text", x = -Inf, y = Inf, label = "E",
-           hjust = hj, vjust = vj, size = sz) +
-  scale_x_continuous(breaks=seq(1,15,2))+
-  coord_cartesian(clip = "off")
-
-p3_tag <- p3 +
-  annotate("text", x = -Inf, y = Inf, label = "F",
-           hjust = hj, vjust = vj, size = sz) + 
-  scale_x_continuous("Delay in ORI implementation (weeks)",
-                     breaks=seq(1,15,2))+
-  coord_cartesian(clip = "off")
-
-plt4 <- (p1_tag / p2_tag / p3_tag) + plot_layout(ncol=1) 
-
-
-plts_3_4 <- (plt3 | plt4) + plot_layout(ncol=2) + 
-  plot_layout(axis_titles = "collect_x")
-
-if (save_plot) {
-  fac <- 1.35
-  ggsave(paste0("plots/figs_3_4_pcr_capd_", tstamp(), ".pdf"),
-         plts_3_4,
-         device = cairo_pdf, width = fgw2*fac,
-         height = fgw2*fac*fac, units = "mm")
-}
-```
 
 ## Figure S3: Case Reduction in Case-Triggered Scenario
 

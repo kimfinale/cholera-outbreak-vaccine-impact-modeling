@@ -1096,8 +1096,6 @@ plan(sequential)
 
 ## Create Outbreak Subsets: sample until the target number of OCV doses is reached.
 
-
-
 ```{r}
 outbk_dat <- outbreaks_filtered |>
   summarize(
@@ -1112,69 +1110,99 @@ outbk_dat <- outbreaks_filtered |>
     .by = id_outbreak
   )
 
-# --- 2. Setup Simulation Parameters ---
-priorities <- c("size", "dur", "AR")
-ocv_doses <- c(1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6, 500e6, 1000e6)
-nsubset <- 200
-probs <- seq(0, 0.9, 0.1)
+priorities <- c("size","dur","AR")
+ocv_doses  <- c(1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6, 500e6, 1000e6)
+nsubset    <- 200
+probs      <- seq(0, 0.9, 0.1)
+cov        <- 0.75                     # vaccine coverage (fraction)
+qtype      <- 7                        # quantile type: default = 7
 
-# --- 3. Run Simulations Functionally and in Parallel ---
-
-# Set up a parallel processing plan. This uses multiple CPU cores.
-# The number of workers can be adjusted, e.g., plan(multisession, workers = 4)
 plan(multisession)
+
+# helper to filter by priority + pr
+filter_by_priority <- function(dat, priority, pr, qtype = 8) {
+  if (priority == "size") {
+    thr <- stats::quantile(dat$size, probs = pr, na.rm = TRUE, type = qtype)
+    dat %>% filter(size > thr)
+  } else if (priority == "dur") {
+    thr <- stats::quantile(dat$duration, probs = pr, na.rm = TRUE, type = qtype)
+    dat %>% filter(duration > thr)
+  } else if (priority == "AR") {
+    thr <- stats::quantile(dat$ar, probs = pr, na.rm = TRUE, type = qtype)
+    dat %>% filter(ar > thr)
+  } else stop("Unknown priority")
+}
+
+# safe sampler (identical to yours, but minimal)
+run_one_sample <- function(dat_filtered, ocv_dose, j) {
+  set.seed(j)
+  smpl <- sample_outbreaks(
+    outbreak_data     = dat_filtered,
+    target_population = ocv_dose,
+    target_count      = NULL,
+    sampling_method   = "random"
+  )
+  tibble(
+    id_outbreak = smpl$sampled_data$id_outbreak,
+    id_sample   = j
+  )
+}
 
 for (priority in priorities) {
   for (ocv_dose in ocv_doses) {
-  # The outer map_dfr iterates over each probability cutoff.
-  # The inner future_map_dfr iterates over each simulation run in parallel.
-  # The .dfr suffix automatically row-binds the results into a single data frame.
-  DF <- map_dfr(probs, ~{
-    pr <- .x # Assign to a more readable variable name inside the loop
-    
-    # Filter data for the current probability cutoff
-    if (priority  == "size") {
-      dat_filtered <- outbk_dat |>
-        filter(size > quantile(outbk_dat$size, probs = pr))
-    }
-    else if (priority  == "dur") {
-      dat_filtered <- outbk_dat |>
-        filter(duration > quantile(outbk_dat$duration, probs = pr))
-    }
-    else if (priority  == "AR") {
-      dat_filtered <- outbk_dat |>
-        filter(ar > quantile(outbk_dat$ar, probs = pr))
-    }
-    # Run nsubset simulations for this cutoff *in parallel*
-    future_map_dfr(1:nsubset, ~{
-      j <- .x
-      set.seed(j) # Ensures reproducibility for each simulation run
-      
-      # Run the sampling function
-      smpl <- sample_outbreaks(
-        outbreak_data = dat_filtered,
-        target_population = ocv_dose,
-        target_count = NULL,
-        sampling_method = "random"
-      )
-      
-      # Return a data frame for this single run
-      tibble(
-        id_outbreak = smpl$sampled_data$id_outbreak,
-        id_sample = j,
-        size_prob_cutoff = pr
-      )
-    }, .options = furrr_options(seed = TRUE)) # Ensures seeds are handled correctly in parallel
-    
-  }, .progress = TRUE) # Adds a progress bar for the outer loop
-  
-  # --- 4. Save the final results ---
-  saveRDS(DF, paste0("outputs/subsets_", round(ocv_dose/1e6), 
-                     "M_", priority, "_", tstamp(), ".rds"))
+    DF <- map_dfr(probs, function(pr) {
+      dat_filtered <- filter_by_priority(outbk_dat, priority, pr, qtype)
+      # capacity = eligible pop * coverage (single dose assumed)
+      cap <- sum(dat_filtered$pop, na.rm = TRUE) * cov
+      cap_ok <- is.finite(cap) && cap > 0 && ocv_dose <= cap
+
+      if (!cap_ok) {
+        # Skip sampling; return a single status row (no per-replicate noise)
+        return(tibble(
+          id_outbreak      = NA_character_,
+          id_sample        = NA_integer_,
+          size_prob_cutoff = pr,
+          vacc_priority    = priority,
+          ocv_dose         = ocv_dose,
+          capacity         = cap,
+          coverage         = cov,
+          sampled          = FALSE,
+          reason           = ifelse(nrow(dat_filtered) == 0L,
+                                    "no_outbreaks_after_filter",
+                                    "dose_exceeds_capacity")
+        ))
+      }
+
+      # Run nsubset samples in parallel
+      future_map_dfr(
+        1:nsubset,
+        ~run_one_sample(dat_filtered, ocv_dose, .x),
+        .options = furrr_options(seed = TRUE)
+      ) %>%
+        mutate(
+          size_prob_cutoff = pr,
+          vacc_priority    = priority,
+          ocv_dose         = ocv_dose,
+          capacity         = cap,
+          coverage         = cov,
+          sampled          = TRUE,
+          reason           = NA_character_,
+          .before = 1
+        )
+    }, .progress = TRUE)
+
+    saveRDS(
+      DF,
+      paste0("outputs/subsets_", 
+             round(ocv_dose/1e6), "M_", priority, "_", tstamp(), ".rds")
+    )
   }
 }
-# Clean up parallel workers
+
 plan(sequential)
+
+```
+
 ```
 
 Analysis
