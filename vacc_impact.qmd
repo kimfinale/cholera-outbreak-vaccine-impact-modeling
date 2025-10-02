@@ -1203,7 +1203,45 @@ plan(sequential)
 
 ```
 
+combine datasets
+
+```{r}
+subset_files <- c(
+  "outputs/subsets_1M_AR_20251002.rds",
+  "outputs/subsets_2M_AR_20251002.rds",
+  "outputs/subsets_5M_AR_20251002.rds",
+  "outputs/subsets_10M_AR_20251002.rds",
+  "outputs/subsets_20M_AR_20251002.rds",
+  "outputs/subsets_50M_AR_20251002.rds",
+  "outputs/subsets_100M_AR_20251002.rds",
+  "outputs/subsets_200M_AR_20251002.rds",
+  "outputs/subsets_500M_AR_20251002.rds",
+  "outputs/subsets_1000M_AR_20251002.rds",
+  "outputs/subsets_1M_dur_20251002.rds",
+  "outputs/subsets_2M_dur_20251002.rds",
+  "outputs/subsets_5M_dur_20251002.rds",
+  "outputs/subsets_10M_dur_20251002.rds",
+  "outputs/subsets_20M_dur_20251002.rds",
+  "outputs/subsets_50M_dur_20251002.rds",
+  "outputs/subsets_100M_dur_20251002.rds",
+  "outputs/subsets_200M_dur_20251002.rds",
+  "outputs/subsets_500M_dur_20251002.rds",
+  "outputs/subsets_1000M_dur_20251002.rds",
+  "outputs/subsets_1M_size_20251002.rds",
+  "outputs/subsets_2M_size_20251002.rds",
+  "outputs/subsets_5M_size_20251002.rds",
+  "outputs/subsets_10M_size_20251002.rds",
+  "outputs/subsets_20M_size_20251002.rds",
+  "outputs/subsets_50M_size_20251002.rds",
+  "outputs/subsets_100M_size_20251002.rds",
+  "outputs/subsets_200M_size_20251002.rds",
+  "outputs/subsets_500M_size_20251002.rds",
+  "outputs/subsets_1000M_size_20251002.rds")
+
+subset_data <- map_dfr(subset_files, read_rds)
+saveRDS(subset_data, paste0("outputs/paper/subsets_proritization_", tstamp(), ".rds"))
 ```
+
 
 Analysis
 ```{r}

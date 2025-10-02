@@ -2831,6 +2831,11 @@ rm(cea_subsets_by_size_q1, cea_subsets_by_size_q2,
 ## Figure 4: Cumulative OCV Impact during OCV stockpile deployment
 
 ```{r fig4, eval=FALSE}
+
+
+```
+
+```{r fig4, eval=FALSE}
 # Load subset analyses reflecting global OCV stockpile
 cea_stockpile_subsets_q1 <-
   read_rds("outputs/cea_stockpile_0_onset_trigger_by_year_20250828.rds")
