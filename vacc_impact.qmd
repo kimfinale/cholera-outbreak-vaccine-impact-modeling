@@ -1110,48 +1110,56 @@ outbk_dat <- outbreaks_filtered |>
     .by = id_outbreak
   )
 
-priorities <- c("size","dur","AR")
+priorities <- c("size", "dur", "AR")
 ocv_doses  <- c(1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6, 500e6, 1000e6)
 nsubset    <- 200
 probs      <- seq(0, 0.9, 0.1)
 cov        <- 0.75                     # vaccine coverage (fraction)
-qtype      <- 7                        # quantile type: default = 7
+# 
+# priorities <- c("size")
+# ocv_doses  <- c(1e6)
+# nsubset    <- 10
+# probs      <- seq(0, 0.9, 0.1)[1]
+# cov        <- 0.75   
+
+set.seed(42)
 
 plan(multisession)
 
 # helper to filter by priority + pr
-filter_by_priority <- function(dat, priority, pr, qtype = 8) {
+filter_by_priority <- function(dat, priority, pr) {
   if (priority == "size") {
-    thr <- stats::quantile(dat$size, probs = pr, na.rm = TRUE, type = qtype)
-    dat %>% filter(size > thr)
+    thr <- quantile(dat$size, probs = pr, na.rm = TRUE)
+    dat %>% filter(size >= thr)
   } else if (priority == "dur") {
-    thr <- stats::quantile(dat$duration, probs = pr, na.rm = TRUE, type = qtype)
-    dat %>% filter(duration > thr)
+    thr <- quantile(dat$duration, probs = pr, na.rm = TRUE)
+    dat %>% filter(duration >= thr)
   } else if (priority == "AR") {
-    thr <- stats::quantile(dat$ar, probs = pr, na.rm = TRUE, type = qtype)
-    dat %>% filter(ar > thr)
+    thr <- quantile(dat$ar, probs = pr, na.rm = TRUE)
+    dat %>% filter(ar >= thr)
   } else stop("Unknown priority")
 }
 
 # safe sampler (identical to yours, but minimal)
-run_one_sample <- function(dat_filtered, ocv_dose, j) {
+run_one_sample <- function(dat, ocv_dose, j) {
   set.seed(j)
   smpl <- sample_outbreaks(
-    outbreak_data     = dat_filtered,
+    outbreak_data     = dat,
     target_population = ocv_dose,
     target_count      = NULL,
     sampling_method   = "random"
   )
   tibble(
     id_outbreak = smpl$sampled_data$id_outbreak,
+    pop = smpl$sampled_data$pop,
     id_sample   = j
   )
 }
 
 for (priority in priorities) {
   for (ocv_dose in ocv_doses) {
-    DF <- map_dfr(probs, function(pr) {
-      dat_filtered <- filter_by_priority(outbk_dat, priority, pr, qtype)
+    outbreaks_sampled <- map_dfr(probs, function(pr) {
+      dat_filtered <- filter_by_priority(outbk_dat, priority, pr)
       # capacity = eligible pop * coverage (single dose assumed)
       cap <- sum(dat_filtered$pop, na.rm = TRUE) * cov
       cap_ok <- is.finite(cap) && cap > 0 && ocv_dose <= cap
@@ -1161,11 +1169,11 @@ for (priority in priorities) {
         return(tibble(
           id_outbreak      = NA_character_,
           id_sample        = NA_integer_,
-          size_prob_cutoff = pr,
+          prob             = pr,
           vacc_priority    = priority,
           ocv_dose         = ocv_dose,
           capacity         = cap,
-          coverage         = cov,
+          vacc_cov         = cov,
           sampled          = FALSE,
           reason           = ifelse(nrow(dat_filtered) == 0L,
                                     "no_outbreaks_after_filter",
@@ -1176,15 +1184,15 @@ for (priority in priorities) {
       # Run nsubset samples in parallel
       future_map_dfr(
         1:nsubset,
-        ~run_one_sample(dat_filtered, ocv_dose, .x),
+        ~ run_one_sample(dat_filtered, ocv_dose, .x),
         .options = furrr_options(seed = TRUE)
       ) %>%
         mutate(
-          size_prob_cutoff = pr,
+          prob             = pr,
           vacc_priority    = priority,
           ocv_dose         = ocv_dose,
           capacity         = cap,
-          coverage         = cov,
+          vacc_cov         = cov,
           sampled          = TRUE,
           reason           = NA_character_,
           .before = 1
@@ -1192,7 +1200,7 @@ for (priority in priorities) {
     }, .progress = TRUE)
 
     saveRDS(
-      DF,
+      outbreaks_sampled,
       paste0("outputs/subsets_", 
              round(ocv_dose/1e6), "M_", priority, "_", tstamp(), ".rds")
     )
@@ -1200,7 +1208,9 @@ for (priority in priorities) {
 }
 
 plan(sequential)
-
+# DF %>% 
+#   group_by(id_sample, prob) %>% 
+#   summarize(total_pop = sum(pop))
 ```
 
 combine datasets
@@ -1239,7 +1249,80 @@ subset_files <- c(
   "outputs/subsets_1000M_size_20251002.rds")
 
 subset_data <- map_dfr(subset_files, read_rds)
-saveRDS(subset_data, paste0("outputs/paper/subsets_proritization_", tstamp(), ".rds"))
+saveRDS(subset_data, paste0("outputs/paper/subsets_dose_proritization_", tstamp(), ".rds"))
+```
+
+
+Analysis
+```{r}
+cea_data <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
+
+subset_data <- 
+  read_rds("outputs/paper/subsets_dose_proritization_20251002.rds")
+
+# --- 2. Perform Analysis with a Single, Vectorized Operation ---
+
+# Convert input data.frames to data.tables
+setDT(subset_data)
+
+subset_dt <- subset_data %>% 
+  filter(sampled == TRUE, vacc_priority == "AR", id_sample == 1)
+
+# Perform the operations using data.table
+
+res_list <- vector('list', 200)
+
+for (i in 1:length(res_list)) {
+  
+  subset_dt <- subset_data %>% 
+    filter(sampled == TRUE, !is.na(id_sample), 
+           vacc_priority == "AR", id_sample == i)
+  
+  res_list[[i]] <- cea_data[subset_dt, on = .(id_outbreak), allow.cartesian = TRUE][
+    , .(
+      sum_pop = sum(pop),
+      sum_vacc_dose = sum(vacc_dose),
+      sum_s_ch = sum(s_ch_tot),
+      sum_s_ch_averted = sum(s_ch_averted_tot),
+      percent_case_averted = 100 * sum(s_ch_averted_tot) / sum(s_ch_tot),
+      case_averted_per_1000_OCV = 1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
+      n_outbreaks_in_subset = .N
+    ),
+    # by = .(prob, id_sample, ocv_dose, runid, vacc_week)
+    by = .(prob, id_sample, ocv_dose, runid, vacc_week)
+  ]
+}
+res1 <- rbindlist(res_list)
+
+# Ensure the result is not grouped (data.table automatically drops grouping)
+setkey(res1, NULL)
+# Ensure res1 is a data.table. This modifies res1 in place for efficiency.
+# setDT(res1)
+
+# summary across runid's and id_sample's
+res <- res1[, .(
+  pop_q500 = median(sum_pop),
+  vacc_dose_q500 = median(sum_vacc_dose),
+  s_ch_q500 = median(sum_s_ch),
+  s_ch_averted_q500 = median(sum_s_ch_averted),
+  percent_case_averted_q500 = median(percent_case_averted),
+  case_averted_per_1000_OCV_q500 = median(case_averted_per_1000_OCV, na.rm = TRUE),
+  n_outbreaks_in_subset_q500 = median(n_outbreaks_in_subset)
+  ), 
+  by = .(prob, ocv_dose, vacc_week)
+]
+
+
+# --- 3. Save the Final Output ---
+if (save_rds) {
+  saveRDS(res, paste0("outputs/cea_dose_ar_priority_", tstamp(), ".rds"))
+}
+
+# View a sample of the results
+print(res)
+res <- read_rds("outputs/cea_onset_trigger_10m_doses_size_cutoff_20250922.rds")
+res %>% filter(vacc_cov == 0.75, vacc_week %in% c(1,9), 
+               size_prob_cutoff %in% c(0,0.9))
 ```
 
 
@@ -1260,7 +1343,7 @@ cea_data <- map_dfr(cea_files, read_rds)
 # subsets_df <- readRDS("outputs/subsets_1M_size_20250922.rds")
 # subsets_df <- readRDS("outputs/subsets_10M_AR_20250922.rds")
 # subsets_df <- readRDS("outputs/subsets_10M_size_20250922.rds")
-subsets_df <- readRDS("outputs/subsets_10M_dur_20250922.rds")
+subsets_df <- readRDS("outputs/paper/subsets_10M_dur_20250922.rds")
 
 # --- 2. Perform Analysis with a Single, Vectorized Operation ---
 

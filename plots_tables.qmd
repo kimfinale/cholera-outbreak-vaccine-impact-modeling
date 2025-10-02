@@ -1440,13 +1440,29 @@ fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
   summarize_group(vars=c("rate_reduc"), group_name="> 5 weeks") %>% 
   format_median_iqr(digits=1)
 
+
+fit_decay[["9"]] %>%  # outbreaks 5 weeks or longer
+  filter(vacc_cov == VC) %>% 
+  summarize_group(vars=c("decay_rate_k"), group_name="> 9 weeks") %>% 
+  format_median_iqr(digits=3)
+
 fit_decay[["9"]] %>%  # outbreaks 5 weeks or longer
   filter(vacc_cov == VC) %>% 
   mutate(rate_reduc = 100*(1 - exp(- decay_rate_k))) %>% 
   summarize_group(vars=c("rate_reduc"), group_name="> 9 weeks") %>% 
   format_median_iqr(digits=1)
 
-fit_decay[["13"]] %>%  # outbreaks 5 weeks or longer
+fit_decay[["9"]] %>%  # outbreaks 9 weeks or longer
+  filter(vacc_cov == VC) %>% 
+  summarize_group(vars=c("half_life_weeks"), group_name="> 9 weeks") %>% 
+  format_median_iqr(digits=1)
+
+fit_decay[["9"]] %>%  # outbreaks 9 weeks or longer
+  filter(vacc_cov == VC) %>% 
+  summarize_group(vars=c("r_squared"), group_name="> 9 weeks") %>% 
+  format_median_iqr(digits=3)
+
+fit_decay[["13"]] %>%  # outbreaks 13 weeks or longer
   filter(vacc_cov == VC) %>% 
   mutate(rate_reduc = 100*(1 - exp(- decay_rate_k))) %>% 
   summarize_group(vars=c("rate_reduc"), group_name="> 13 weeks") %>% 
@@ -1794,6 +1810,15 @@ if (save_plot) {
 
 ### Right panel
 
+Summary values referred in the manuscript
+```{r}
+capd_data <- 
+  read_rds("outputs/paper/summary_case_averted_per_1000_OCV_20251001.rds")
+
+capd_data %>% 
+  filter(prob == 0.9, vacc_cov == 0.75, percentile_by == "ar", vacc_week == 1)
+```
+
 Heatmap of cases averted per 1,000 OCVs a
 
 ```{r}
@@ -1811,8 +1836,9 @@ y_annotations <- c("Prioritizing high AR outbreaks",
                    "Prioritizing longer outbreaks",
                    "Prioritizing larger outbreaks")
 
+capd_data %>% filter(vacc_cov == 0.75) %>% pull(median_value) %>% range()
 
-fill_limits <- c(0.1, 12)
+fill_limits <- c(0.1, 10)
 brks <- c(1, 2, 5, 10)
  
 p1  <- capd_data %>% 
@@ -2040,14 +2066,23 @@ if (save_plot) {
 }
 ```
 
-
 ## Figure SX
+
+Summary values 
+```{r}
+pca_data <- read_rds("outputs/paper/summary_pct_reduc_case_20251001.rds")
+pca_data %>% filter(vacc_cov == 0.75, vacc_week == 1, prob == 0.9)
+pca_data %>% filter(vacc_cov == 0.75, vacc_week == 9, prob == 0.9)
+```
 
 Heatmap of percentage cases averted 
 
 ```{r}
 # percent case averted data
 pca_data <- read_rds("outputs/paper/summary_pct_reduc_case_20251001.rds")
+
+pca_data %>% filter(vacc_cov == 0.75, vacc_week == 1, prob == 0.9)
+pca_data %>% filter(vacc_cov == 0.75, vacc_week == 9, prob == 0.9)
 
 # 1. Create the color palette function (your code was correct here)
 myPalette <- colorRampPalette(brewer.pal(9, "YlOrBr"))
@@ -2831,7 +2866,116 @@ rm(cea_subsets_by_size_q1, cea_subsets_by_size_q2,
 ## Figure 4: Cumulative OCV Impact during OCV stockpile deployment
 
 ```{r fig4, eval=FALSE}
+subset_data <- 
+  read_rds("outputs/paper/subsets_dose_proritization_20251002.rds")
 
+subset_data %>% 
+  filter(sampled == FALSE) %>% 
+  group_by(vacc_priority) %>% 
+  summarize(min_dose = min(ocv_dose), 
+            max_prob = max(prob))
+
+subset_data %>% 
+  filter(vacc_priority == "AR", id_sample == 1, prob > 0.69, prob < 0.71) %>%
+  filter(prob == 0.6) %>%
+  group_by(prob, ocv_dose) %>% 
+  summarize(capacity = first(capacity),
+            n_outbreaks = n(),
+            min_dose = min(ocv_dose), 
+            max_prob = max(prob)) -> d
+View(d)
+```
+
+
+```{r}
+subset_data %>% filter(vacc_cov == 0.75) %>% pull(median_value) %>% range()
+
+fill_limits <- c(0.1, 10)
+brks <- c(1, 2, 5, 10)
+ 
+p1  <- capd_data %>% 
+  filter(percentile_by == "ar", vacc_cov == 0.75) %>%
+  ggplot(aes(x = vacc_week, y = prob, 
+               fill = median_value)) +
+  geom_tile(color = "white", linewidth = 0.25) +
+  scale_fill_gradientn(
+    trans = scales::pseudo_log_trans(),
+    colours = myPalette(100), # Generate a smooth ramp of 100 colors
+    breaks = brks,
+    limits = fill_limits, 
+    name = "Cases Averted\nper 1,000 OCVs" # Legend title
+  ) +
+  scale_y_continuous(y_labs[1],
+    expand = c(0, 0), 
+    breaks = seq(0, 0.8, 0.2),
+    labels = c(expression(">="*P[0*"%"]),
+               expression(">="*P[20*"%"]),
+               expression(">="*P[40*"%"]),
+               expression(">="*P[60*"%"]),
+               expression(">="*P[80*"%"]))) +
+    
+  scale_x_continuous(expand = c(0, 0), breaks = seq(1, 15, 2)) +
+  annotate(
+    "segment",
+    x = 9, y = 0,
+    xend = c(9, 1), # End points for the three arrows
+    yend = c(0.9, 0),
+    arrow = arrow(length = unit(0.3, "cm")),
+    color = "black",
+    linewidth = 0.4
+  ) +
+  annotate(
+    "point",
+    x = c(9), # The four key coordinates
+    y = c(0),
+    size = 3,
+    shape = 21,
+    fill = "white",
+    color = "black",
+    stroke = 1.2
+  ) +
+  annotate(
+    "segment",
+    x = 8, y = 0.5,
+    xend = c(8, 1), # End points for the three arrows
+    yend = c(0.9, 0.5),
+    arrow = arrow(length = unit(0.3, "cm")),
+    color = "black",
+    linewidth = 0.4,
+    linetype = "dashed" # Changed to dashed lines
+  ) +
+  annotate(
+    "point",
+    x = c(8), # The four key coordinates
+    y = c(0.5),
+    size = 3,
+    shape = 21,
+    fill = "white",
+    color = "black",
+    stroke = 1.2
+  ) +
+  annotate(
+    "text",
+    x = c(9.5, 5), # x-positions for the two labels
+    y = c(0.5, 0.05), # y-positions for the two labels
+    label = c(y_annotations[1], "Reducing ORI delay"),
+    angle = c(90, 0), # Rotate the vertical label
+    color = "black",
+    # fontface = "bold",
+    size = 4,
+    hjust = 0.5
+  ) +
+  labs(
+    x = NULL,
+    y = y_labs[1]
+  ) +
+  theme_light() +
+  theme_tight() +
+  theme(
+    legend.position = "top",
+  ) + 
+  theme_x_blank()
+ 
 
 ```
 
