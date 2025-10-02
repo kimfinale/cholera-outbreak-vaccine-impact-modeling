@@ -1110,6 +1110,10 @@ outbk_dat <- outbreaks_filtered |>
     .by = id_outbreak
   )
 
+# exclude additionally where gdp is not available
+cea %>% filter(is.na(gdp)) %>% pull(id_outbreak) %>% unique() -> ids_na
+outbk_dat <- outbk_dat[!(outbk_dat$id_outbreak %in% ids_na), ]
+
 priorities <- c("size", "dur", "AR")
 ocv_doses  <- c(1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6, 500e6, 1000e6)
 nsubset    <- 200
@@ -1256,6 +1260,16 @@ saveRDS(subset_data, paste0("outputs/paper/subsets_dose_proritization_", tstamp(
 Analysis
 ```{r}
 cea_data <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
+cea_data %>% filter(vacc_week == 1, runid == 1) -> d
+d1 <- d[d$gdp > 0, ]
+length(d1$id_outbreak)
+d1[is.na(d$net_cost), ]$id_outbreak
+d2 <- d1[!complete.cases(d1),]
+unique(d2$death_tot)
+unique(d2$death_averted_tot)
+
+d2[(death_tot > 0 & death_averted_tot == 0), ]
+
 
 subset_data <- 
   read_rds("outputs/paper/subsets_dose_proritization_20251002.rds")
@@ -1271,24 +1285,34 @@ subset_dt <- subset_data %>%
 # Perform the operations using data.table
 
 res_list <- vector('list', 200)
+vacc_cov <- 0.75
 
 for (i in 1:length(res_list)) {
   
   subset_dt <- subset_data %>% 
+    select(prob, vacc_priority, ocv_dose, sampled, id_outbreak, pop, id_sample) %>% 
     filter(sampled == TRUE, !is.na(id_sample), 
            vacc_priority == "AR", id_sample == i)
   
-  res_list[[i]] <- cea_data[subset_dt, on = .(id_outbreak), allow.cartesian = TRUE][
-    , .(
+  res_list[[i]] <- 
+    cea_data[subset_dt, on = .(id_outbreak), allow.cartesian = TRUE][, .(
       sum_pop = sum(pop),
       sum_vacc_dose = sum(vacc_dose),
       sum_s_ch = sum(s_ch_tot),
       sum_s_ch_averted = sum(s_ch_averted_tot),
+      sum_death_averted = sum(death_averted_tot),
       percent_case_averted = 100 * sum(s_ch_averted_tot) / sum(s_ch_tot),
-      case_averted_per_1000_OCV = 1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
+      case_averted_per_1000_OCV = 
+        1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
+      
+      cost_per_daly_averted = sum(net_cost, na.rm=TRUE) / 
+        sum(daly_averted, na.rm=TRUE), 
+      cost_per_case_averted = sum(net_cost, na.rm=TRUE) / 
+        sum(s_ch_averted_tot, na.rm=TRUE),
+      n_outbreaks_ori = sum(ori_occurred),
       n_outbreaks_in_subset = .N
     ),
-    # by = .(prob, id_sample, ocv_dose, runid, vacc_week)
+
     by = .(prob, id_sample, ocv_dose, runid, vacc_week)
   ]
 }
@@ -1305,8 +1329,16 @@ res <- res1[, .(
   vacc_dose_q500 = median(sum_vacc_dose),
   s_ch_q500 = median(sum_s_ch),
   s_ch_averted_q500 = median(sum_s_ch_averted),
-  percent_case_averted_q500 = median(percent_case_averted),
-  case_averted_per_1000_OCV_q500 = median(case_averted_per_1000_OCV, na.rm = TRUE),
+  pca_q500 = median(percent_case_averted),
+  pca_q025 = quantile(percent_case_averted, probs=0.025),
+  pca_q975 = quantile(percent_case_averted, probs=0.975),
+  pca_q250 = quantile(percent_case_averted, probs=0.25),
+  pca_q750 = quantile(percent_case_averted, probs=0.75),
+  capd_q500 = median(case_averted_per_1000_OCV, na.rm = TRUE),
+  capd_q025 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.025),
+  capd_q975 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.975),
+  capd_q250 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.25),
+  capd_q750 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.75),
   n_outbreaks_in_subset_q500 = median(n_outbreaks_in_subset)
   ), 
   by = .(prob, ocv_dose, vacc_week)
@@ -1315,14 +1347,13 @@ res <- res1[, .(
 
 # --- 3. Save the Final Output ---
 if (save_rds) {
-  saveRDS(res, paste0("outputs/cea_dose_ar_priority_", tstamp(), ".rds"))
+  saveRDS(res, paste0("outputs/paper/cea_dose_ar_priority_", tstamp(), ".rds"))
 }
 
 # View a sample of the results
 print(res)
-res <- read_rds("outputs/cea_onset_trigger_10m_doses_size_cutoff_20250922.rds")
-res %>% filter(vacc_cov == 0.75, vacc_week %in% c(1,9), 
-               size_prob_cutoff %in% c(0,0.9))
+res <- read_rds("outputs/paper/cea_dose_ar_priority_20251002.rds")
+res %>% filter(ocv_dose == 10e6, vacc_week %in% c(1,9), prob %in% c(0.0,0.9))
 ```
 
 
