@@ -2287,16 +2287,16 @@ top_p_ids <- function(data, var, p = 0.9) {
 ids_list_ar <- map(probs, ~ top_p_ids(outbk_dat, ar, p = .x))
 ids_list_dur <- map(probs, ~ top_p_ids(outbk_dat, duration, p = .x))
 ids_list_size <- map(probs, ~ top_p_ids(outbk_dat, size, p = .x))
+ids_list_cfr <- map(probs, ~ top_p_ids(outbk_dat, cfr, p = .x))
 ```
 
 ```{r}
-# -------- configurable inputs --------
-# Metrics you want medians for (edit as needed)
+cea_files <- c(
+  "outputs/paper/cea_0.75_onset_trigger_20250919.rds"
+)
+cea <- map_dfr(cea_files, read_rds)
+cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
-
-# (Assumes you already have: probs, ids_list_ar, ids_list_dur, ids_list_size)
-
-# -------- helper: summarize medians over an ids list --------
 summarize_by_ids <- function(cea, ids_list, probs, metrics = cea_metrics,
                              id_col = "id_outbreak") {
   stopifnot(length(ids_list) == length(probs))
@@ -2352,5 +2352,36 @@ med_all_long <- med_all %>%
   )
 
 saveRDS(med_all_long, paste0("outputs/paper/summary_", cea_metrics, "_", tstamp(), ".rds"))
+
+
+cea_ori_daly <- cea_ori[!is.na(cea_ori$daly_averted), ]
+cea_ori_daly$daly_averted_per_1000_OCV <- 1000 * cea_ori_daly$daly_averted / 
+  cea_ori_daly$vacc_dose
+# cea_metrics <- c("case_averted_per_1000_OCV")  # add more if you like
+cea_metrics <- c("daly_averted_per_1000_OCV")  # add more if you like
+# -------- run for each percentile definition --------
+med_ar   <- summarize_by_ids(cea_ori_daly, ids_list_ar,   probs, metrics = cea_metrics)
+med_dur  <- summarize_by_ids(cea_ori_daly, ids_list_dur,  probs, metrics = cea_metrics)
+med_size <- summarize_by_ids(cea_ori_daly, ids_list_size, probs, metrics = cea_metrics)
+med_cfr <- summarize_by_ids(cea_ori_daly, ids_list_cfr, probs, metrics = cea_metrics)
+# Optional: label and combine into one tidy table
+med_all <- bind_rows(
+  mutate(med_ar,   percentile_by = "ar"),
+  mutate(med_dur,  percentile_by = "duration"),
+  mutate(med_size, percentile_by = "size"),
+  mutate(med_cfr, percentile_by = "cfr")
+) %>%
+  relocate(percentile_by, prob, vacc_cov, vacc_week)
+
+# -------- optional: long format (nice for plotting faceted heatmaps, etc.) --------
+med_all_long <- med_all %>%
+  pivot_longer(
+    cols = starts_with("med_"),
+    names_to = "metric",
+    values_to = "median_value"
+  )
+
+saveRDS(med_all_long, paste0("outputs/paper/summary_", cea_metrics, "_", tstamp(), ".rds"))
+
 ```
 
