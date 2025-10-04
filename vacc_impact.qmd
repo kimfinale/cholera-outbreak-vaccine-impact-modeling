@@ -2291,13 +2291,10 @@ ids_list_cfr <- map(probs, ~ top_p_ids(outbk_dat, cfr, p = .x))
 ```
 
 ```{r}
-cea_files <- c(
-  "outputs/paper/cea_0.75_onset_trigger_20250919.rds"
-)
-cea <- map_dfr(cea_files, read_rds)
+cea <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
-summarize_by_ids <- function(cea, ids_list, probs, metrics = cea_metrics,
+summarize_by_ids <- function(cea, ids_list, probs, metrics,
                              id_col = "id_outbreak") {
   stopifnot(length(ids_list) == length(probs))
 
@@ -2328,60 +2325,35 @@ summarize_by_ids <- function(cea, ids_list, probs, metrics = cea_metrics,
   })
 }
 
-# cea_metrics <- c("case_averted_per_1000_OCV")  # add more if you like
-cea_metrics <- c("pct_reduc_case")  # add more if you like
-# -------- run for each percentile definition --------
-med_ar   <- summarize_by_ids(cea_ori, ids_list_ar,   probs, metrics = cea_metrics)
-med_dur  <- summarize_by_ids(cea_ori, ids_list_dur,  probs, metrics = cea_metrics)
-med_size <- summarize_by_ids(cea_ori, ids_list_size, probs, metrics = cea_metrics)
+cea_ori$daly_averted_per_1000_OCV <- 1000 * cea_ori$daly_averted / 
+  cea_ori$vacc_dose
 
-# Optional: label and combine into one tidy table
-med_all <- bind_rows(
-  mutate(med_ar,   percentile_by = "ar"),
-  mutate(med_dur,  percentile_by = "duration"),
-  mutate(med_size, percentile_by = "size")
-) %>%
-  relocate(percentile_by, prob, vacc_cov, vacc_week)
-
-# -------- optional: long format (nice for plotting faceted heatmaps, etc.) --------
-med_all_long <- med_all %>%
-  pivot_longer(
-    cols = starts_with("med_"),
-    names_to = "metric",
-    values_to = "median_value"
-  )
-
-saveRDS(med_all_long, paste0("outputs/paper/summary_", cea_metrics, "_", tstamp(), ".rds"))
-
-
-cea_ori_daly <- cea_ori[!is.na(cea_ori$daly_averted), ]
-cea_ori_daly$daly_averted_per_1000_OCV <- 1000 * cea_ori_daly$daly_averted / 
-  cea_ori_daly$vacc_dose
-# cea_metrics <- c("case_averted_per_1000_OCV")  # add more if you like
-cea_metrics <- c("daly_averted_per_1000_OCV")  # add more if you like
-# -------- run for each percentile definition --------
-med_ar   <- summarize_by_ids(cea_ori_daly, ids_list_ar,   probs, metrics = cea_metrics)
-med_dur  <- summarize_by_ids(cea_ori_daly, ids_list_dur,  probs, metrics = cea_metrics)
-med_size <- summarize_by_ids(cea_ori_daly, ids_list_size, probs, metrics = cea_metrics)
-med_cfr <- summarize_by_ids(cea_ori_daly, ids_list_cfr, probs, metrics = cea_metrics)
+cea_metrics <- c("s_ch_averted_tot", "pct_reduc_case",
+                 "case_averted_per_1000_OCV", "daly_averted_per_1000_OCV")  # add 
+med_ar   <- summarize_by_ids(cea_ori, ids_list_ar, probs, 
+                             metrics = cea_metrics)
+med_dur  <- summarize_by_ids(cea_ori, ids_list_dur, probs, 
+                             metrics = cea_metrics)
+med_size <- summarize_by_ids(cea_ori, ids_list_size, probs, 
+                             metrics = cea_metrics)
+med_cfr <- summarize_by_ids(cea_ori, ids_list_cfr, probs, 
+                            metrics = cea_metrics)
 # Optional: label and combine into one tidy table
 med_all <- bind_rows(
   mutate(med_ar,   percentile_by = "ar"),
   mutate(med_dur,  percentile_by = "duration"),
   mutate(med_size, percentile_by = "size"),
-  mutate(med_cfr, percentile_by = "cfr")
-) %>%
+  mutate(med_cfr, percentile_by = "cfr")) %>%
   relocate(percentile_by, prob, vacc_cov, vacc_week)
 
-# -------- optional: long format (nice for plotting faceted heatmaps, etc.) --------
 med_all_long <- med_all %>%
   pivot_longer(
     cols = starts_with("med_"),
     names_to = "metric",
-    values_to = "median_value"
-  )
+    values_to = "median_value")
 
-saveRDS(med_all_long, paste0("outputs/paper/summary_", cea_metrics, "_", tstamp(), ".rds"))
-
+saveRDS(med_all_long, 
+        paste0("outputs/paper/summary_impact_delay_prioritization_", 
+               tstamp(), ".rds"))
 ```
 
