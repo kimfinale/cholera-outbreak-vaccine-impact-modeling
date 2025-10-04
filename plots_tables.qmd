@@ -2066,6 +2066,127 @@ if (save_plot) {
 }
 ```
 
+## Figure 3.1
+
+
+```{r}
+# Outbreak onset-triggered vaccination results
+cea_75 <- 
+  read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
+cea_75_ori <- cea_75 %>% filter(ori_occurred == TRUE)
+
+cea_75_ori %>% 
+  filter(vacc_week == 9) %>% 
+  group_by(id_outbreak) %>% 
+  summarize(
+    pop = first(pop),
+    s_ch_averted_tot          = median(s_ch_averted_tot),
+    pct_reduc_case            = median(pct_reduc_case),
+    case_averted_per_1000_OCV = median(case_averted_per_1000_OCV),
+    cost_per_case_averted     = median(cost_per_case_averted),
+    cost_per_daly_averted     = median(cost_per_daly_averted)
+  ) -> summary_id
+
+dat <- left_join(summary_id, outbreaks_filtered, by="id_outbreak")     
+
+dat[dat$spatial_scale == "admin3 composite",]$spatial_scale <- "admin3"
+dat[dat$spatial_scale == "admin2 composite",]$spatial_scale <- "admin2"
+dat[dat$spatial_scale == "admin1 composite",]$spatial_scale <- "admin1"
+
+myPalette <- colorRampPalette(brewer.pal(9, "YlOrBr"))
+
+dat %>% 
+  ggplot(aes(outbreak_pop, pct_reduc_case, 
+             fill=ar_per_10e3, shape=spatial_scale)) +
+  geom_point()+
+  scale_fill_gradientn(
+    trans = scales::pseudo_log_trans(),
+    colours = myPalette(100), # Generate a smooth ramp of 100 colors
+    name = "Attack rate per 10,000" # Legend title
+  )+
+  scale_x_log10()+
+  theme_light()+
+  theme_tight()
+
+range(dat$case_averted_per_1000_OCV)
+
+myPalette <- colorRampPalette(RColorBrewer::brewer.pal(9, "YlOrBr"))
+
+dat %>% 
+  ggplot(aes(outbreak_pop, case_averted_per_1000_OCV,
+             fill = ar_per_10e3, shape = spatial_scale)) +
+  geom_point(size = 3.2, color = "grey20", stroke = 0.3) +  # color=outline; stroke=outline width
+  scale_shape_manual("", 
+                     values = c(admin1 = 21, admin2 = 22, admin3 = 24), 
+                     labels = c("adm 1", "adm 2", "adm 3")) + 
+  scale_fill_gradientn(
+    trans = scales::pseudo_log_trans(),
+    colours = myPalette(100),
+    breaks = c(1,5,10,50),
+    name = "Attack rate per 10,000"
+  ) +
+  scale_x_log10() +
+  scale_y_log10(limits=c(1e-3,25)) +
+  geom_smooth(
+    method = "lm",
+    formula = y ~ log10(x),
+    color = "black",
+    linetype = "dashed",
+    se = TRUE # set FALSE if you don't want the ribbon
+  )+
+  guides(
+    shape = guide_legend(override.aes = list(fill = "white")), # nicer shape legend
+    fill  = guide_colorbar(title.position = "top")
+  ) +
+  labs(x="Population size", y="Case averted per 1,000 OCVs")+
+  theme_light() +
+  theme_tight()
+
+dat %>% 
+  ggplot(aes(outbreak_pop, pct_reduc_case,
+             fill = duration_weeks, shape = spatial_scale)) +
+  geom_point(size = 2.8, color = "grey20", stroke = 0.3) +  # color=outline; stroke=outline width
+  scale_shape_manual(values = c(admin1 = 21, admin2 = 22,
+                                admin3 = 24)) + 
+  scale_fill_gradientn(
+    trans = scales::pseudo_log_trans(),
+    colours = myPalette(100),
+    # breaks = c(1,5,10,50),
+    name = "Duration (weeks)"
+  ) +
+  scale_x_log10() +
+  scale_y_log10() +
+  guides(
+    shape = guide_legend(override.aes = list(fill = "white")), # nicer shape legend
+    fill  = guide_colorbar(title.position = "top")
+  ) +
+  theme_light() +
+  theme_tight()
+
+dat %>% 
+  ggplot(aes(outbreak_pop, pct_reduc_case,
+             fill = total_s_ch, shape = spatial_scale)) +
+  geom_point(size = 2.8, color = "grey20", stroke = 0.3) +  # color=outline; stroke=outline width
+  scale_shape_manual(values = c(admin1 = 21, admin2 = 22,
+                                admin3 = 24)) + 
+  scale_fill_gradientn(
+    trans = scales::pseudo_log_trans(),
+    colours = myPalette(100),
+    breaks = c(10,100,1000,10000),
+    name = "Total cases"
+  ) +
+  scale_x_log10() +
+  scale_y_log10() +
+  guides(
+    shape = guide_legend(override.aes = list(fill = "white")), # nicer shape legend
+    fill  = guide_colorbar(title.position = "top")
+  ) +
+  theme_light() +
+  theme_tight()
+
+```
+
+
 ## Figure SX
 
 Summary values 
