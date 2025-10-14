@@ -47,7 +47,6 @@ summary(ds824$population)
 unique(ds824[ds824$population > 3e6,]$ID_outbreak)
 ```
    
-
 Create the weekly incidence of all outbreaks by date and epidemic week
 
 ```{r}
@@ -170,7 +169,6 @@ fwrite(ts113_wk, paste0("outputs/ts113_week_",tstamp(),".csv"))
 ```
    
 
-   
 Combine vaccine impact 
 ```{r}
 vacc_cov <- 1:9
@@ -275,7 +273,6 @@ data.table::fwrite(pop_by_age,
                    paste0("outputs/wpp_pop_by_age_", tstamp(), ".csv"))
 ```
  
-  
 ## Indirect vaccine efficacy (IVE)
 
 IVE data come from a Bayesian beta regression fit
@@ -297,5 +294,19 @@ saveRDS(ive_yhat_yrep, paste0("outputs/ive_yhat_yrep_", tstamp(), ".rds"))
 #         ive_yrep$yrep[sample(1:nrow(ive_yrep$yrep),1), ], col="grey90")
 #   invisible(readline(prompt="Press [enter] to continue"))
 # }
+```
+
+## Global stockpile deployment data
+
+Data were manually extracted from the dashboard.
+```{r}
+ocv_use <- clean_names(fread("data/paper/OCV_Use_GTFCC_Dashboard.csv"))
+ocv_use |> 
+  filter(shipped == "Shipped", type == "Reactive") |> 
+  group_by(year) |> 
+  summarize(num_ocv = sum(dose)) |>
+  setDT() -> ocv_year
+
+ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
 ```
 
