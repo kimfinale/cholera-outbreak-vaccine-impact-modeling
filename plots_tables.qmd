@@ -3979,6 +3979,40 @@ rm(cea_subsets_by_size_q1, cea_subsets_by_size_q2,
 
 ## Figure 4: Cumulative OCV Impact during OCV stockpile deployment
 
+```{r}
+priority <- "AR"
+cea_subsets <- read_rds(paste0("outputs/cea_subsets_", priority, 
+                               "_onset_trigger_20251015.rds"))
+
+
+ocv_use <- clean_names(fread("data/paper/OCV_Use_GTFCC_Dashboard.csv"))
+ocv_use |> 
+  filter(shipped == "Shipped", type == "Reactive") |> 
+  group_by(year) |> 
+  summarize(num_ocv = sum(dose)) |>
+  setDT() -> ocv_year
+
+ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
+
+
+ocv_use2 <- clean_names(fread("outputs/paper/ocv_use_GTFCC_data_20241120.csv"))
+ocv_use2 %>% 
+  mutate(year_r1 = data.table::year(date_delivery_round_one)) %>% 
+  group_by(year_r1) %>% 
+  summarize(dose_r1 = sum(dose_delivered_round_one, na.rm=T)) -> ocv_year2
+
+ocv_year2$cum_dose_r1 <- cumsum(ocv_year2$dose_r1)
+
+
+
+```
+
+Total number of cases averted
+```{r}
+quantiles are 
+```
+
+
 ```{r fig4, eval=FALSE}
 subset_data <- 
   read_rds("outputs/paper/subsets_dose_proritization_20251002.rds")
