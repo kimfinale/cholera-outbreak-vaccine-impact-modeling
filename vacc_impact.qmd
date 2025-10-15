@@ -1881,21 +1881,96 @@ for (cutoff in ar_cutoffs) {
 ## Analysis of outbreaks
 
 ```{r}
-subsets <- read_rds("outputs/subsets_100K_AR_20251015.rds")
+# subsets <- read_rds("outputs/subsets_100K_AR_20251015.rds")
+subsets <- read_rds("outputs/subsets_100K_size_20251015.rds")
 cea <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
 
 id <- 1
 setDT(subsets)
 d <- subsets[prob == 0.0 & id_sample == id]
     
-dat <- cea[id_outbreak %in% d$id_outbreak]
+cea_sub <- cea[id_outbreak %in% d$id_outbreak]
     
     # Sum impact across outbreaks
-    datall <- sum_over_outbreaks_by_runid(dat, ori_occurred = T)
+datall <- sum_over_outbreaks_by_runid(cea_sub, ori_occurred = T)
     
-    # Tag with subset metadata
-    datall$subset_id <- df$subset_id[i]
-    datall$year_max <- df$year_max[i]
+ocv_doses <- c(1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6)
+priorities <- c("AR", "dur", "size")
+# fn <- paste0("outputs/subsets_", 
+#              round(ocv_dose/1e6), "M_", priority, "_20251015.rds")
+# if (ocv_dose < 1e6) {
+#    fn <- paste0("outputs/subsets_", 
+#                 round(ocv_dose/1e3), "K_", priority, "_20251015.rds")
+# }
+
+
+
+  # Initialize results lists
+
+subset_list <- vector('list', length(priorities) * length(ocv_doses))
+i <- 1
+for (priority in priorities) {
+  for (ocv_dose in ocv_doses) {
+    # filename
+    fn <- paste0("outputs/subsets_", 
+               round(ocv_dose/1e6), "M_", priority, "_20251015.rds")
+    if (ocv_dose < 1e6) {
+       fn <- paste0("outputs/subsets_", 
+                    round(ocv_dose/1e3), "K_", priority, "_20251015.rds")
+    }
+    
+    subset_list[[i]] <- readRDS(fn)
+    i <- i + 1
+  }
+}
+subsets <- rbindlist(subset_list)
+setDT(subsets)
+
+
+# ids <- 1:200
+
+probs <- seq(0, 1, 0.1)
+
+subsets_cea_list <- vector("list", 
+                           length(priorities) * length(ocv_doses) * 
+                             length(probs) * length(unique(subsets$id_sample)))  
+i <- 1
+
+for (priority in priorities) {
+  i <- 1
+  subsets_cea_list <- vector("list", length(ocv_doses) * 
+                             length(probs) * length(unique(subsets$id_sample)))  
+  
+  for (dose in ocv_doses) {
+    for (pr in probs) {
+      for (id in unique(subsets$id_sample)) {
+        # Get outbreaks in this subset up to specified year
+        sub <- subsets[(id_sample == id & prob == pr & 
+                          vacc_priority == priority & ocv_dose == dose)]
+      
+        # Extract impact results for these outbreaks
+        cea_sub <- cea[id_outbreak %in% sub$id_outbreak]
+ 
+        # Sum impact across outbreaks
+        cea_sub_sum <- sum_over_outbreaks_by_runid(dat, ori_occurred = T)
+      
+        # Tag with subset metadata
+        cea_sub_sum$subset_id <- id
+        cea_sub_sum$vacc_priority <- priority
+        cea_sub_sum$priority_prob <- pr
+        cea_sub_sum$target_vacc_doses <- dose
+      
+        # Store results
+        subsets_cea_list[[i]] <- cea_sub_sum
+        i <- i + 1 
+      }
+    }
+  }
+  subsets_cea_priority <- rbindlist(subsets_cea_list)
+  saveRDS(subsets_cea_priority, 
+          paste0("outputs/cea_subsets_", priority, "_onset_trigger_",
+                         tstamp(), ".rds"))
+}
 ```
 
 
