@@ -22,3 +22,4 @@ data/**
 !data/paper/*/
 !data/registry.csv
 !data/README.md
+.Rhistory
