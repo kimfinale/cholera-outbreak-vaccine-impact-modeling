@@ -369,7 +369,7 @@ This section models vaccination initiated at specific weeks after outbreak onset
 ```{r onset-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
 # dat <- outbreak_data %>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak) 
-
+read_rds("outputs/outbreaks_excluded_20250612dd.rds")
 # sensitivity analyses 
 outbreaks_excl <- read_rds("outputs/outbreaks_excluded_20250612.rds")
 dat <- outbreak_data_all %>% filter(id_outbreak %in% outbreaks_excl$id_outbreak) 
@@ -1152,13 +1152,13 @@ filter_by_priority <- function(dat, priority, pr) {
 }
 
 # safe sampler (identical to yours, but minimal)
-run_one_sample <- function(dat, ocv_dose, j) {
+run_one_sample <- function(dat, ocv_dose, cov, j) {
   set.seed(j)
   smpl <- sample_outbreaks(
-    outbreak_data     = dat,
-    target_population = ocv_dose,
-    target_count      = NULL,
-    sampling_method   = "random"
+    outbreak_data         = dat,
+    target_ocv_doses      = ocv_dose,
+    target_coverage       = cov,
+    target_outbreak_count = NULL
   )
   tibble(
     id_outbreak = smpl$sampled_data$id_outbreak,
@@ -1171,38 +1171,33 @@ for (priority in priorities) {
   for (ocv_dose in ocv_doses) {
     outbreaks_sampled <- map_dfr(probs, function(pr) {
       dat_filtered <- filter_by_priority(outbk_dat, priority, pr)
-      # capacity = eligible pop * coverage (single dose assumed)
-      cap <- sum(dat_filtered$pop, na.rm = TRUE) * cov
-      cap_ok <- is.finite(cap) && cap > 0 && ocv_dose <= cap
-
-      if (!cap_ok) {
-        # Skip sampling; return a single status row (no per-replicate noise)
-        return(tibble(
-          id_outbreak      = NA_character_,
-          id_sample        = NA_integer_,
-          prob             = pr,
-          vacc_priority    = priority,
-          ocv_dose         = ocv_dose,
-          capacity         = cap,
-          vacc_cov         = cov,
-          sampled          = FALSE,
-          reason           = ifelse(nrow(dat_filtered) == 0L,
-                                    "no_outbreaks_after_filter",
-                                    "dose_exceeds_capacity")
-        ))
-      }
+      # if (!cap_ok) {
+      #   # Skip sampling; return a single status row (no per-replicate noise)
+      #   return(tibble(
+      #     id_outbreak      = NA_character_,
+      #     id_sample        = NA_integer_,
+      #     prob             = pr,
+      #     vacc_priority    = priority,
+      #     ocv_dose         = ocv_dose,
+      #     capacity         = cap,
+      #     vacc_cov         = cov,
+      #     sampled          = FALSE,
+      #     reason           = ifelse(nrow(dat_filtered) == 0L,
+      #                               "no_outbreaks_after_filter",
+      #                               "dose_exceeds_capacity")
+      #   ))
+      # }
 
       # Run nsubset samples in parallel
       future_map_dfr(
         1:nsubset,
-        ~ run_one_sample(dat_filtered, ocv_dose, .x),
+        ~ run_one_sample(dat_filtered, ocv_dose, cov, .x),
         .options = furrr_options(seed = TRUE)
       ) %>%
         mutate(
           prob             = pr,
           vacc_priority    = priority,
           ocv_dose         = ocv_dose,
-          capacity         = cap,
           vacc_cov         = cov,
           sampled          = TRUE,
           reason           = NA_character_,
@@ -1883,6 +1878,27 @@ for (cutoff in ar_cutoffs) {
 }
 ```
 
+## Analysis of outbreaks
+
+```{r}
+subsets <- read_rds("outputs/subsets_100K_AR_20251015.rds")
+cea <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
+
+id <- 1
+setDT(subsets)
+d <- subsets[prob == 0.0 & id_sample == id]
+    
+dat <- cea[id_outbreak %in% d$id_outbreak]
+    
+    # Sum impact across outbreaks
+    datall <- sum_over_outbreaks_by_runid(dat, ori_occurred = T)
+    
+    # Tag with subset metadata
+    datall$subset_id <- df$subset_id[i]
+    datall$year_max <- df$year_max[i]
+```
+
+
 ## Analyis of outbreaks onset-triggered vaccination on subsets
 
 ```{r subset-time-trigger}
@@ -1931,7 +1947,6 @@ for (pr in probs) {
                        tstamp(), ".rds"))
 }
 ```
-
 
 ## Analaysis of subsets by AR cutoffs
 

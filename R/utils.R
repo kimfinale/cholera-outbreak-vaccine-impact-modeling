@@ -732,270 +732,132 @@ add_cea_results_all_outbreaks <- function(svim) {
     )
 }
 
+
+
 #==============================================================================
-# SECTION 9: OUTBREAK SAMPLING FUNCTIONS
+# Random-only outbreak sampler with dose budgeting
 #==============================================================================
 
-#' Sample Outbreaks to Meet Target Population or Target Count
+#' Randomly sample outbreaks under an OCV dose budget and/or a count target
 #'
-#' Selects outbreaks using various sampling methods until reaching either a target
-#' population size or a target number of outbreaks
+#' At each draw, only outbreaks with population <= (remaining ocv doses / target_coverage)
+#' are eligible. Selected outbreaks consume `target_coverage * pop` doses.
 #'
-#' @param outbreak_data Data frame with outbreak information
-#' @param target_population Target population size to reach (optional if target_count is provided)
-#' @param target_count Target number of outbreaks to sample (optional if target_population is provided)
-#' @param sampling_method Method for sampling ("random", "attack_rate", "duration", or "cases")
-#' @param seed Random seed for reproducibility
-#' @param max_attempts Maximum number of sampling attempts
-#' @return List with sampling results
+#' @param outbreak_data Data frame; must include column `pop` (numeric, outbreak population)
+#' @param target_outbreak_count Integer >=1 or NULL; number of outbreaks to select (optional)
+#' @param target_ocv_doses Numeric >0 or NULL; total ocv doses available (optional)
+#' @param target_coverage Numeric in (0,1]; assumed coverage applied to every selected outbreak
+#' @param seed Integer or NULL; random seed for reproducibility
+#' @param max_attempts Integer; safety cap on iterations
+#'
+#' @return List with sampled_data, indices, dose bookkeeping, and stopping_criterion
 sample_outbreaks <- function(outbreak_data,
-                             target_population = NULL,
-                             target_count = NULL,
-                             sampling_method = c("random", "attack_rate", "duration", "cases"),
+                             target_outbreak_count = NULL,
+                             target_ocv_doses = NULL,
+                             target_coverage = 1,
                              seed = NULL,
                              max_attempts = 1000) {
 
-  # Input validation
-  sampling_method <- match.arg(sampling_method)
+  # ---- Checks ----
+  if (!"pop" %in% names(outbreak_data))
+    stop("`outbreak_data` must contain a numeric `pop` column.")
+  if (!is.numeric(outbreak_data$pop) || any(outbreak_data$pop < 0, na.rm = TRUE))
+    stop("`pop` must be non-negative numeric.")
+  if (is.null(target_outbreak_count) && is.null(target_ocv_doses))
+    stop("Specify at least one of `target_outbreak_count` or `target_ocv_doses`.")
+  if (!is.null(target_outbreak_count) && (!is.finite(target_outbreak_count) || target_outbreak_count <= 0))
+    stop("`target_outbreak_count` must be a positive integer or NULL.")
+  if (!is.null(target_ocv_doses) && (!is.finite(target_ocv_doses) || target_ocv_doses <= 0))
+    stop("`target_ocv_doses` must be a positive number or NULL.")
+  if (!is.numeric(target_coverage) || target_coverage <= 0 || target_coverage > 1)
+    stop("`target_coverage` must be in (0, 1].")
   if (!is.null(seed)) set.seed(seed)
 
-  # Check that at least one target is specified
-  if (is.null(target_population) && is.null(target_count)) {
-    stop("At least one of target_population or target_count must be specified")
-  }
+  # Defaults
+  if (is.null(target_outbreak_count)) target_outbreak_count <- Inf
+  dose_mode <- !is.null(target_ocv_doses)
+  doses_remaining <- if (dose_mode) target_ocv_doses else Inf
+  doses_used <- 0
 
-  # Set default values if one target is missing
-  if (is.null(target_population)) target_population <- Inf
-  if (is.null(target_count)) target_count <- Inf
-
-  # Required columns check
-  required_cols <- NULL
-  if (sampling_method != "random") {
-    required_cols <- sampling_method
-  }
-
-  missing_cols <- setdiff(required_cols, names(outbreak_data))
-  if (length(missing_cols) > 0) {
-    stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
-  }
-
-  # Define sampling weights based on method
-  weights <- switch(sampling_method,
-                    random = rep(1, nrow(outbreak_data)), # uniform random
-                    attack_rate = outbreak_data$attack_rate,
-                    duration = outbreak_data$duration,
-                    cases = outbreak_data$cases)
-
-  # Normalize weights
-  weights <- weights / sum(weights)
-
-  # Initialize variables
+  # ---- State ----
+  n <- nrow(outbreak_data)
+  available_indices <- seq_len(n)
   sampled_indices <- integer(0)
-  current_population <- 0
-  current_count <- 0
-  attempts <- 0
-  available_indices <- 1:nrow(outbreak_data)
+  k <- 0L
+  attempts <- 0L
 
-  # Sample outbreaks until target population or count is reached
-  while ((current_population < target_population && current_count < target_count) &&
-         length(available_indices) > 0 && attempts < max_attempts) {
+  # ---- Helper: eligible indices given remaining doses ----
+  eligible_pool <- function() {
+    idx <- available_indices
+    if (dose_mode) {
+      if (doses_remaining <= 0) return(integer(0))
+      max_pop <- floor(doses_remaining / target_coverage)
+      idx <- idx[outbreak_data$pop[idx] <= max_pop]
+    }
+    idx
+  }
 
-    # Sample one outbreak at a time
-    new_index <- sample(available_indices,
-                        size = 1,
-                        prob = weights[available_indices])
+  # ---- Loop ----
+  while (k < target_outbreak_count &&
+         length(available_indices) > 0 &&
+         attempts < max_attempts) {
 
-    # Calculate new total population if we add this outbreak
-    potential_population <- current_population + outbreak_data$pop[new_index]
-    potential_count <- current_count + 1
+    candidates <- eligible_pool()
+    if (length(candidates) == 0) break
 
-    # Check if adding this outbreak would exceed target population
-    if (potential_population <= target_population || potential_count <= target_count) {
-      # Add outbreak if either condition is met
-      sampled_indices <- c(sampled_indices, new_index)
-      current_population <- potential_population
-      current_count <- potential_count
+    # Uniform random among eligible
+    pick <- if (length(candidates) == 1) candidates else sample(candidates, 1L)
 
-      # Check if we've reached either target
-      if (current_population >= target_population || current_count >= target_count) {
+    # Dose accounting (should always fit because of eligibility filter)
+    needed <- target_coverage * outbreak_data$pop[pick]
+    if (!dose_mode || needed <= doses_remaining) { # it's redundant but keep it for now
+      sampled_indices <- c(sampled_indices, pick)
+      k <- k + 1L
+      if (dose_mode) {
+        doses_remaining <- doses_remaining - needed
+        doses_used <- doses_used + needed
+      }
+      # stop if targets met
+      if (k >= target_outbreak_count || (dose_mode && doses_remaining <= 0)) {
+        available_indices <- setdiff(available_indices, pick)
         break
       }
-
-    } else {
-      # Try to find a smaller outbreak that fits within population target
-      possible_indices <-
-        available_indices[outbreak_data$pop[available_indices] <=
-                            (target_population - current_population)]
-
-      if (length(possible_indices) == 0) {
-        break  # No more outbreaks can be added without exceeding target
-      }
-
-      weights_subset <- weights[possible_indices]
-      weights_subset <- weights_subset / sum(weights_subset)
-
-      new_index <- if (length(possible_indices) == 1) {
-        possible_indices
-      } else {
-        sample(possible_indices, size = 1, prob = weights_subset)
-      }
-
-      sampled_indices <- c(sampled_indices, new_index)
-      current_population <- current_population + outbreak_data$pop[new_index]
-      current_count <- current_count + 1
     }
 
-    # Remove selected outbreak from available pool
-    available_indices <- setdiff(available_indices, new_index)
-    weights[new_index] <- 0  # Prevent resampling
-
-    if (length(available_indices) > 0) {
-      weights <- weights / sum(weights)  # Renormalize weights
-    }
-
-    attempts <- attempts + 1
+    # Remove picked index (no replacement)
+    available_indices <- setdiff(available_indices, pick)
+    attempts <- attempts + 1L
   }
 
-  if (length(sampled_indices) == 0) {
-    stop("Could not sample any outbreaks within the constraints")
-  }
+  if (length(sampled_indices) == 0)
+    stop("No outbreaks could be sampled within the constraints. Check doses/coverage or data.")
 
-  # Determine success criteria
-  population_success <- is.infinite(target_population) || current_population > 0
-  count_success <- is.infinite(target_count) || current_count > 0
-
-  # Return results
-  return(list(
-    sampled_data = outbreak_data[sampled_indices, ],
-    sampling_method = sampling_method,
-    total_population = current_population,
-    target_population = if(is.infinite(target_population)) NULL else target_population,
-    population_difference = if(is.infinite(target_population)) NULL else target_population - current_population,
-    outbreak_count = current_count,
-    target_count = if(is.infinite(target_count)) NULL else target_count,
-    n_samples = length(sampled_indices),
-    success = population_success && count_success,
-    stopping_criterion = if(current_count >= target_count && !is.infinite(target_count))
-      "target_count"
-    else if(current_population >= target_population && !is.infinite(target_population))
-      "target_population"
-    else "max_attempts"
-  ))
-}
-
-
-
-#' Sample Outbreaks to Meet Target Population or Target Count
-#'
-#' Selects outbreaks using various sampling methods until reaching either a target
-#' population size or a target number of outbreaks. This vectorized version is
-#' significantly faster than an iterative approach.
-#'
-#' @param outbreak_data A data frame with outbreak information. Must contain a 'pop'
-#'   column for population size, and columns corresponding to the sampling method
-#'   (e.g., 'attack_rate', 'duration', 'cases') if not "random".
-#' @param target_population Numeric. The target cumulative population size for the sample.
-#'   Sampling stops once this target is met or exceeded. Optional if `target_count` is set.
-#' @param target_count Integer. The target number of outbreaks to sample. Optional if
-#'   `target_population` is set.
-#' @param sampling_method Character. The method for sampling. Must be one of
-#'   "random" (uniform weights), "attack_rate", "duration", or "cases" (weighted).
-#' @param seed Integer. A random seed for reproducibility.
-#' @param max_attempts Deprecated in this version as the vectorized approach
-#'   is deterministic in its selection process after the initial shuffle, but the
-#'   argument is kept for backward compatibility.
-#' @return A list containing the sampled data (`sampled_data`), summary statistics
-#'   (e.g., `total_population`, `outbreak_count`), and metadata about the sampling process.
-sample_outbreaks <- function(outbreak_data,
-                             target_population = NULL,
-                             target_count = NULL,
-                             sampling_method = c("random", "attack_rate", "duration", "cases"),
-                             seed = NULL,
-                             max_attempts = 1000) { # Kept for compatibility
-
-  # --- 1. Input Validation and Setup ---
-  sampling_method <- match.arg(sampling_method)
-  if (!is.null(seed)) set.seed(seed)
-
-  if (is.null(target_population) && is.null(target_count)) {
-    stop("At least one of target_population or target_count must be specified.")
-  }
-  if (nrow(outbreak_data) == 0) {
-    stop("Input 'outbreak_data' has 0 rows and cannot be sampled.")
-  }
-
-  # Use Inf as a placeholder for unspecified targets to simplify logic
-  target_population <- target_population %||% Inf
-  target_count <- target_count %||% Inf
-
-  # Define sampling weights based on the method
-  weights <- switch(
-    sampling_method,
-    random      = rep(1, nrow(outbreak_data)),
-    attack_rate = outbreak_data$ar,    # Assuming 'ar' is the column name
-    duration    = outbreak_data$duration,
-    cases       = outbreak_data$size,  # Assuming 'size' is the column name
-    stop("Invalid sampling_method. This should not happen due to match.arg.")
-  )
-
-  if (any(is.na(weights)) || any(weights < 0)) {
-    stop("Weights must be non-negative and non-missing.")
-  }
-
-  # --- 2. Vectorized Sampling Logic ---
-  n_outbreaks <- nrow(outbreak_data)
-
-  # Create a fully shuffled sequence of outbreak indices based on weights
-  # We sample all outbreaks without replacement to get a prioritized order
-  shuffled_indices <- sample.int(n_outbreaks, size = n_outbreaks, prob = weights)
-
-  # Reorder the populations according to the shuffled sequence
-  shuffled_pops <- outbreak_data$pop[shuffled_indices]
-
-  # Find the stopping point for each criterion
-  # a) For population: first index where cumulative sum meets the target
-  stop_idx_pop <- which(cumsum(shuffled_pops) >= target_population)[1] %||% Inf
-
-  # b) For count: the target count itself is the index
-  stop_idx_count <- target_count
-
-  # The final stopping point is the *first* of these two targets to be met
-  final_stop_idx <- min(stop_idx_pop, stop_idx_count, n_outbreaks)
-
-  if (final_stop_idx == 0) {
-    stop("Could not sample any outbreaks. Check targets and data.")
-  }
-
-  # The final set of sampled indices is the start of the shuffled sequence
-  sampled_indices <- shuffled_indices[1:final_stop_idx]
-
-  # --- 3. Prepare and Return Results ---
-  sampled_data <- outbreak_data[sampled_indices, ]
-  current_population <- sum(sampled_data$pop)
-  current_count <- nrow(sampled_data)
-
-  # Determine the reason for stopping
-  stopping_criterion <- if (current_count >= target_count && !is.infinite(target_count)) {
-    "target_count"
-  } else if (current_population >= target_population && !is.infinite(target_population)) {
-    "target_population"
+  stopping_criterion <- if (k >= target_outbreak_count) {
+    "target_outbreak_count"
+  } else if (dose_mode && doses_remaining <= 0) {
+    "target_ocv_doses"
+  } else if (attempts >= max_attempts) {
+    "max_attempts"
   } else {
-    "all_available_data_sampled"
+    "no_more_eligible"
   }
 
   list(
-    sampled_data = sampled_data,
-    sampling_method = sampling_method,
-    total_population = current_population,
-    target_population = if(is.infinite(target_population)) NULL else target_population,
-    population_difference = if(is.infinite(target_population)) NULL else target_population - current_population,
-    outbreak_count = current_count,
-    target_count = if(is.infinite(target_count)) NULL else target_count,
-    n_samples = current_count,
-    success = current_count > 0,
-    stopping_criterion = stopping_criterion
+    sampled_data        = outbreak_data[sampled_indices, , drop = FALSE],
+    sampled_indices     = sampled_indices,
+    outbreak_count      = k,
+    target_outbreak_count = if (is.infinite(target_outbreak_count)) NULL else target_outbreak_count,
+    target_ocv_doses    = if (dose_mode) target_ocv_doses else NULL,
+    target_coverage     = target_coverage,
+    doses_used          = if (dose_mode) doses_used else NULL,
+    doses_remaining     = if (dose_mode) doses_remaining else NULL,
+    n_samples           = length(sampled_indices),
+    success             = k > 0,
+    stopping_criterion  = stopping_criterion
   )
 }
+
+
 
 # Helper function for concise NULL replacement (available in rlang `||`)
 `%||%` <- function(a, b) if (is.null(a)) b else a
