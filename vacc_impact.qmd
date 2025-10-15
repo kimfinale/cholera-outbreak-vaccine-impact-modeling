@@ -1097,6 +1097,12 @@ plan(sequential)
 ## Create Outbreak Subsets: sample until the target number of OCV doses is reached.
 
 ```{r}
+# Outbreak onset-triggered vaccination results
+cea_files <- 
+  c("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
+
+cea <- map_dfr(cea_files, read_rds)
+
 outbk_dat <- outbreaks_filtered |>
   summarize(
     year = first(data.table::year(start_date)),
@@ -1203,11 +1209,14 @@ for (priority in priorities) {
         )
     }, .progress = TRUE)
 
-    saveRDS(
-      outbreaks_sampled,
-      paste0("outputs/subsets_", 
+    nm <- paste0("outputs/subsets_", 
              round(ocv_dose/1e6), "M_", priority, "_", tstamp(), ".rds")
-    )
+    
+    if (ocv_dose < 1e6) {
+       nm <- paste0("outputs/subsets_", 
+             round(ocv_dose/1e3), "K_", priority, "_", tstamp(), ".rds")
+    }
+    saveRDS(outbreaks_sampled, nm)
   }
 }
 
