@@ -2823,3 +2823,84 @@ match_ocv_to_outbreaks <- function(ocv_deployments, outbreak_populations,
     )
   ))
 }
+
+
+
+
+#' Build grouped summary statistics (mean, n, and quantiles) for one or more value columns
+#'
+#' @description
+#' For each column in `value_col`, compute group-wise summary statistics:
+#' the mean, non-missing count `n`, and a set of quantiles (given by `probs`).
+#' Returns one tidy data frame with one row per group and value column.
+#'
+#' @param data A data frame (or data.table/tibble coercible to tibble).
+#' @param value_col A single column name (string or unquoted tidyselect) or
+#'   a character vector of column names indicating the variables to summarize.
+#' @param by A character vector of grouping column names (defaults to c("vacc_cov","vacc_week")).
+#' @param probs Numeric vector of probabilities in [0,1] passed to `stats::quantile()`.
+#'   Defaults to c(0.025, 0.25, 0.5, 0.75, 0.975).
+#' @param round_digits Integer; number of decimal places to round summary stats to (default 3).
+#'
+#' @returns A tibble with columns:
+#' - `value_column`: the name of the summarized variable,
+#' - grouping columns specified in `by`,
+#' - `mean`, `n`,
+#' - one column per requested quantile, named like `q025`, `q250`, `q500`, ...
+#'
+#' @details
+#' - Uses `tibble::as_tibble()` first to avoid data.table masking/SE issues.
+#' - Quantiles are computed once per group and expanded via `unnest_wider()`.
+#' - Rounds mean and quantiles to `round_digits`; `n` stays integer.
+#' - NA values are ignored in both `mean()` and `quantile()` (via `na.rm = TRUE`).
+#'
+#' @examples
+#' # Single column (tidy-eval):
+#' # build_summary(df, value_col = pct_reduc_case, by = c("vacc_cov","vacc_week"))
+#'
+#' # Multiple columns (character vector):
+#' # build_summary(df, value_col = c("pct_reduc_case","cases_averted"))
+build_summary <- function(data,
+                          value_col,
+                          by = c("vacc_cov", "vacc_week"),
+                          probs = c(0.025, 0.25, 0.5, 0.75, 0.975),
+                          round_digits = 3) {
+
+  data <- tibble::as_tibble(data)  # avoid data.table mask quirks
+
+  value_cols <- if (is.character(value_col)) {
+    value_col
+  } else {
+    as_name(enquo(value_col))
+  }
+  if (!is.character(by)) {
+    abort("`by` must be a character vector of column names, e.g., by = c('vacc_cov','vacc_week').")
+  }
+  # Inner worker to summarize a single value column `vc`
+  summarize_one <- function(vc) {
+    if (!vc %in% names(data)) abort(paste0("Column '", vc, "' not found in `data`."))
+    data %>%
+      mutate(`..v..` = .data[[vc]]) %>% # materialize the target vector once
+      group_by(across(all_of(by))) %>%
+      summarise(
+        mean = mean(`..v..`, na.rm = TRUE),
+        n = sum(!is.na(`..v..`)),
+        q = list({
+          qs <- stats::quantile(`..v..`, probs = probs, na.rm = TRUE, names = FALSE)
+          stats::setNames(as.numeric(qs),
+                          paste0("q", formatC(probs * 1000, width = 3, flag = "0")))
+        }),
+        .groups = "drop"
+      ) %>%
+      unnest_wider(q) %>%            # expands q025, q250, ... q975
+      mutate(
+        across(c(mean, starts_with("q")), ~ round(.x, round_digits)),
+        value_column = vc,
+        .before = 1
+      )
+  }
+
+  bind_rows(lapply(value_cols, summarize_one))
+}
+
+

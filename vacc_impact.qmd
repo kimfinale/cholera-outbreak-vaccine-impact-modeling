@@ -587,6 +587,112 @@ for (vc in unique(d_ct$vacc_cov)) {
 #                 tstamp(), ".rds"))
 ```
 
+# Summary by prioritization
+
+```{r}
+outbk_dat <- outbreaks_filtered |>
+  summarize(
+    year = first(data.table::year(start_date)),
+    rural_urban = first(rural_urban),
+    ar = first(ar_per_10e3),
+    cfr = first(cfr_per_100percent),
+    spatial_scale = first(spatial_scale),
+    pop = first(outbreak_pop),
+    duration = first(duration_weeks),
+    size = first(total_s_ch),
+    .by = id_outbreak
+  )
+
+# Percentile grid (edit as you like; for full 0–1 include 1)
+probs <- seq(0, 0.9, by = 0.1)
+
+# ---- Helpers ----
+# 1) IDs in the top p-quantile (e.g., p=0.9 for top 10%)
+top_p_ids <- function(data, var, p = 0.9) {
+  thr <- stats::quantile(dplyr::pull(data, {{ var }}), probs = p, na.rm = TRUE)
+  data %>%
+    filter({{ var }} >= thr) %>%
+    pull(id_outbreak) %>%
+    unique()
+}
+
+# lapply(probs, function(p) top_p_ids(outbk_dat, ar, p = p))
+ids_list_ar <- map(probs, ~ top_p_ids(outbk_dat, ar, p = .x))
+ids_list_dur <- map(probs, ~ top_p_ids(outbk_dat, duration, p = .x))
+ids_list_size <- map(probs, ~ top_p_ids(outbk_dat, size, p = .x))
+ids_list_cfr <- map(probs, ~ top_p_ids(outbk_dat, cfr, p = .x))
+```
+
+```{r}
+cea <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
+cea_ori <- cea %>% filter(ori_occurred == TRUE)
+
+summarize_by_ids <- function(cea, ids_list, probs, metrics,
+                             id_col = "id_outbreak") {
+  stopifnot(length(ids_list) == length(probs))
+
+  map2_dfr(probs, ids_list, function(p, ids) {
+    if (length(ids) == 0L) {
+      # Return an empty tibble with expected columns (so bind_rows works)
+      return(tibble(
+        prob = numeric(0),
+        vacc_cov = numeric(0),
+        vacc_week = numeric(0)
+      ))
+    }
+
+    cea %>%
+      filter(.data[[id_col]] %in% ids) %>%
+      group_by(vacc_cov, vacc_week) %>%
+      summarise(
+        across(
+          all_of(metrics),
+          ~ median(.x, na.rm = TRUE),
+          .names = "med_{.col}"
+        ),
+        # n = n(),                     # how many rows contributed
+        n = length(ids),                     # how many rows contributed
+        .groups = "drop"
+      ) %>%
+      mutate(prob = p, .before = 1)
+  })
+}
+
+cea_ori$daly_averted_per_1000_OCV <- 1000 * cea_ori$daly_averted / 
+  cea_ori$vacc_dose
+
+cea_metrics <- c("s_ch_averted_tot", "pct_reduc_case",
+                 "case_averted_per_1000_OCV", "daly_averted_per_1000_OCV")  # add 
+med_ar   <- summarize_by_ids(cea_ori, ids_list_ar, probs, 
+                             metrics = cea_metrics)
+med_dur  <- summarize_by_ids(cea_ori, ids_list_dur, probs, 
+                             metrics = cea_metrics)
+med_size <- summarize_by_ids(cea_ori, ids_list_size, probs, 
+                             metrics = cea_metrics)
+med_cfr <- summarize_by_ids(cea_ori, ids_list_cfr, probs, 
+                            metrics = cea_metrics)
+# Optional: label and combine into one tidy table
+med_all <- bind_rows(
+  mutate(med_ar,   percentile_by = "ar"),
+  mutate(med_dur,  percentile_by = "duration"),
+  mutate(med_size, percentile_by = "size"),
+  mutate(med_cfr, percentile_by = "cfr")) %>%
+  relocate(percentile_by, prob, vacc_cov, vacc_week)
+
+med_all_long <- med_all %>%
+  pivot_longer(
+    cols = starts_with("med_"),
+    names_to = "metric",
+    values_to = "median_value")
+
+saveRDS(med_all_long, 
+        paste0("outputs/paper/summary_impact_delay_prioritization_", 
+               tstamp(), ".rds"))
+```
+
+
+
+
 # Subset Analysis
 
 This section creates and analyzes subsets of outbreaks to simulate different 
@@ -791,17 +897,11 @@ for (priority in priorities) {
 plan(sequential)
 ```
 
-
-Calculate aggregated metrics across sampled outbreaks
+Aggregate metrics across sampled outbreaks
 
 ```{r}
-# subsets <- read_rds("outputs/subsets_100K_AR_20251015.rds")
-subsets <- read_rds("outputs/subsets_100K_size_20251015.rds")
-cea <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
-
-
-ocv_doses <- c(1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6)
-priorities <- c("AR", "dur", "size")
+# ocv_doses <- c(1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6)
+# priorities <- c("AR", "dur", "size")
 
 subset_list <- vector('list', length(priorities) * length(ocv_doses))
 
@@ -865,71 +965,166 @@ for (priority in priorities) {
 }
 ```
 
-Calculate statistics by grouping variables
+ - data.table version
+```{r}
+library(data.table)
+
+## ---------- 1) Read all subset files efficiently ----------
+# Grid of filenames
+grid <- CJ(vacc_priority = priorities, ocv_dose = ocv_doses)
+grid[, fn := ifelse(ocv_dose < 1e6,
+                    sprintf("outputs/subsets_%sK_%s_20251015.rds", round(ocv_dose/1e3), vacc_priority),
+                    sprintf("outputs/subsets_%sM_%s_20251015.rds", round(ocv_dose/1e6), vacc_priority))]
+
+# Optional: parallel reading with future.apply
+# library(future.apply); plan(multisession)  # or multicore on Linux
+# subset_list <- future_lapply(grid$fn, readRDS, future.seed = TRUE)
+subset_list <- lapply(grid$fn, readRDS)
+
+subsets <- rbindlist(subset_list, fill = TRUE)
+setDT(subsets)
+setkey(subsets, vacc_priority, ocv_dose, prob, id_sample)
+
+## ---------- 2) Prepare CEA for fast lookup ----------
+setDT(cea)
+setkey(cea, id_outbreak)
+
+## ---------- 3) Build group index & metadata ----------
+# One group per (priority, dose, prob, id_sample)
+subsets[, grp := .GRP, by = .(vacc_priority, ocv_dose, prob, id_sample)]
+
+# Metadata to re-attach later (one row per group)
+meta <- unique(subsets[, .(grp, vacc_priority, ocv_dose, prob, id_sample,
+                           outbreak_count, doses_used)])
+
+# Map each group to its vector of outbreak IDs (list column)
+grp2ids <- subsets[, .(id_outbreak = list(unique(id_outbreak))), by = grp]
+
+## ---------- 4) Worker that computes one group ----------
+compute_one_grp <- function(g) {
+  ids <- grp2ids[grp == g, id_outbreak][[1L]]
+  if (length(ids) == 0L) return(NULL)
+
+  # Fast keyed subset on CEA
+  cea_sub <- cea[.(ids), nomatch = 0L]
+
+  # Your existing aggregator
+  out <- sum_over_outbreaks_by_runid(cea_sub, ori_occurred = TRUE)
+
+  # Attach metadata
+  m <- meta[grp == g]
+  out[, `:=`(
+    subset_id        = m$id_sample,
+    vacc_priority    = m$vacc_priority,
+    priority_prob    = m$prob,
+    target_vacc_doses= m$ocv_dose,
+    outbreak_count   = m$outbreak_count,
+    doses_used       = m$doses_used
+  )]
+
+  out[]
+}
+
+## ---------- 5) Compute & save per priority (flat lapply, no nested loops) ----------
+for (p in priorities) {
+  grp_p <- meta[vacc_priority == p, grp]
+
+  # Optional: parallelize this lapply with future.apply if desired
+  # library(future.apply); plan(multisession)
+  # res_list <- future_lapply(grp_p, compute_one_grp, future.seed = TRUE)
+  res_list <- lapply(grp_p, compute_one_grp)
+
+  subsets_cea_priority <- rbindlist(res_list, fill = TRUE)
+  saveRDS(
+    subsets_cea_priority,
+    sprintf("outputs/cea_subsets_%s_onset_trigger_%s.rds", p, tstamp())
+  )
+}
+
+```
+
+ - Parallel version
+```{r}
+library(data.table)
+library(future.apply)
+library(qs)
+
+## 0) One-time: persist big globals for workers to load (no exporting)
+cea_path     <- tempfile(fileext = ".qs")
+grp2ids_path <- tempfile(fileext = ".qs")
+qsave(cea, cea_path, preset = "fast")          # ~2–5x faster than saveRDS
+qsave(grp2ids, grp2ids_path, preset = "fast")
+
+## 1) Pre-slice lightweight metadata to keep per-task payload tiny
+meta_split     <- split(meta,     by = "vacc_priority", keep.by = FALSE)
+grp2ids_split  <- split(grp2ids,  by = "vacc_priority", keep.by = FALSE)
+
+## 2) Parallel over priorities; each worker loads its own data from disk
+old_plan <- future::plan()
+on.exit(future::plan(old_plan), add = TRUE)
+future::plan(multisession, workers = max(1, future::availableCores() - 1))
+
+invisible(future_lapply(priorities, function(pri) {
+  # Load heavy data locally inside the worker (no giant globals exported)
+  library(data.table); library(qs)
+  cea_w     <- qread(cea_path)
+  grp2ids_w <- qread(grp2ids_path)
+
+  meta_p    <- meta_split[[pri]]
+  grp2ids_p <- grp2ids_split[[pri]]
+
+  # Compute for all groups within this priority 
+  res_list <- lapply(meta_p$grp, function(g) {
+    ids <- grp2ids_p[grp == g, id_outbreak][[1L]]
+    if (length(ids) == 0L) return(NULL)
+
+    cea_sub <- cea_w[.(ids), nomatch = 0L]      # keyed join is fast
+    out <- sum_over_outbreaks_by_runid(cea_sub, ori_occurred = TRUE)
+
+    m <- meta_p[grp == g]
+    out[, `:=`(
+      subset_id         = m$id_sample,
+      vacc_priority     = m$vacc_priority,
+      priority_prob     = m$prob,
+      target_vacc_doses = m$ocv_dose,
+      outbreak_count    = m$outbreak_count,
+      doses_used        = m$doses_used
+    )]
+    out[]
+  })
+
+  subsets_cea_priority <- rbindlist(res_list, fill = TRUE)
+  saveRDS(
+    subsets_cea_priority,
+    sprintf("outputs/cea_subsets_%s_onset_trigger_%s.rds", pri, tstamp())
+  )
+  NULL
+}, future.seed = TRUE))
+
+```
+
+Calculate statistics (mean, quantiles) by grouping variables
 
 ```{r}
 subset_data <- 
   read_rds("outputs/cea_subsets_AR_onset_trigger_20251015.rds")
 
-# --- 2. Perform Analysis with a Single, Vectorized Operation ---
-
-# Convert input data.frames to data.tables
-setDT(subset_data)
-
-build_summary <- function(data,
-                          value_col,
-                          by = c("vacc_cov", "vacc_week"),
-                          probs = c(0.025, 0.25, 0.5, 0.75, 0.975),
-                          round_digits = 3) {
-
-  data <- tibble::as_tibble(data)  # avoid data.table mask quirks
-
-  value_cols <- if (is.character(value_col)) {
-    value_col 
-  } else {
-    as_name(enquo(value_col))
-  }
-  if (!is.character(by)) {
-    abort("`by` must be a character vector of column names, e.g., by = c('vacc_cov','vacc_week').")
-  }
-
-  summarize_one <- function(vc) {
-    if (!vc %in% names(data)) abort(paste0("Column '", vc, "' not found in `data`."))
-    data %>%
-      mutate(`..v..` = .data[[vc]]) %>% # materialize the target vector once
-      group_by(across(all_of(by))) %>%
-      summarise(
-        mean = mean(`..v..`, na.rm = TRUE),
-        n = sum(!is.na(`..v..`)),
-        q = list({
-          qs <- stats::quantile(`..v..`, probs = probs, na.rm = TRUE, names = FALSE)
-          stats::setNames(as.numeric(qs),
-                             paste0("q", formatC(probs * 1000, width = 3, flag = "0")))
-        }),
-        .groups = "drop"
-      ) %>%
-      unnest_wider(q) %>%                                   # expands q025, q250, ... q975
-      mutate(
-        across(c(mean, starts_with("q")), ~ round(.x, round_digits)),
-        value_column = vc,
-        .before = 1
-      )
-  }
-
-  bind_rows(lapply(value_cols, summarize_one))
-}
-
 group_var <- c("vacc_cov", "vacc_week", "target_vacc_doses", 
   "vacc_priority", "priority_prob")
 
+summary_cols <- c("pct_reduc_case","case_averted_per_1000_OCV")
+
 cea_ar_subset_pca <- subset_data %>%
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-  build_summary(c("pct_reduc_case","case_averted_per_1000_OCV", ), by = group_var) 
-
+  build_summary(value_col = summary_var, by=group_var) 
 
 saveRDS(cea_summary_pca, 
         paste0("outputs/paper/cea_pca_summary_", tstamp(), ".rds"))
+```
 
+
+
+```{r}
 for (i in 1:length(res_list)) {
   
   subset_dt <- subset_data %>% 
@@ -1468,6 +1663,10 @@ if (save_plot) {
          height = fgw1*fac, units = "mm")
 }
 ```
+
+
+
+# -------------------------------------------------
 
 ## Create outbreak subsets for global OCV stockpile use
 
@@ -2055,112 +2254,6 @@ cea_summary_pca <- cea_ori %>%
 saveRDS(cea_summary_pca, 
         paste0("outputs/paper/cea_pca_summary_", tstamp(), ".rds"))
 ```
-
-
-
-## cea summary by attack rate, duration, and size percentile
-
-```{r}
-outbk_dat <- outbreaks_filtered |>
-  summarize(
-    year = first(data.table::year(start_date)),
-    rural_urban = first(rural_urban),
-    ar = first(ar_per_10e3),
-    cfr = first(cfr_per_100percent),
-    spatial_scale = first(spatial_scale),
-    pop = first(outbreak_pop),
-    duration = first(duration_weeks),
-    size = first(total_s_ch),
-    .by = id_outbreak
-  )
-
-# Percentile grid (edit as you like; for full 0–1 include 1)
-probs <- seq(0, 0.9, by = 0.1)
-
-# ---- Helpers ----
-# 1) IDs in the top p-quantile (e.g., p=0.9 for top 10%)
-top_p_ids <- function(data, var, p = 0.9) {
-  thr <- stats::quantile(dplyr::pull(data, {{ var }}), probs = p, na.rm = TRUE)
-  data %>%
-    filter({{ var }} >= thr) %>%
-    pull(id_outbreak) %>%
-    unique()
-}
-
-# lapply(probs, function(p) top_p_ids(outbk_dat, ar, p = p))
-ids_list_ar <- map(probs, ~ top_p_ids(outbk_dat, ar, p = .x))
-ids_list_dur <- map(probs, ~ top_p_ids(outbk_dat, duration, p = .x))
-ids_list_size <- map(probs, ~ top_p_ids(outbk_dat, size, p = .x))
-ids_list_cfr <- map(probs, ~ top_p_ids(outbk_dat, cfr, p = .x))
-```
-
-```{r}
-cea <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
-cea_ori <- cea %>% filter(ori_occurred == TRUE)
-
-summarize_by_ids <- function(cea, ids_list, probs, metrics,
-                             id_col = "id_outbreak") {
-  stopifnot(length(ids_list) == length(probs))
-
-  map2_dfr(probs, ids_list, function(p, ids) {
-    if (length(ids) == 0L) {
-      # Return an empty tibble with expected columns (so bind_rows works)
-      return(tibble(
-        prob = numeric(0),
-        vacc_cov = numeric(0),
-        vacc_week = numeric(0)
-      ))
-    }
-
-    cea %>%
-      filter(.data[[id_col]] %in% ids) %>%
-      group_by(vacc_cov, vacc_week) %>%
-      summarise(
-        across(
-          all_of(metrics),
-          ~ median(.x, na.rm = TRUE),
-          .names = "med_{.col}"
-        ),
-        # n = n(),                     # how many rows contributed
-        n = length(ids),                     # how many rows contributed
-        .groups = "drop"
-      ) %>%
-      mutate(prob = p, .before = 1)
-  })
-}
-
-cea_ori$daly_averted_per_1000_OCV <- 1000 * cea_ori$daly_averted / 
-  cea_ori$vacc_dose
-
-cea_metrics <- c("s_ch_averted_tot", "pct_reduc_case",
-                 "case_averted_per_1000_OCV", "daly_averted_per_1000_OCV")  # add 
-med_ar   <- summarize_by_ids(cea_ori, ids_list_ar, probs, 
-                             metrics = cea_metrics)
-med_dur  <- summarize_by_ids(cea_ori, ids_list_dur, probs, 
-                             metrics = cea_metrics)
-med_size <- summarize_by_ids(cea_ori, ids_list_size, probs, 
-                             metrics = cea_metrics)
-med_cfr <- summarize_by_ids(cea_ori, ids_list_cfr, probs, 
-                            metrics = cea_metrics)
-# Optional: label and combine into one tidy table
-med_all <- bind_rows(
-  mutate(med_ar,   percentile_by = "ar"),
-  mutate(med_dur,  percentile_by = "duration"),
-  mutate(med_size, percentile_by = "size"),
-  mutate(med_cfr, percentile_by = "cfr")) %>%
-  relocate(percentile_by, prob, vacc_cov, vacc_week)
-
-med_all_long <- med_all %>%
-  pivot_longer(
-    cols = starts_with("med_"),
-    names_to = "metric",
-    values_to = "median_value")
-
-saveRDS(med_all_long, 
-        paste0("outputs/paper/summary_impact_delay_prioritization_", 
-               tstamp(), ".rds"))
-```
-
 
 
 

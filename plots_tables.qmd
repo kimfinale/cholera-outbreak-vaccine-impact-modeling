@@ -82,11 +82,11 @@ VW <- 9  # representative vaccination week from GTFCC data
 # Sequence of vaccination weeks to evaluate
 VW_seq <- seq(1, 15, 2)
 
-# Representative vaccination coverage rate
-VC <- 0.75  # 75% coverage
-
 # Three representative vaccination coverage rates
 VC3 <- c(0.6, 0.75, 0.9)  # 60%, 75%, 90%
+
+# Reference vaccination coverage rate
+VC <- VC3[2]  # 75% coverage
 
 # Thresholds for case-triggered vaccination to analyze
 cts_sel <- c(1, seq(10, 100, 10))  # case triggers selected
@@ -100,11 +100,11 @@ africa <- st_read("data/paper/afr_g2014_2013_0.shp", quiet = TRUE)
 
 # only a subset of sample runid's is used for plotting for convenience
 set.seed(42)
-sample_runids <- sample(1:200, size=30)
+# sample_runids <- sample(1:200, size=30)
 
 # Plot parameters
-line_width_50 <- 1.2 
-line_width_95 <- 0.5 
+line_width_50 <- 1.2
+line_width_95 <- 0.5
 line_interval <- 0.7
 point_size <- 0.5
 x_size <- 1.5
@@ -117,7 +117,8 @@ x_stroke <- 1
 #| warning: false
 # Load outbreak data
 # All outbreaks including those affected by OCVs
-outbreak_data_all <- as.data.frame(fread("outputs/paper/outbreak_data_all_20250228.csv"))
+outbreak_data_all <- 
+  as.data.frame(fread("outputs/paper/outbreak_data_all_20250228.csv"))
 
 # Outbreaks included in vaccine impact modeling (not affected by OCVs)
 outbreak_data <- fread("outputs/paper/outbreak_data_20250228.csv") 
@@ -128,7 +129,8 @@ outbreak_data <- fread("outputs/paper/outbreak_data_20250228.csv")
 outbreaks_filtered <-
   readRDS("outputs/paper/outbreak_summary_filtered_20250418.rds")
 
-outbreak_data %<>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak) 
+outbreak_data %<>% 
+  filter(id_outbreak %in% outbreaks_filtered$id_outbreak) 
 # outbreaks excluded
 outbreaks_excluded <- read_rds("outputs/paper/outbreaks_excluded_20250612.rds")
 
@@ -136,13 +138,13 @@ outbreaks_excluded <- read_rds("outputs/paper/outbreaks_excluded_20250612.rds")
 ocv_use <- fread("outputs/paper/ocv_use_GTFCC_data_20241120.csv")
 
 # Calculate delay statistics between request and round 1 vaccination
-delay_req_r1 <- as.integer(ocv_use$DATE_ROUND_ONE - ocv_use$DATE_REQUEST)
-# Compute key percentiles of the delay distribution
-ocv_delay <- quantile(delay_req_r1, probs = c(0.25, 0.5, 0.75, 0.9), na.rm = TRUE)
+# delay_req_r1 <- as.integer(ocv_use$DATE_ROUND_ONE - ocv_use$DATE_REQUEST)
+# # Compute key percentiles of the delay distribution
+# ocv_delay <- quantile(delay_req_r1, probs = c(0.25, 0.5, 0.75, 0.9), na.rm = TRUE)
 
 # Get historical OCV deployment data
-dat <- clean_names(fread("outputs/paper/OCV_Use_GTFCC_Dashboard.csv"))
-dat |> 
+ocv_use_dashboard <- clean_names(fread("outputs/paper/OCV_Use_GTFCC_Dashboard.csv"))
+ocv_use_dashboard |> 
   filter(shipped == "Shipped", type == "Reactive") |> 
   group_by(year) |> 
   summarize(num_ocv = sum(dose)) |>
@@ -150,23 +152,22 @@ dat |>
 
 ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
 
-# Load OCV campaign dataset
-docv_ <- clean_names(fread("data/paper/outbreak_files_Oct2024/ocv_long_dataset.csv"))
-docv <- docv_[(ocv_before_1 == TRUE | ocv_before_2 == TRUE | 
-               ocv_before_3 == TRUE | ocv_during == TRUE)]
+# # Load OCV campaign dataset
+# docv_ <- clean_names(fread("data/paper/outbreak_files_Oct2024/ocv_long_dataset.csv"))
+# docv <- docv_[(ocv_before_1 == TRUE | ocv_before_2 == TRUE | 
+#                ocv_before_3 == TRUE | ocv_during == TRUE)]
 
 # Load model parameters
-dis_params <- as.data.frame(data.table::fread("data/paper/parameters.csv"))
+dis_params <- as.data.frame(fread("data/paper/parameters.csv"))
 
-# Load IVE posterior predictive values from Bayesian beta regression
-# ive_fit <- read_rds("outputs/ive_yrep_20241010.rds")
+# Load Bayesian beta regression results for the indirect vaccine effectiveness
 ive_fit <- readRDS("outputs/paper/ive_yhat_yrep_20250919.rds")
 ive_data <- ive_fit$yrep
 rm(ive_fit)  # Free memory by removing large object
 
 # Load outbreak summary data
 ds <- clean_names(as.data.frame(fread("data/paper/outbreak_files_Oct2024/outbreak_summary.csv")))
-message(paste0(length(unique(ds$country)), " countries"))
+# message(paste0(length(unique(ds$country)), " countries"))
 
 # Create unique outbreak identifiers
 ds |>
@@ -185,53 +186,11 @@ outbk_data_summary <-
     by = "id_outbreak"
   )
 
-outbk_data_summary %<>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak) 
+outbk_data_summary %<>% 
+  filter(id_outbreak %in% outbreaks_filtered$id_outbreak) 
 # Summarize attack rates and population sizes
-summary(outbk_data_summary$ar_per_10e3)
-summary(outbk_data_summary$outbreak_pop)
-```
-
-# Recent cholera outbreak analysis
-
-This section analyzes recent cholera data from WHO Global Cholera Dashboard.
-
-```{r eval=FALSE recent-outbreaks}
-# Load recent cholera data
-c2023 <- fread("data/cholera_adm0_public_2023.csv")
-c2024 <- fread("data/cholera_adm0_public_2024.csv")
-c2023$year <- 2023
-c2024$year <- 2024
-chol <- rbind(c2023, c2024)
-
-# Analyze 2023 data by WHO region
-c2023 |> 
-  group_by(year, who_region) |>
-  summarize(case_region_total = sum(case_total), 
-            death_region_total = sum(death_total)) |> 
-  mutate(case_pct = 100 * case_region_total / sum(case_region_total),
-         death_pct = 100 * death_region_total / sum(death_region_total),
-         case_tot = sum(case_region_total),
-         death_tot = sum(death_region_total))
-
-# Analyze 2024 data by WHO region
-c2024 |> 
-  group_by(year, who_region) |>
-  summarize(case_region_total = sum(case_total), 
-            death_region_total = sum(death_total)) |> 
-  mutate(case_pct = 100 * case_region_total / sum(case_region_total),
-         death_pct = 100 * death_region_total / sum(death_region_total),
-         case_tot = sum(case_region_total),
-         death_tot = sum(death_region_total))
-
-# Analyze all data by WHO region
-chol |> 
-  group_by(who_region) |>
-  summarize(case_region_total = sum(case_total), 
-            death_region_total = sum(death_total)) |> 
-  mutate(case_pct = 100 * case_region_total / sum(case_region_total),
-         death_pct = 100 * death_region_total / sum(death_region_total),
-         case_tot = sum(case_region_total),
-         death_tot = sum(death_region_total))
+# summary(outbk_data_summary$ar_per_10e3)
+# summary(outbk_data_summary$outbreak_pop)
 ```
 
 # Load Vaccine Impact Simulation Results
@@ -247,6 +206,9 @@ cea <- map_dfr(cea_files, read_rds)
 
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
+# weekly decline
+fit_decay <- read_rds("outputs/paper/fit_decay_model_20250923.rds")
+
 # Case-triggered vaccination results
 # cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250716.rds")
 # cea_ct <- read_rds("outputs/paper/cea_0.75_case_trigger_20250921.rds")
@@ -257,19 +219,6 @@ cea_ori <- cea %>% filter(ori_occurred == TRUE)
 # cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.75_onset_trigger_excl_20250716.rds"))
 # cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.9_onset_trigger_excl_20250716.rds"))
 # cea_ct_excl <- read_rds("outputs/cea_0.75_case_trigger_excl_20250716.rds")
-
-# weekly decline
-fit_decay <- read_rds("outputs/paper/fit_decay_model_20250923.rds")
-
-# Load subset analyses reflecting global OCV stockpile
-# cea_stockpile_subsets_q1 <-
-#   read_rds("outputs/cea_stockpile_0_onset_trigger_by_year_20250828.rds")
-# cea_stockpile_subsets_q2 <-
-#   read_rds("outputs/cea_stockpile_0.25_onset_trigger_by_year_20250828.rds")
-# cea_stockpile_subsets_q3 <-
-#   read_rds("outputs/cea_stockpile_0.5_onset_trigger_by_year_20250828.rds")
-# cea_stockpile_subsets_q4 <-
-#   read_rds("outputs/cea_stockpile_0.75_onset_trigger_by_year_20250828.rds")
 ```
 
 # Abstract
@@ -317,37 +266,36 @@ fit_decay[["5"]] %>%
   summarize_quantiles(half_life_weeks) %>% 
   format_median_iqr(digits=1)
 
-
-# stockpile impact
-stockpile_impact <- cea_stockpile_subsets_q1 %>%
-  filter(vacc_cov %in% c(0.75), vacc_week %in% c(9)) %>%
-  group_by(vacc_cov, vacc_week) %>%
-  summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
-                      case_averted_per_1000_OCV, cost_per_case_averted, 
-                      cost_per_daly_averted)
-  
-stockpile_impact
-# cases averted for vaccine coverage of 75%
-format_median_iqr(stockpile_impact, row=1)
-# percentage cases averted
-format_median_iqr(stockpile_impact, row=2)
-
-
-format_median_iqr(stockpile_impact, digits=2, row=3)
-format_median_iqr(stockpile_impact, row=4)
-
-stockpile_impact_q4 <- cea_stockpile_subsets_q4 %>%
-  filter(vacc_cov %in% c(0.75), vacc_week %in% c(9)) %>%
-  group_by(vacc_cov, vacc_week) %>%
-  summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
-                      case_averted_per_1000_OCV, cost_per_case_averted, 
-                      cost_per_daly_averted)
-# cases averted for vaccine coverage of 75%
-format_median_iqr(stockpile_impact_q4, row=1)
-# percentage cases averted
-format_median_iqr(stockpile_impact_q4, row=2)
-
-rm(onset_impact, stockpile_impact, stockpile_impact_q4)
+# # stockpile impact
+# stockpile_impact <- cea_stockpile_subsets_q1 %>%
+#   filter(vacc_cov %in% c(0.75), vacc_week %in% c(9)) %>%
+#   group_by(vacc_cov, vacc_week) %>%
+#   summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
+#                       case_averted_per_1000_OCV, cost_per_case_averted, 
+#                       cost_per_daly_averted)
+#   
+# stockpile_impact
+# # cases averted for vaccine coverage of 75%
+# format_median_iqr(stockpile_impact, row=1)
+# # percentage cases averted
+# format_median_iqr(stockpile_impact, row=2)
+# 
+# 
+# format_median_iqr(stockpile_impact, digits=2, row=3)
+# format_median_iqr(stockpile_impact, row=4)
+# 
+# stockpile_impact_q4 <- cea_stockpile_subsets_q4 %>%
+#   filter(vacc_cov %in% c(0.75), vacc_week %in% c(9)) %>%
+#   group_by(vacc_cov, vacc_week) %>%
+#   summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
+#                       case_averted_per_1000_OCV, cost_per_case_averted, 
+#                       cost_per_daly_averted)
+# # cases averted for vaccine coverage of 75%
+# format_median_iqr(stockpile_impact_q4, row=1)
+# # percentage cases averted
+# format_median_iqr(stockpile_impact_q4, row=2)
+# 
+# rm(onset_impact, stockpile_impact, stockpile_impact_q4)
 ```
 
 # Plots
@@ -357,10 +305,7 @@ rm(onset_impact, stockpile_impact, stockpile_impact_q4)
 The right panel of Figure 1 in the main text was generated using the following code. The left panel, a flowchart illustrating outbreak identification and selection for vaccine impact modeling, was created in PowerPoint.
 
 ```{r}
-set.seed(42)
-
 # Global parameters ----------------------------------------------------
-save_plot <- TRUE
 text_size <- 5          # Default text size for annotations
 line_height <- 0.95     # Line spacing for text annotation
 pattern_dens <- 0.1     # Density of pattern filling
@@ -1331,7 +1276,7 @@ if (save_plot) {
 }
 ```
 
-## Figure 3
+## Figure 3: Impact across delays and prioritization
 
 ### Summary values referred in the main text
 ```{r fig3, eval=FALSE}
@@ -1477,8 +1422,7 @@ rm(d, d1, d2, d3, d4, res, onset_impact)
 Percent cases averted
 
 ```{r}
-cea_ori_sum <- read_rds("outputs/paper/cea_ori_plot_summary_20251001.rds")
-
+cea_ori_sum <- read_rds("outputs/paper/cea_pca_summary_20251015.rds")
 ymean  <- 95 
 ymedian<- 87.5
 y50    <- c(82, 93)
@@ -3980,6 +3924,39 @@ rm(cea_subsets_by_size_q1, cea_subsets_by_size_q2,
 ## Figure 4: Cumulative OCV Impact during OCV stockpile deployment
 
 ```{r}
+cea_stockpile <- read_rds(paste0("outputs/paper/cea_doses_subsets_20251016.rds"))
+
+VW
+
+VW_plot_seq <- seq(1,15,2)
+# percentage case averted 
+p1 <- cea_stockpile %>%
+  filter(vacc_week == VW, value_col == "cases_averted") %>%
+  ggplot(aes(x = target_ocv_doses, color = as.factor(vacc_cov), 
+             group = as.factor(vacc_cov))) +
+  ci_layers_from_summary(
+    dodge_width = 1.4,
+    lw95 = line_width_95,
+    lw50 = line_width_50,
+    pr_size = 2.4,
+    mean_size = x_size,
+    mean_stroke = x_stroke
+  )+
+  scale_y_continuous("% cases averted",
+                     labels = scales::percent_format(scale = 1), 
+                     limits=c(0,100)) +
+  scale_color_manual(
+    name = "",
+    values = my_discrete_colors[1:3],
+    labels = c(paste0(format_num(VC3*100, 1), "%")))+
+  theme_light() +
+  theme_tight() +
+  theme_x_blank()
+
+```
+
+
+```{r}
 priority <- "AR"
 cea_subsets <- read_rds(paste0("outputs/cea_subsets_", priority, 
                                "_onset_trigger_20251015.rds"))
@@ -4002,14 +3979,6 @@ ocv_use2 %>%
   summarize(dose_r1 = sum(dose_delivered_round_one, na.rm=T)) -> ocv_year2
 
 ocv_year2$cum_dose_r1 <- cumsum(ocv_year2$dose_r1)
-
-
-
-```
-
-Total number of cases averted
-```{r}
-quantiles are 
 ```
 
 
