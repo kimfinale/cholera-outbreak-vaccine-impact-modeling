@@ -2866,23 +2866,23 @@ build_summary <- function(data,
                           probs = c(0.025, 0.25, 0.5, 0.75, 0.975),
                           round_digits = 3) {
 
-  data <- tibble::as_tibble(data)  # avoid data.table mask quirks
+  data <- tibble::as_tibble(data)
 
   value_cols <- if (is.character(value_col)) {
     value_col
   } else {
-    as_name(enquo(value_col))
+    rlang::as_name(rlang::enquo(value_col))
   }
   if (!is.character(by)) {
-    abort("`by` must be a character vector of column names, e.g., by = c('vacc_cov','vacc_week').")
+    rlang::abort("`by` must be a character vector of column names, e.g., by = c('vacc_cov','vacc_week').")
   }
-  # Inner worker to summarize a single value column `vc`
+
   summarize_one <- function(vc) {
-    if (!vc %in% names(data)) abort(paste0("Column '", vc, "' not found in `data`."))
+    if (!vc %in% names(data)) rlang::abort(paste0("Column '", vc, "' not found in `data`."))
     data %>%
-      mutate(`..v..` = .data[[vc]]) %>% # materialize the target vector once
-      group_by(across(all_of(by))) %>%
-      summarise(
+      dplyr::mutate(`..v..` = .data[[vc]]) %>%
+      dplyr::group_by(dplyr::across(dplyr::all_of(by))) %>%
+      dplyr::summarise(
         mean = mean(`..v..`, na.rm = TRUE),
         n = sum(!is.na(`..v..`)),
         q = list({
@@ -2892,15 +2892,16 @@ build_summary <- function(data,
         }),
         .groups = "drop"
       ) %>%
-      unnest_wider(q) %>%            # expands q025, q250, ... q975
-      mutate(
-        across(c(mean, starts_with("q")), ~ round(.x, round_digits)),
+      tidyr::unnest_wider(q) %>%
+      dplyr::mutate(
+        dplyr::across(c(mean, dplyr::starts_with("q")), ~ round(.x, round_digits)),
         value_column = vc,
         .before = 1
       )
   }
 
-  bind_rows(lapply(value_cols, summarize_one))
+  dplyr::bind_rows(lapply(value_cols, summarize_one))
 }
+
 
 

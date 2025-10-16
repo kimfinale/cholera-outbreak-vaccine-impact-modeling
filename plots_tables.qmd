@@ -3924,16 +3924,55 @@ rm(cea_subsets_by_size_q1, cea_subsets_by_size_q2,
 ## Figure 4: Cumulative OCV Impact during OCV stockpile deployment
 
 ```{r}
-cea_stockpile <- read_rds(paste0("outputs/paper/cea_doses_subsets_20251016.rds"))
+cea_subsets <- 
+  read_rds("outputs/paper/cea_summary_subsets_by_id_20251016.rds")
 
-VW
-
+pri <- "AR"
 VW_plot_seq <- seq(1,15,2)
+pr_model <- c(0.0, 0.7)
+
+d <- cea_subsets %>%
+  mutate(pp_r = round(priority_prob, 1)) %>% 
+  filter(vacc_priority == pri,
+         pp_r %in% pr_model,
+         vacc_week == 1,
+         vacc_cov == VC,
+         value_column %in% c("vacc_dose", "case_averted_per_1000_OCV"))
+         
+dsub <- d %>% 
+  filter(value_column == "vacc_dose") %>%
+  select(c("vacc_cov", "vacc_week", "target_vacc_doses", "vacc_priority",
+           "priority_prob", "subset_id", "q500")) 
+
+names(dsub) <- c("vacc_cov", "vacc_week", "target_vacc_doses", "vacc_priority",
+           "priority_prob", "subset_id", "vacc_dose_used")
+
+dw <- left_join(subset(d, value_column != "vacc_dose"), dsub, 
+                by= c("vacc_cov", "vacc_week", "target_vacc_doses", 
+                      "vacc_priority", "priority_prob", "subset_id"))
+
+View(dw)
+```
+
+```{r}
+cea_subsets <- 
+  read_rds("outputs/paper/cea_summary_subsets_by_id_20251016.rds")
+
+pri <- "AR"
+VW_plot_seq <- seq(1,15,2)
+pr_model <- c(0.0, 0.7)
 # percentage case averted 
-p1 <- cea_stockpile %>%
-  filter(vacc_week == VW, value_col == "cases_averted") %>%
-  ggplot(aes(x = target_ocv_doses, color = as.factor(vacc_cov), 
-             group = as.factor(vacc_cov))) +
+# p1 <- cea_subsets %>%
+p1 <- dw %>%  
+  mutate(pp_r = round(priority_prob, 1)) %>% 
+  filter(vacc_priority == pri,
+         pp_r %in% pr_model,
+         vacc_week == 1,
+         vacc_cov == VC,
+         value_column == "case_averted_per_1000_OCV") %>%
+  ggplot(aes(x = vacc_dose_used, 
+             color = as.factor(pp_r), 
+             group = as.factor(pp_r))) +
   ci_layers_from_summary(
     dodge_width = 1.4,
     lw95 = line_width_95,
@@ -3941,18 +3980,16 @@ p1 <- cea_stockpile %>%
     pr_size = 2.4,
     mean_size = x_size,
     mean_stroke = x_stroke
-  )+
-  scale_y_continuous("% cases averted",
-                     labels = scales::percent_format(scale = 1), 
-                     limits=c(0,100)) +
+  ) +
+  scale_x_log10("Vaccine doses deployed") +
+  scale_y_continuous("Cases averted\nper 1000 OCV") +
   scale_color_manual(
     name = "",
     values = my_discrete_colors[1:3],
-    labels = c(paste0(format_num(VC3*100, 1), "%")))+
+    labels = c(paste0(format_num(pr_model*100, 1), "%")))+
   theme_light() +
-  theme_tight() +
-  theme_x_blank()
-
+  theme_tight() 
+p1
 ```
 
 

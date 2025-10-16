@@ -1106,245 +1106,83 @@ invisible(future_lapply(priorities, function(pri) {
 Calculate statistics (mean, quantiles) by grouping variables
 
 ```{r}
-subset_data <- 
-  read_rds("outputs/cea_subsets_AR_onset_trigger_20251015.rds")
-
 group_var <- c("vacc_cov", "vacc_week", "target_vacc_doses", 
   "vacc_priority", "priority_prob")
 
-summary_cols <- c("pct_reduc_case","case_averted_per_1000_OCV")
+summary_cols <- c("pct_reduc_case", 
+                  "n_outbreaks", "outbreak_count",
+                  "vacc_dose", "doses_used",
+                  "s_ch_averted_tot",  "death_averted_tot",
+                  "case_averted_per_1000_OCV", "death_averted_per_1000_OCV",
+                  "cost_per_daly_averted",
+                  "cost_per_case_averted", "cost_per_death_averted")
 
-cea_ar_subset_pca <- subset_data %>%
-  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-  build_summary(value_col = summary_var, by=group_var) 
+priorities <- c("AR", "dur", "size")
 
-saveRDS(cea_summary_pca, 
-        paste0("outputs/paper/cea_pca_summary_", tstamp(), ".rds"))
+for (pri in priorities) {
+  subset_data <- 
+    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
+  # forgot to include this column when generating the data
+  subset_data$vacc_priority <- pri
+  
+  cea_summary <- subset_data %>%
+    filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
+    build_summary(value_col = summary_cols, by=group_var) 
+  
+  saveRDS(cea_summary, 
+          paste0("outputs/paper/cea_summary_", pri, "_subsets_", tstamp(),
+                 ".rds"))
+}
+# combine and save 
+cea_summary_subsets_list <- lapply(priorities, function(pri) 
+  read_rds(paste0("outputs/paper/cea_summary_", pri,
+                               "_subsets_20251016.rds")))
+cea_summary_subsets <- rbindlist(cea_summary_subsets_list) 
+saveRDS(cea_summary_subsets, 
+          paste0("outputs/paper/cea_summary_subsets_", tstamp(),
+                 ".rds"))
 ```
 
-
-
+- group also by subset_id
+This has an effect of creating a subset of the same size of vaccine doses because the number of vaccine doses vary only across subsets not across runid's
 ```{r}
-for (i in 1:length(res_list)) {
+group_var <- c("vacc_cov", "vacc_week", "target_vacc_doses", 
+  "vacc_priority", "priority_prob","subset_id")
+
+summary_cols <- c("pct_reduc_case", 
+                  "n_outbreaks", "outbreak_count",
+                  "vacc_dose", "doses_used",
+                  "s_ch_averted_tot",  "death_averted_tot",
+                  "case_averted_per_1000_OCV", "death_averted_per_1000_OCV",
+                  "cost_per_daly_averted",
+                  "cost_per_case_averted", "cost_per_death_averted")
+
+priorities <- c("AR", "dur", "size")
+
+for (pri in priorities) {
+  subset_data <- 
+    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
+  # forgot to include this column when generating the data
+  subset_data$vacc_priority <- pri
   
-  subset_dt <- subset_data %>% 
-    filter(priority_prob == pr, vacc_priority == priority, 
-           target_vacc_doses == target_ose, 
-           id_outbreak, pop, subset_id) %>% 
-
-           vacc_priority == "AR", subset_sample == i)
+  cea_summary_subsets <- subset_data %>%
+    filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
+    build_summary(value_col = summary_cols, by=group_var) 
   
-  res_list[[i]] <- 
-    
-}
-res1 <- rbindlist(res_list)
-
-# Ensure the result is not grouped (data.table automatically drops grouping)
-setkey(res1, NULL)
-# Ensure res1 is a data.table. This modifies res1 in place for efficiency.
-# setDT(res1)
-
-# summary across runid's and id_sample's
-res <- res1[, .(
-  pop_q500 = median(sum_pop),
-  vacc_dose_q500 = median(sum_vacc_dose),
-  s_ch_q500 = median(sum_s_ch),
-  s_ch_averted_q500 = median(sum_s_ch_averted),
-  pca_q500 = median(percent_case_averted),
-  pca_q025 = quantile(percent_case_averted, probs=0.025),
-  pca_q975 = quantile(percent_case_averted, probs=0.975),
-  pca_q250 = quantile(percent_case_averted, probs=0.25),
-  pca_q750 = quantile(percent_case_averted, probs=0.75),
-  capd_q500 = median(case_averted_per_1000_OCV, na.rm = TRUE),
-  capd_q025 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.025),
-  capd_q975 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.975),
-  capd_q250 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.25),
-  capd_q750 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.75),
-  n_outbreaks_in_subset_q500 = median(n_outbreaks_in_subset)
-  ), 
-  by = .(prob, ocv_dose, vacc_week)
-]
-
-
-# --- 3. Save the Final Output ---
-if (save_rds) {
-  saveRDS(res, paste0("outputs/paper/cea_dose_ar_priority_", tstamp(), ".rds"))
+  saveRDS(cea_summary_subsets, 
+          paste0("outputs/paper/cea_summary_", pri, "_subsets_by_id_", tstamp(),
+                 ".rds"))
 }
 
-# View a sample of the results
-print(res)
-res <- read_rds("outputs/paper/cea_dose_ar_priority_20251002.rds")
-res %>% filter(ocv_dose == 10e6, vacc_week %in% c(1,9), prob %in% c(0.0,0.9))
-```
+cea_summary_subsets_list <- lapply(priorities, function(pri) 
+  read_rds(paste0("outputs/paper/cea_summary_", pri,
+                               "_subsets_by_id_20251016.rds")))
 
+cea_summary_subsets <- rbindlist(cea_summary_subsets_list) 
+saveRDS(cea_summary_subsets, 
+          paste0("outputs/paper/cea_summary_subsets_by_id_", tstamp(),
+                 ".rds"))
 
-Analysis
-```{r}
-cea_data <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
-cea_data %>% filter(vacc_week == 1, runid == 1) -> d
-d1 <- d[d$gdp > 0, ]
-length(d1$id_outbreak)
-d1[is.na(d$net_cost), ]$id_outbreak
-d2 <- d1[!complete.cases(d1),]
-unique(d2$death_tot)
-unique(d2$death_averted_tot)
-
-d2[(death_tot > 0 & death_averted_tot == 0), ]
-
-subset_data <- 
-  read_rds("outputs/paper/subsets_dose_proritization_20251002.rds")
-
-# --- 2. Perform Analysis with a Single, Vectorized Operation ---
-
-# Convert input data.frames to data.tables
-setDT(subset_data)
-
-subset_dt <- subset_data %>% 
-  filter(sampled == TRUE, vacc_priority == "AR", id_sample == 1)
-
-# Perform the operations using data.table
-
-res_list <- vector('list', 200)
-vacc_cov <- 0.75
-
-for (i in 1:length(res_list)) {
-  
-  subset_dt <- subset_data %>% 
-    select(prob, vacc_priority, ocv_dose, sampled, id_outbreak, pop, id_sample) %>% 
-    filter(sampled == TRUE, !is.na(id_sample), 
-           vacc_priority == "AR", id_sample == i)
-  
-  res_list[[i]] <- 
-    cea_data[subset_dt, on = .(id_outbreak), allow.cartesian = TRUE][, .(
-      sum_pop = sum(pop),
-      sum_vacc_dose = sum(vacc_dose),
-      sum_s_ch = sum(s_ch_tot),
-      sum_s_ch_averted = sum(s_ch_averted_tot),
-      sum_death_averted = sum(death_averted_tot),
-      percent_case_averted = 100 * sum(s_ch_averted_tot) / sum(s_ch_tot),
-      case_averted_per_1000_OCV = 
-        1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
-      
-      cost_per_daly_averted = sum(net_cost, na.rm=TRUE) / 
-        sum(daly_averted, na.rm=TRUE), 
-      cost_per_case_averted = sum(net_cost, na.rm=TRUE) / 
-        sum(s_ch_averted_tot, na.rm=TRUE),
-      n_outbreaks_ori = sum(ori_occurred),
-      n_outbreaks_in_subset = .N
-    ),
-
-    by = .(prob, id_sample, ocv_dose, runid, vacc_week)
-  ]
-}
-res1 <- rbindlist(res_list)
-
-# Ensure the result is not grouped (data.table automatically drops grouping)
-setkey(res1, NULL)
-# Ensure res1 is a data.table. This modifies res1 in place for efficiency.
-# setDT(res1)
-
-# summary across runid's and id_sample's
-res <- res1[, .(
-  pop_q500 = median(sum_pop),
-  vacc_dose_q500 = median(sum_vacc_dose),
-  s_ch_q500 = median(sum_s_ch),
-  s_ch_averted_q500 = median(sum_s_ch_averted),
-  pca_q500 = median(percent_case_averted),
-  pca_q025 = quantile(percent_case_averted, probs=0.025),
-  pca_q975 = quantile(percent_case_averted, probs=0.975),
-  pca_q250 = quantile(percent_case_averted, probs=0.25),
-  pca_q750 = quantile(percent_case_averted, probs=0.75),
-  capd_q500 = median(case_averted_per_1000_OCV, na.rm = TRUE),
-  capd_q025 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.025),
-  capd_q975 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.975),
-  capd_q250 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.25),
-  capd_q750 = quantile(case_averted_per_1000_OCV, na.rm = TRUE, probs=0.75),
-  n_outbreaks_in_subset_q500 = median(n_outbreaks_in_subset)
-  ), 
-  by = .(prob, ocv_dose, vacc_week)
-]
-
-
-# --- 3. Save the Final Output ---
-if (save_rds) {
-  saveRDS(res, paste0("outputs/paper/cea_dose_ar_priority_", tstamp(), ".rds"))
-}
-
-# View a sample of the results
-print(res)
-res <- read_rds("outputs/paper/cea_dose_ar_priority_20251002.rds")
-res %>% filter(ocv_dose == 10e6, vacc_week %in% c(1,9), prob %in% c(0.0,0.9))
-```
-
-Analysis
-```{r}
-# --- 1. Load and Combine Data Efficiently ---
-
-# Load the cost-effectiveness analysis (CEA) results
-# Use map_dfr for a clean, scalable way to load and row-bind multiple files.
-cea_files <- c(
-  "outputs/paper/cea_0.6_onset_trigger_20250919.rds",
-  "outputs/paper/cea_0.75_onset_trigger_20250919.rds",
-  "outputs/paper/cea_0.9_onset_trigger_20250919.rds"
-)
-cea_data <- map_dfr(cea_files, read_rds)
-
-# Load the outbreak subset definitions
-# subsets_df <- readRDS("outputs/subsets_1M_size_20250922.rds")
-# subsets_df <- readRDS("outputs/subsets_10M_AR_20250922.rds")
-# subsets_df <- readRDS("outputs/subsets_10M_size_20250922.rds")
-subsets_df <- readRDS("outputs/paper/subsets_10M_dur_20250922.rds")
-
-# --- 2. Perform Analysis with a Single, Vectorized Operation ---
-
-# Convert input data.frames to data.tables
-setDT(subsets_df)
-setDT(cea_data)
-
-subsets_df <- subsets_df %>% filter(id_sample %in% 1:30)
-
-# Perform the operations using data.table
-res1 <- cea_data[subsets_df, on = .(id_outbreak), allow.cartesian = TRUE][
-  , .(
-    sum_vacc_dose = sum(vacc_dose),
-    sum_s_ch = sum(s_ch_tot),
-    sum_s_ch_averted = sum(s_ch_averted_tot),
-    case_averted_per_1000_OCV = 1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
-    n_outbreaks_in_subset = .N
-  ),
-  by = .(size_prob_cutoff, id_sample, runid, vacc_week, vacc_cov)
-]
-
-# Ensure the result is not grouped (data.table automatically drops grouping)
-setkey(res1, NULL)
-# Ensure res1 is a data.table. This modifies res1 in place for efficiency.
-# setDT(res1)
-
-# summary across runid's and id_sample's
-res <- res1[, .(
-  vacc_dose_q500 = median(sum_vacc_dose),
-  s_ch_q500 = median(sum_s_ch),
-  s_ch_averted_q500 = median(sum_s_ch_averted),
-  case_averted_per_1000_OCV_q500 = median(case_averted_per_1000_OCV, na.rm = TRUE),
-  n_outbreaks_in_subset_q500 = median(n_outbreaks_in_subset)
-), by = .(size_prob_cutoff, vacc_week, vacc_cov)]
-
-
-# --- 3. Save the Final Output ---
-
-if (save_rds) {
-  # (Assuming tstamp() is a user-defined function for timestamps)
-  # tstamp <- function() format(Sys.time(), "%Y%m%d_%H%M%S")
-  saveRDS(res,
-    paste0("outputs/cea_onset_trigger_10m_doses_dur_cutoff_", tstamp(), ".rds")
-  )
-}
-
-# View a sample of the results
-print(res)
-res <- read_rds("outputs/cea_onset_trigger_10m_doses_size_cutoff_20250922.rds")
-res %>% filter(vacc_cov == 0.75, vacc_week %in% c(1,9), 
-               size_prob_cutoff %in% c(0,0.9))
 ```
 
 Analysis of median with IQR
