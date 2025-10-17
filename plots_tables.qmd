@@ -3923,35 +3923,95 @@ rm(cea_subsets_by_size_q1, cea_subsets_by_size_q2,
 
 ## Figure 4: Cumulative OCV Impact during OCV stockpile deployment
 
+Total suspected cases averted (s_ch_averted_tot)
 ```{r}
+# summary by subset_id in addition to the grouping variables # 
+# grouping variables \in c("vacc_cov","vacc_week","target_vacc_doses",
+# "vacc_priority","priority_prob", "subset_id","pp_r")
+
 cea_subsets <- 
   read_rds("outputs/paper/cea_summary_subsets_by_id_20251016.rds")
 
 pri <- "AR"
-VW_plot_seq <- seq(1,15,2)
 pr_model <- c(0.0, 0.7)
 
+keys <- c("vacc_cov","vacc_week","target_vacc_doses",
+          "vacc_priority","priority_prob", "subset_id","pp_r")
+
+value_col <- c("doses_used", "s_ch_averted_tot")
+
 d <- cea_subsets %>%
-  mutate(pp_r = round(priority_prob, 1)) %>% 
+  mutate(pp_r = round(priority_prob, 1), 
+         pp_f = factor(round(priority_prob, 1))) %>% 
   filter(vacc_priority == pri,
          pp_r %in% pr_model,
-         vacc_week == 1,
+         vacc_week == VW,
          vacc_cov == VC,
-         value_column %in% c("vacc_dose", "case_averted_per_1000_OCV"))
-         
-dsub <- d %>% 
-  filter(value_column == "vacc_dose") %>%
-  select(c("vacc_cov", "vacc_week", "target_vacc_doses", "vacc_priority",
-           "priority_prob", "subset_id", "q500")) 
+         value_column %in% value_col)
+  
+dw <- d %>%
+  select(any_of(keys), pp_r, pp_f, value_column,
+         mean, q025, q250, q500, q750, q975) %>%
+  pivot_wider(
+    names_from  = value_column,
+    values_from = c(mean, q025, q250, q500, q750, q975),
+    names_glue  = "{.value}__{value_column}"
+  )
 
-names(dsub) <- c("vacc_cov", "vacc_week", "target_vacc_doses", "vacc_priority",
-           "priority_prob", "subset_id", "vacc_dose_used")
+# impact_var: the column name of the impact variable in your wide names
+# e.g. "case_averted_per_1000_OCV"
+rename_impact_cols <- 
+  function(df, impact_var,
+           stats = c("mean","q025","q250","q500","q750","q975")) {
 
-dw <- left_join(subset(d, value_column != "vacc_dose"), dsub, 
-                by= c("vacc_cov", "vacc_week", "target_vacc_doses", 
-                      "vacc_priority", "priority_prob", "subset_id"))
+  # build a regex that matches e.g. ^(mean|q025|...)__case_averted_per_1000_OCV$
+  pat <- paste0("^(", paste(stats, collapse = "|"), ")__", 
+                stringr::str_replace_all(impact_var, "([\\W])", "\\\\\\1"), "$")
 
-View(dw)
+  df %>%
+    rename_with(
+      ~ stringr::str_replace(.x, pat, "\\1"),
+      .cols = matches(pat)
+    )
+}
+
+dw <- rename_impact_cols(dw, impact_var = value_col[2])
+```
+
+```{r}
+set.seed(42)
+ids <- sample(200,30) # just to reduce plotting load
+
+rf <- 0.2 # line withds and points scaled down compared to pca plots in Fig3
+p1 <- dw %>% 
+  # filter(subset_id %in% ids, pp_r == 0.0) %>%
+   filter(subset_id %in% ids, pp_r == 0.0, 
+          target_vacc_doses < 1e7, target_vacc_doses > 1e5) %>% 
+  ggplot(aes(x = q500__doses_used, 
+             color = as.factor(pp_r), 
+             group = as.factor(pp_r)), alpha=0.2) +
+  ci_layers_from_summary(
+    # dodge_width = 1.4,
+    lw95 = line_width_95 * rf,
+    lw50 = line_width_50 * rf,
+    pr_size = 2.4 * rf,
+    mean_size = x_size * rf,
+    mean_stroke = x_stroke * rf,
+    dodge_width = 0.6,
+    alpha95 = 0.2, alpha50 = 0.2,   # more see-through intervals
+    alpha_med = 0.2, alpha_mean = 0.2, # keep centers strong
+    use_jitter_points = TRUE,        # jitter only the points
+    jitter_width = 1
+  ) +
+  scale_x_log10("Vaccine doses deployed") +
+  # scale_y_log10("Total cases averted") +
+  scale_color_manual(
+    name = "",
+    values = my_discrete_colors[1:3],
+    labels = c(paste0(format_num(pr_model*100, 1), "%")))+
+  theme_light() +
+  theme_tight() 
+p1
 ```
 
 ```{r}
@@ -3959,27 +4019,78 @@ cea_subsets <-
   read_rds("outputs/paper/cea_summary_subsets_by_id_20251016.rds")
 
 pri <- "AR"
+
 VW_plot_seq <- seq(1,15,2)
 pr_model <- c(0.0, 0.7)
-# percentage case averted 
-# p1 <- cea_subsets %>%
-p1 <- dw %>%  
-  mutate(pp_r = round(priority_prob, 1)) %>% 
+
+si_lab <- label_number(scale_cut = cut_si(" "))
+
+# keys that identify a group in your d
+keys <- c("vacc_cov","vacc_week","target_vacc_doses",
+          "vacc_priority","priority_prob", "subset_id","pp_r")
+
+value_col <- c("doses_used", "case_averted_per_1000_OCV")
+d <- cea_subsets %>%
+  mutate(pp_r = round(priority_prob, 1), 
+         pp_f = factor(round(priority_prob, 1),
+                       levels = c(0.0, 0.7),
+                       labels = c("p = 0.0", "p = 0.7"))) %>% 
   filter(vacc_priority == pri,
          pp_r %in% pr_model,
-         vacc_week == 1,
+         vacc_week == VW,
          vacc_cov == VC,
-         value_column == "case_averted_per_1000_OCV") %>%
-  ggplot(aes(x = vacc_dose_used, 
+         value_column %in% value_col)
+
+dw <- d %>%
+  select(any_of(keys), pp_f, value_column,
+         mean, q025, q250, q500, q750, q975) %>%
+  pivot_wider(
+    names_from  = value_column,
+    values_from = c(mean, q025, q250, q500, q750, q975),
+    names_glue  = "{.value}__{value_column}"
+  )
+
+
+# impact_var: the column name of the impact variable in your wide names
+# e.g. "case_averted_per_1000_OCV"
+rename_impact_cols <- function(df, impact_var,
+                               stats = c("mean","q025","q250","q500","q750","q975")) {
+
+  # build a regex that matches e.g. ^(mean|q025|... )__case_averted_per_1000_OCV$
+  pat <- paste0("^(", paste(stats, collapse = "|"), ")__", 
+                stringr::str_replace_all(impact_var, "([\\W])", "\\\\\\1"), "$")
+
+  df %>%
+    rename_with(
+      ~ stringr::str_replace(.x, pat, "\\1"),
+      .cols = matches(pat)
+    )
+}
+
+dw <- rename_impact_cols(dw, impact_var = value_col[2])
+```
+
+```{r}
+set.seed(42)
+ids <- sample(200,40)
+
+rf <- 0.2 # reduction factor
+p1 <- dw %>%
+  ggplot(aes(x = q500__doses_used, 
              color = as.factor(pp_r), 
-             group = as.factor(pp_r))) +
+             group = as.factor(pp_r)), alpha=0.2) +
   ci_layers_from_summary(
-    dodge_width = 1.4,
-    lw95 = line_width_95,
-    lw50 = line_width_50,
-    pr_size = 2.4,
-    mean_size = x_size,
-    mean_stroke = x_stroke
+    # dodge_width = 1.4,
+    lw95 = line_width_95 * rf,
+    lw50 = line_width_50 * rf,
+    pr_size = 2.4 * rf,
+    mean_size = x_size * rf,
+    mean_stroke = x_stroke * rf,
+    dodge_width = 0.6,
+    alpha95 = 0.2, alpha50 = 0.2,   # more see-through intervals
+    alpha_med = 0.2, alpha_mean = 0.2, # keep centers strong
+    use_jitter_points = TRUE,        # jitter only the points
+    jitter_width = 1
   ) +
   scale_x_log10("Vaccine doses deployed") +
   scale_y_continuous("Cases averted\nper 1000 OCV") +
@@ -3990,32 +4101,6 @@ p1 <- dw %>%
   theme_light() +
   theme_tight() 
 p1
-```
-
-
-```{r}
-priority <- "AR"
-cea_subsets <- read_rds(paste0("outputs/cea_subsets_", priority, 
-                               "_onset_trigger_20251015.rds"))
-
-
-ocv_use <- clean_names(fread("data/paper/OCV_Use_GTFCC_Dashboard.csv"))
-ocv_use |> 
-  filter(shipped == "Shipped", type == "Reactive") |> 
-  group_by(year) |> 
-  summarize(num_ocv = sum(dose)) |>
-  setDT() -> ocv_year
-
-ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
-
-
-ocv_use2 <- clean_names(fread("outputs/paper/ocv_use_GTFCC_data_20241120.csv"))
-ocv_use2 %>% 
-  mutate(year_r1 = data.table::year(date_delivery_round_one)) %>% 
-  group_by(year_r1) %>% 
-  summarize(dose_r1 = sum(dose_delivered_round_one, na.rm=T)) -> ocv_year2
-
-ocv_year2$cum_dose_r1 <- cumsum(ocv_year2$dose_r1)
 ```
 
 

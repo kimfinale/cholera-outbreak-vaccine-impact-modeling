@@ -690,97 +690,14 @@ saveRDS(med_all_long,
                tstamp(), ".rds"))
 ```
 
+# Sampling outbreaks
 
+This section creates and analyzes subsets of outbreaks to simulate different targeting strategies.
 
+## Varying OCV budgets
 
-# Subset Analysis
+Outbreaks are randomly sampled for a given OCV budget. Outbreaks are eligible if the underlying population factored by the vaccine coverage proportion is smaller than the remaining vaccine doses. 
 
-This section creates and analyzes subsets of outbreaks to simulate different 
-targeting strategies.
-
-## Create Outbreak Subsets: sample until the target number of outbreaks is reached.
-
-```{r}
-outbk_dat <- outbreaks_filtered |>
-  summarize(
-    year = first(data.table::year(start_date)),
-    rural_urban = first(rural_urban),
-    ar = first(ar_per_10e3),
-    cfr = first(cfr_per_100percent),
-    spatial_scale = first(spatial_scale),
-    pop = first(outbreak_pop),
-    duration = first(duration_weeks),
-    size = first(total_s_ch),
-    .by = id_outbreak
-  )
-
-# --- 2. Setup Simulation Parameters ---
-priorities <- c("size", "dur", "AR")
-# ocv_doses <- c(1e6, 2e6, 10e6)
-n_outbreaks <- c(1, 5, 10, 50)
-nsubset <- 200
-probs <- seq(0, 0.9, 0.1)
-
-# --- 3. Run Simulations Functionally and in Parallel ---
-
-# Set up a parallel processing plan. This uses multiple CPU cores.
-# The number of workers can be adjusted, e.g., plan(multisession, workers = 4)
-plan(multisession)
-
-for (priority in priorities) {
-  for (n_outbk in n_outbreaks) {
-  # The outer map_dfr iterates over each probability cutoff.
-  # The inner future_map_dfr iterates over each simulation run in parallel.
-  # The .dfr suffix automatically row-binds the results into a single data frame.
-  DF <- map_dfr(probs, ~{
-    pr <- .x # Assign to a more readable variable name inside the loop
-    
-    # Filter data for the current probability cutoff
-    if (priority  == "size") {
-      dat_filtered <- outbk_dat |>
-        filter(size > quantile(outbk_dat$size, probs = pr))
-    }
-    else if (priority  == "dur") {
-      dat_filtered <- outbk_dat |>
-        filter(duration > quantile(outbk_dat$duration, probs = pr))
-    }
-    else if (priority  == "AR") {
-      dat_filtered <- outbk_dat |>
-        filter(ar > quantile(outbk_dat$ar, probs = pr))
-    }
-    # Run nsubset simulations for this cutoff *in parallel*
-    future_map_dfr(1:nsubset, ~{
-      j <- .x
-      set.seed(j) # Ensures reproducibility for each simulation run
-      
-      # Run the sampling function
-      smpl <- sample_outbreaks(
-        outbreak_data = dat_filtered,
-        target_population = NULL,
-        target_count = n_outbk,
-        sampling_method = "random"
-      )
-      
-      # Return a data frame for this single run
-      tibble(
-        id_outbreak = smpl$sampled_data$id_outbreak,
-        id_sample = j,
-        prob_cutoff = pr
-      )
-    }, .options = furrr_options(seed = TRUE)) # Ensures seeds are handled correctly in parallel
-    
-  }, .progress = TRUE) # Adds a progress bar for the outer loop
-  
-  # --- 4. Save the final results ---
-  saveRDS(DF, paste0("outputs/subsets_num_outbk_", n_outbk, 
-                     "_", priority, "_", tstamp(), ".rds"))
-  }
-}
-# Clean up parallel workers
-plan(sequential)
-```
-
-## Create Outbreak Subsets: sample until the target number of OCV doses is reached.
 
 ```{r}
 # Outbreak onset-triggered vaccination results
@@ -965,52 +882,19 @@ for (priority in priorities) {
 }
 ```
 
- - data.table version
+ - data.table way
 ```{r}
-library(data.table)
-
-## ---------- 1) Read all subset files efficiently ----------
-# Grid of filenames
-grid <- CJ(vacc_priority = priorities, ocv_dose = ocv_doses)
-grid[, fn := ifelse(ocv_dose < 1e6,
-                    sprintf("outputs/subsets_%sK_%s_20251015.rds", round(ocv_dose/1e3), vacc_priority),
-                    sprintf("outputs/subsets_%sM_%s_20251015.rds", round(ocv_dose/1e6), vacc_priority))]
-
-# Optional: parallel reading with future.apply
-# library(future.apply); plan(multisession)  # or multicore on Linux
-# subset_list <- future_lapply(grid$fn, readRDS, future.seed = TRUE)
-subset_list <- lapply(grid$fn, readRDS)
-
-subsets <- rbindlist(subset_list, fill = TRUE)
-setDT(subsets)
-setkey(subsets, vacc_priority, ocv_dose, prob, id_sample)
-
-## ---------- 2) Prepare CEA for fast lookup ----------
-setDT(cea)
-setkey(cea, id_outbreak)
-
-## ---------- 3) Build group index & metadata ----------
-# One group per (priority, dose, prob, id_sample)
-subsets[, grp := .GRP, by = .(vacc_priority, ocv_dose, prob, id_sample)]
-
-# Metadata to re-attach later (one row per group)
-meta <- unique(subsets[, .(grp, vacc_priority, ocv_dose, prob, id_sample,
-                           outbreak_count, doses_used)])
-
-# Map each group to its vector of outbreak IDs (list column)
-grp2ids <- subsets[, .(id_outbreak = list(unique(id_outbreak))), by = grp]
-
 ## ---------- 4) Worker that computes one group ----------
-compute_one_grp <- function(g) {
+compute_one_grp <- function(g, cea_data) {
   ids <- grp2ids[grp == g, id_outbreak][[1L]]
   if (length(ids) == 0L) return(NULL)
-
+  
   # Fast keyed subset on CEA
-  cea_sub <- cea[.(ids), nomatch = 0L]
-
+  cea_sub <- cea_data[.(ids), nomatch = 0L]
+  
   # Your existing aggregator
   out <- sum_over_outbreaks_by_runid(cea_sub, ori_occurred = TRUE)
-
+  
   # Attach metadata
   m <- meta[grp == g]
   out[, `:=`(
@@ -1021,30 +905,64 @@ compute_one_grp <- function(g) {
     outbreak_count   = m$outbreak_count,
     doses_used       = m$doses_used
   )]
-
-  out[]
+  
+    out[]
 }
+## ---------- 2) Prepare CEA for fast lookup ----------
+cea_data <- cea %>% filter(vacc_cov == 0.75, vacc_week == 9) 
+setDT(cea_data)
+setkey(cea_data, id_outbreak)  
 
-## ---------- 5) Compute & save per priority (flat lapply, no nested loops) ----------
-for (p in priorities) {
-  grp_p <- meta[vacc_priority == p, grp]
+## ---------- 1) Read all subset files efficiently ----------
+# Grid of filenames
+grid <- CJ(vacc_priority = priorities, ocv_dose = ocv_doses)
+grid[, fn := ifelse(ocv_dose < 1e6, 
+                    sprintf("outputs/subsets_n2000_%sK_%s_20251017.rds",
+                            round(ocv_dose/1e3), vacc_priority),
+                    sprintf("outputs/subsets_n2000_%sM_%s_20251017.rds", 
+                            round(ocv_dose/1e6), vacc_priority))]
 
-  # Optional: parallelize this lapply with future.apply if desired
-  # library(future.apply); plan(multisession)
-  # res_list <- future_lapply(grp_p, compute_one_grp, future.seed = TRUE)
-  res_list <- lapply(grp_p, compute_one_grp)
+subset_list <- lapply(grid$fn, readRDS)
+subsets_all <- rbindlist(subset_list) 
 
-  subsets_cea_priority <- rbindlist(res_list, fill = TRUE)
-  saveRDS(
-    subsets_cea_priority,
-    sprintf("outputs/cea_subsets_%s_onset_trigger_%s.rds", p, tstamp())
-  )
+setDT(subsets_all)
+setkey(subsets_all, vacc_priority, ocv_dose, vacc_cov, prob, id_sample)
+
+id0 <- seq(1, 1901, by=100)
+ids_list <- lapply(id0, function(x) seq(x, x+99))
+
+for (ids in ids_list) {
+  subsets <- subsets_all[id_sample %in% ids]
+  ## ---------- 3) Build group index & metadata ----------
+  # One group per (priority, dose, prob, id_sample)
+  subsets[, grp := .GRP, by = .(vacc_priority, ocv_dose, prob, id_sample)]
+  
+  # Metadata to re-attach later (one row per group)
+  meta <- unique(subsets[, .(grp, vacc_priority, ocv_dose, prob, id_sample,
+                             outbreak_count, doses_used)])
+  
+  # Map each group to its vector of outbreak IDs (list column)
+  grp2ids <- subsets[, .(id_outbreak = list(unique(id_outbreak))), by = grp]
+  
+  ## ---------- 5) Compute & save per priority (flat lapply, no nested loops) ----------
+  for (p in priorities) {
+    grp_p <- meta[vacc_priority == p, grp]
+  
+    # Optional: parallelize this lapply with future.apply if desired
+    # library(future.apply); plan(multisession)
+    # res_list <- future_lapply(grp_p, compute_one_grp, future.seed = TRUE)
+    res_list <- lapply(grp_p, compute_one_grp, cea_data)
+  
+    subsets_cea_priority <- rbindlist(res_list, fill = TRUE)
+    saveRDS(
+      subsets_cea_priority,
+      sprintf("outputs/cea_subsets_%d_%d_%s_onset_trigger_%s.rds", 
+              dplyr::first(ids),  dplyr::last(ids), p, tstamp())
+    )
+  }
 }
+# parallel data.table
 
-```
-
- - Parallel version
-```{r}
 library(data.table)
 library(future.apply)
 library(qs)
@@ -1052,7 +970,7 @@ library(qs)
 ## 0) One-time: persist big globals for workers to load (no exporting)
 cea_path     <- tempfile(fileext = ".qs")
 grp2ids_path <- tempfile(fileext = ".qs")
-qsave(cea, cea_path, preset = "fast")          # ~2–5x faster than saveRDS
+qsave(cea_data, cea_path, preset = "fast")          # ~2–5x faster than saveRDS
 qsave(grp2ids, grp2ids_path, preset = "fast")
 
 ## 1) Pre-slice lightweight metadata to keep per-task payload tiny
@@ -2462,4 +2380,84 @@ for (pr in probs) {
                        tstamp(), ".rds"))
 }
 
+```
+Sampling a fixed number of outbreaks
+```{r}
+outbk_dat <- outbreaks_filtered |>
+  summarize(
+    year = first(data.table::year(start_date)),
+    rural_urban = first(rural_urban),
+    ar = first(ar_per_10e3),
+    cfr = first(cfr_per_100percent),
+    spatial_scale = first(spatial_scale),
+    pop = first(outbreak_pop),
+    duration = first(duration_weeks),
+    size = first(total_s_ch),
+    .by = id_outbreak
+  )
+
+# --- 2. Setup Simulation Parameters ---
+priorities <- c("size", "dur", "AR")
+# ocv_doses <- c(1e6, 2e6, 10e6)
+n_outbreaks <- c(1, 5, 10, 50)
+nsubset <- 200
+probs <- seq(0, 0.9, 0.1)
+
+# --- 3. Run Simulations Functionally and in Parallel ---
+
+# Set up a parallel processing plan. This uses multiple CPU cores.
+# The number of workers can be adjusted, e.g., plan(multisession, workers = 4)
+plan(multisession)
+
+for (priority in priorities) {
+  for (n_outbk in n_outbreaks) {
+  # The outer map_dfr iterates over each probability cutoff.
+  # The inner future_map_dfr iterates over each simulation run in parallel.
+  # The .dfr suffix automatically row-binds the results into a single data frame.
+  DF <- map_dfr(probs, ~{
+    pr <- .x # Assign to a more readable variable name inside the loop
+    
+    # Filter data for the current probability cutoff
+    if (priority  == "size") {
+      dat_filtered <- outbk_dat |>
+        filter(size > quantile(outbk_dat$size, probs = pr))
+    }
+    else if (priority  == "dur") {
+      dat_filtered <- outbk_dat |>
+        filter(duration > quantile(outbk_dat$duration, probs = pr))
+    }
+    else if (priority  == "AR") {
+      dat_filtered <- outbk_dat |>
+        filter(ar > quantile(outbk_dat$ar, probs = pr))
+    }
+    # Run nsubset simulations for this cutoff *in parallel*
+    future_map_dfr(1:nsubset, ~{
+      j <- .x
+      set.seed(j) # Ensures reproducibility for each simulation run
+      
+      # Run the sampling function
+      smpl <- sample_outbreaks(
+        outbreak_data = dat_filtered,
+        target_population = NULL,
+        target_count = n_outbk,
+        sampling_method = "random"
+      )
+      
+      # Return a data frame for this single run
+      tibble(
+        id_outbreak = smpl$sampled_data$id_outbreak,
+        id_sample = j,
+        prob_cutoff = pr
+      )
+    }, .options = furrr_options(seed = TRUE)) # Ensures seeds are handled correctly in parallel
+    
+  }, .progress = TRUE) # Adds a progress bar for the outer loop
+  
+  # --- 4. Save the final results ---
+  saveRDS(DF, paste0("outputs/subsets_num_outbk_", n_outbk, 
+                     "_", priority, "_", tstamp(), ".rds"))
+  }
+}
+# Clean up parallel workers
+plan(sequential)
 ```
