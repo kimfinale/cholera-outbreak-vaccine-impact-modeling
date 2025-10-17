@@ -1274,77 +1274,64 @@ ci_layers <- function(group = NULL, color = NULL,
 }
 
 
-#' Quantile whiskers + median + mean "X" for PRE-SUMMARIZED data
-#' Expects columns: q025, q250, q500, q750, q975, mean
-#' Map x / color / group in ggplot(), e.g.:
-#' ggplot(df, aes(x = vacc_week, color = factor(vacc_cov), group = factor(vacc_cov)))
-ci_layers_from_summary <- function(
-    dodge_width = 0.5,
-    lw95 = 0.6,
-    lw50 = 0.9,
-    pr_size = 1.5,
-    mean_size = 3,
-    mean_stroke = 0.8,
-    # NEW: transparency controls
-    alpha95 = 0.45,
-    alpha50 = 0.75,
-    alpha_med = 0.9,
-    alpha_mean = 1.0,
-    # NEW: jitter options for points (helps when many overlap exactly)
-    use_jitter_points = TRUE,
-    jitter_width = 0.12,
-    jitter_height = 0,
-    # Optional: tweak dodging behaviour for ranges
-    preserve = c("total", "single")  # passed to position_dodge2()
-) {
+ci_layers_from_summary <- function(..., x_discrete = TRUE, use_jitter_points = TRUE,
+                                   dodge_width = 0.5, preserve = c("total","single"),
+                                   lw95=0.6,lw50=0.9,pr_size=1.5,mean_size=3,mean_stroke=0.8,
+                                   alpha95=0.45,alpha50=0.75,alpha_med=0.9,alpha_mean=1) {
   preserve <- match.arg(preserve)
 
-  # Positions: dodged ranges; points may be jittered+dodged
-  pos_range <- ggplot2::position_dodge2(width = dodge_width, preserve = preserve)
-  pos_point <- if (isTRUE(use_jitter_points) && jitter_width > 0) {
-    ggplot2::position_jitterdodge(
-      jitter.width = jitter_width,
-      jitter.height = jitter_height,
-      dodge.width  = dodge_width
-    )
+  if (isTRUE(x_discrete)) {
+    pos_range <- ggplot2::position_dodge2(width = dodge_width, preserve = preserve)
+    pos_point <- if (isTRUE(use_jitter_points)) {
+      ggplot2::position_jitterdodge(jitter.width = 0.12, jitter.height = 0,
+                                    dodge.width = dodge_width)
+    } else {
+      ggplot2::position_dodge2(width = dodge_width, preserve = preserve)
+    }
   } else {
-    ggplot2::position_dodge(width = dodge_width)
+    # continuous x: NO DODGE/JITTER
+    pos_range <- ggplot2::position_identity()
+    pos_point <- ggplot2::position_identity()
   }
 
   list(
-    # 95% interval
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = q025, ymax = q975),
-      position  = pos_range,
-      linewidth = lw95,
-      alpha     = alpha95
-    ),
-    # 50% interval
-    ggplot2::geom_linerange(
-      ggplot2::aes(ymin = q250, ymax = q750),
-      position  = pos_range,
-      linewidth = lw50,
-      alpha     = alpha50
-    ),
-    # median (dot)
-    ggplot2::geom_point(
-      ggplot2::aes(y = q500),
-      position = pos_point,
-      size     = pr_size,
-      alpha    = alpha_med
-    ),
-    # mean as "X"
-    ggplot2::geom_point(
-      ggplot2::aes(y = mean),
-      position = pos_point,
-      shape    = 4,
-      size     = mean_size,
-      stroke   = mean_stroke,
-      alpha    = alpha_mean
-    )
+    ggplot2::geom_linerange(ggplot2::aes(ymin=q025, ymax=q975), position=pos_range, linewidth=lw95, alpha=alpha95),
+    ggplot2::geom_linerange(ggplot2::aes(ymin=q250, ymax=q750), position=pos_range, linewidth=lw50, alpha=alpha50),
+    ggplot2::geom_point    (ggplot2::aes(y=q500), position=pos_point, size=pr_size, alpha=alpha_med),
+    ggplot2::geom_point    (ggplot2::aes(y=mean), position=pos_point, shape=4, size=mean_size, stroke=mean_stroke, alpha=alpha_mean)
   )
 }
 
+
+#' #' Quantile whiskers + median + mean "X" for PRE-SUMMARIZED data
+#' #' Expects columns: q025,q250,q500,q750,q975,mean
+#' #' Assumes aesthetics are mapped in ggplot(), e.g.,
+#' #'   ggplot(df, aes(x = vacc_week, color = factor(vacc_cov), group = factor(vacc_cov)))
+#' ci_layers_from_summary <- function(dodge_width = 0.5,
+#'                                    lw95 = 0.6,
+#'                                    lw50 = 0.9,
+#'                                    pr_size = 1.5,
+#'                                    mean_size = 3,
+#'                                    mean_stroke = 0.8) {
+#'   list(
+#'     # 95% central interval
+#'     geom_linerange(aes(ymin = q025, ymax = q975),
+#'                    position = position_dodge(width = dodge_width),
+#'                    linewidth = lw95),
+#'     # 50% IQR
+#'     geom_linerange(aes(ymin = q250, ymax = q750),
+#'                    position = position_dodge(width = dodge_width),
+#'                    linewidth = lw50),
+#'     # median (dot)
+#'     geom_point(aes(y = q500),
+#'                position = position_dodge(width = dodge_width),
+#'                size = pr_size),
+#'     # mean as "X"
+#'     geom_point(aes(y = mean),
+#'                position = position_dodge(width = dodge_width),
+#'                shape = 4, size = mean_size, stroke = mean_stroke)
+#'   )
+#' }
 
 #' Add summary braces and markers for mean/median with uncertainty ranges
 #'

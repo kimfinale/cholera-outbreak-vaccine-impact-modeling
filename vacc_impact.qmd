@@ -1023,9 +1023,11 @@ invisible(future_lapply(priorities, function(pri) {
 
 Calculate statistics (mean, quantiles) by grouping variables
 
+We group by subset_id in addition to other grouping variables (c("vacc_cov", "vacc_week", "target_vacc_doses", "vacc_priority"). The variability in the results, therefore, comes from runid's, for the same set of outbreaks (i.e., the same subset_id). This has the benefit of same or similar vaccine doses are deployed within the subset and therefore comparable. For the delayed vaccination (e.g., week 9), for some outbreaks may have ended and therefore, different number of vaccine doses could have been deployed. 
+
 ```{r}
 group_var <- c("vacc_cov", "vacc_week", "target_vacc_doses", 
-  "vacc_priority", "priority_prob")
+  "vacc_priority", "priority_prob", "subset_id")
 
 summary_cols <- c("pct_reduc_case", 
                   "n_outbreaks", "outbreak_count",
@@ -1037,71 +1039,35 @@ summary_cols <- c("pct_reduc_case",
 
 priorities <- c("AR", "dur", "size")
 
+id0 <- seq(1, 1901, by=100)
+ids_list <- lapply(id0, function(x) seq(x, x+99))
+
+ids <- ids_list[[3]]
+
+cea_summary_subsets_list <- vector('list', length(priorities))
+i <- 1
 for (pri in priorities) {
-  subset_data <- 
-    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
-  # forgot to include this column when generating the data
-  subset_data$vacc_priority <- pri
+#  subset_data <- 
+#    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
+subset_data <- 
+  read_rds(paste0("outputs/cea_subsets_", ids[1], "_", ids[length(ids)],  "_", pri, "_onset_trigger_20251017.rds"))
   
-  cea_summary <- subset_data %>%
+  # forgot to include this column when generating the data
+#  subset_data$vacc_priority <- pri
+  
+  cea_summary_subsets_list[[i]] <- subset_data %>%
     filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
     build_summary(value_col = summary_cols, by=group_var) 
-  
-  saveRDS(cea_summary, 
-          paste0("outputs/paper/cea_summary_", pri, "_subsets_", tstamp(),
-                 ".rds"))
+  i <- i + 1
 }
-# combine and save 
-cea_summary_subsets_list <- lapply(priorities, function(pri) 
-  read_rds(paste0("outputs/paper/cea_summary_", pri,
-                               "_subsets_20251016.rds")))
-cea_summary_subsets <- rbindlist(cea_summary_subsets_list) 
-saveRDS(cea_summary_subsets, 
-          paste0("outputs/paper/cea_summary_subsets_", tstamp(),
-                 ".rds"))
-```
-
-- group also by subset_id
-This has an effect of creating a subset of the same size of vaccine doses because the number of vaccine doses vary only across subsets not across runid's
-```{r}
-group_var <- c("vacc_cov", "vacc_week", "target_vacc_doses", 
-  "vacc_priority", "priority_prob","subset_id")
-
-summary_cols <- c("pct_reduc_case", 
-                  "n_outbreaks", "outbreak_count",
-                  "vacc_dose", "doses_used",
-                  "s_ch_averted_tot",  "death_averted_tot",
-                  "case_averted_per_1000_OCV", "death_averted_per_1000_OCV",
-                  "cost_per_daly_averted",
-                  "cost_per_case_averted", "cost_per_death_averted")
-
-priorities <- c("AR", "dur", "size")
-
-for (pri in priorities) {
-  subset_data <- 
-    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
-  # forgot to include this column when generating the data
-  subset_data$vacc_priority <- pri
-  
-  cea_summary_subsets <- subset_data %>%
-    filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-    build_summary(value_col = summary_cols, by=group_var) 
-  
-  saveRDS(cea_summary_subsets, 
-          paste0("outputs/paper/cea_summary_", pri, "_subsets_by_id_", tstamp(),
-                 ".rds"))
-}
-
-cea_summary_subsets_list <- lapply(priorities, function(pri) 
-  read_rds(paste0("outputs/paper/cea_summary_", pri,
-                               "_subsets_by_id_20251016.rds")))
 
 cea_summary_subsets <- rbindlist(cea_summary_subsets_list) 
 saveRDS(cea_summary_subsets, 
-          paste0("outputs/paper/cea_summary_subsets_by_id_", tstamp(),
+          paste0("outputs/paper/cea_summary_subsets_", ids[1], "_", 
+                ids[length(ids)],  "_", tstamp(),
                  ".rds"))
-
 ```
+
 
 Analysis of median with IQR
 ```{r}
