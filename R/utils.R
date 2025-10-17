@@ -1276,7 +1276,9 @@ ci_layers <- function(group = NULL, color = NULL,
 
 ci_layers_from_summary <- function(..., x_discrete = TRUE, use_jitter_points = TRUE,
                                    dodge_width = 0.5, preserve = c("total","single"),
-                                   lw95=0.6,lw50=0.9,pr_size=1.5,mean_size=3,mean_stroke=0.8,
+                                   lw95=0.6,lw50=0.9,pr_size=1.5,
+                                   mean_size=3,
+                                   mean_stroke=0.8,
                                    alpha95=0.45,alpha50=0.75,alpha_med=0.9,alpha_mean=1) {
   preserve <- match.arg(preserve)
 
