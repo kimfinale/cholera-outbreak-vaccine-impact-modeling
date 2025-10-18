@@ -60,12 +60,7 @@ conflicts_prefer(ggplot2::margin)
 save_plot <- FALSE
 save_table <- FALSE
 
-# Configure figure size settings
-figure_size <- data.frame(
-  journal = "Lancet",
-  single = 85,   # Width for single-column figures (mm)
-  double = 178   # Width for double-column figures (mm)
-)
+
 fgw1 <- figure_size[figure_size$journal == "Lancet",]$single
 fgw2 <- figure_size[figure_size$journal == "Lancet",]$double
 
@@ -3928,8 +3923,9 @@ Total suspected cases averted (s_ch_averted_tot)
 # summary by subset_id in addition to the grouping variables # 
 # grouping variables \in c("vacc_cov","vacc_week","target_vacc_doses",
 # "vacc_priority","priority_prob", "subset_id","pp_r")
-cea_subsets <- 
-  read_rds("outputs/paper/cea_summary_subsets_1_100_20251017.rds")
+fls <- c("outputs/paper/cea_summary_subsets_1_100_20251017.rds",
+         "outputs/paper/cea_summary_subsets_101_200_20251017.rds")
+cea_subsets <- map_dfr(fls, read_rds)
 
 pri <- "AR"
 pr_model <- c(0.0, 0.5)

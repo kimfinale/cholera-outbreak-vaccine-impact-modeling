@@ -121,7 +121,8 @@ calculate_impact_by_subset <- function(data,
 #'
 #' @return A tibble with estimated decay rate (k_hat) and half-life
 #' @export
-fit_decay_model <- function(df, y_var = "pct_reduc_case", x_var = "vacc_week", min_rows = 3) {
+fit_decay_model <- function(df, y_var = "pct_reduc_case",
+                            x_var = "vacc_week", min_rows = 3) {
   if (nrow(df) < min_rows) {
     return(tibble(k_hat = NA_real_, half_life = NA_real_))
   }
@@ -733,11 +734,6 @@ add_cea_results_all_outbreaks <- function(svim) {
 }
 
 
-
-#==============================================================================
-# Random-only outbreak sampler with dose budgeting
-#==============================================================================
-
 #' Randomly sample outbreaks under an OCV dose budget and/or a count target
 #'
 #' At each draw, only outbreaks with population <= (remaining ocv doses / target_coverage)
@@ -858,17 +854,9 @@ sample_outbreaks <- function(outbreak_data,
 }
 
 
-
 # Helper function for concise NULL replacement (available in rlang `||`)
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
-
-
-
-
-#==============================================================================
-# SECTION 10: FORMATTING AND VISUALIZATION FUNCTIONS
-#==============================================================================
 
 #' Format Numbers with Thousands Separators
 #'
@@ -960,6 +948,7 @@ get_group_id <- function(x, cutoff) {
   return(NA)
 }
 
+
 #' Add Summary Statistics
 #'
 #' Adds outbreak characteristics and groups outbreaks by size, duration, and attack rate
@@ -1007,6 +996,7 @@ add_summary_stats <- function(d, case_trigger=FALSE) {
 
   return(d)
 }
+
 
 #' Summarize Impact Metrics
 #'
@@ -1129,6 +1119,7 @@ svim_summary_all_outbreaks <- function(d, case_trigger=FALSE) {
 get_adm <- function(x) {
   lapply(x, function(z) grep("[a-zA-Z+]", strsplit(z, "::|-")[[1]], value=TRUE))
 }
+
 
 #==============================================================================
 # SECTION 11: THEMING FUNCTIONS FOR PLOTS
@@ -1274,18 +1265,42 @@ ci_layers <- function(group = NULL, color = NULL,
 }
 
 
-ci_layers_from_summary <- function(..., x_discrete = TRUE, use_jitter_points = TRUE,
-                                   dodge_width = 0.5, preserve = c("total","single"),
-                                   lw95=0.6,lw50=0.9,pr_size=1.5,
-                                   mean_size=3,
-                                   mean_stroke=0.8,
-                                   alpha95=0.45,alpha50=0.75,alpha_med=0.9,alpha_mean=1) {
+ci_layers_from_summary <- function(...,
+                                   x_discrete = FALSE,
+                                   use_jitter_points = FALSE,
+                                   dodge_width = 0.5,
+                                   preserve = c("total","single"),
+                                   lw95 = 0.6,
+                                   lw50 = 0.9,
+                                   pr_size = 1.5,
+                                   mean_size = 3,
+                                   mean_stroke = 0.8,
+                                   alpha = NULL,
+                                   alpha95 = 0.45,
+                                   alpha50 = 0.75,
+                                   alpha_med = 0.9,
+                                   alpha_mean = 1) {
   preserve <- match.arg(preserve)
 
+  # If a master alpha is provided, use it for all layers.
+  # You can also pass a length-4 vector to set each layer in order:
+  # c(95% range, 50% range, median pt, mean "X")
+  if (!is.null(alpha)) {
+    if (length(alpha) == 1L) {
+      alpha95 <- alpha50 <- alpha_med <- alpha_mean <- alpha
+    } else if (length(alpha) == 4L) {
+      alpha95 <- alpha[1]; alpha50 <- alpha[2]
+      alpha_med <- alpha[3]; alpha_mean <- alpha[4]
+    } else {
+      stop("`alpha` must be length 1 (global) or length 4 (per layer).")
+    }
+  }
   if (isTRUE(x_discrete)) {
-    pos_range <- ggplot2::position_dodge2(width = dodge_width, preserve = preserve)
+    pos_range <- ggplot2::position_dodge2(width = dodge_width,
+                                          preserve = preserve)
     pos_point <- if (isTRUE(use_jitter_points)) {
-      ggplot2::position_jitterdodge(jitter.width = 0.12, jitter.height = 0,
+      ggplot2::position_jitterdodge(jitter.width = 0.12,
+                                    jitter.height = 0,
                                     dodge.width = dodge_width)
     } else {
       ggplot2::position_dodge2(width = dodge_width, preserve = preserve)
@@ -1297,10 +1312,16 @@ ci_layers_from_summary <- function(..., x_discrete = TRUE, use_jitter_points = T
   }
 
   list(
-    ggplot2::geom_linerange(ggplot2::aes(ymin=q025, ymax=q975), position=pos_range, linewidth=lw95, alpha=alpha95),
-    ggplot2::geom_linerange(ggplot2::aes(ymin=q250, ymax=q750), position=pos_range, linewidth=lw50, alpha=alpha50),
-    ggplot2::geom_point    (ggplot2::aes(y=q500), position=pos_point, size=pr_size, alpha=alpha_med),
-    ggplot2::geom_point    (ggplot2::aes(y=mean), position=pos_point, shape=4, size=mean_size, stroke=mean_stroke, alpha=alpha_mean)
+    ggplot2::geom_linerange(ggplot2::aes(ymin=q025, ymax=q975),
+                            position=pos_range, linewidth=lw95, alpha=alpha95),
+    ggplot2::geom_linerange(ggplot2::aes(ymin=q250, ymax=q750),
+                            position=pos_range, linewidth=lw50,
+                            alpha=alpha50),
+    ggplot2::geom_point(ggplot2::aes(y=q500),
+                            position=pos_point, size=pr_size, alpha=alpha_med),
+    ggplot2::geom_point(ggplot2::aes(y=mean),
+                        position=pos_point, shape=4,
+                        size=mean_size, stroke=mean_stroke, alpha=alpha_mean)
   )
 }
 
@@ -1591,15 +1612,23 @@ erf <- function(x) 2 * pnorm(x * sqrt(2)) - 1
 #' @return Quantile value
 quan_func <- function(x) exp(mu + sqrt(2*sigma*sigma) / erf(2*p-1))
 
-#' Journal Figure Size Reference
-#'
-#' Data frame with standard figure sizes for different journals
+#' #' Journal Figure Size Reference
+#' #'
+#' #' Data frame with standard figure sizes for different journals
+#' figure_size <- data.frame(
+#'   journal = c("Nature", "Elsevier", "Lancet"),
+#'   single = c(89, 90, 75),
+#'   double = c(183, 190, 154),
+#'   unit = c("mm", "mm", "mm")
+#' )
+
+# Configure figure size settings
 figure_size <- data.frame(
-  journal = c("Nature", "Elsevier", "Lancet"),
-  single = c(89, 90, 75),
-  double = c(183, 190, 154),
-  unit = c("mm", "mm", "mm")
+  journal = "Lancet",
+  single = 85,   # Width for single-column figures (mm)
+  double = 178   # Width for double-column figures (mm)
 )
+
 
 #==============================================================================
 # SECTION 3: DATE AND TIME UTILITIES
@@ -1793,7 +1822,7 @@ draw_parameter_samples <- function(nruns = 200, parameter_data = NULL) {
 #'
 #' @param data Time series data for a single outbreak
 #' @param age_dist Age distribution data
-#' @param vacc_week Week of vaccination
+#' @param no_ori_delay_outbreak_end Delay the ORI is not implemented after the end of the outbreak
 #' @param case_trigger Case threshold to trigger vaccination
 #' @param vacc_cov Vaccination coverage
 #' @param dve Direct vaccine effectiveness
@@ -1803,13 +1832,12 @@ draw_parameter_samples <- function(nruns = 200, parameter_data = NULL) {
 #' @return Data frame with vaccine impact results
 vacc_impact_outbreak_weekly <- function(data = NULL,
                                         age_dist = NULL,
-                                        # vacc_week = NULL,
-                                        # case_trigger = NULL,
                                         vacc_cov = NULL,
                                         dve = NULL,
                                         ive_data = NULL,
                                         ive_rownum = NULL,
-                                        week_delay = NULL) {
+                                        week_delay = NULL,
+                                        no_ori_delay_outbreak_end = 0) {
 
   # Get year as character
   yr_ch <- as.character(data$year[1])
@@ -1830,9 +1858,7 @@ vacc_impact_outbreak_weekly <- function(data = NULL,
                  "deaths", "pop", "year")]
 
   # Add vaccination parameters
-  # df$vacc_week <- vacc_week
   df$week_delay_to_vacc_effect <- week_delay
-  # df$case_trigger <- case_trigger
   df$vacc_cov <- vacc_cov
   df$ive <- ive
   df$prop_u5 <- prop_u5
@@ -1845,8 +1871,6 @@ vacc_impact_outbreak_weekly <- function(data = NULL,
     df$deaths_averted <- 0
   }
   else {
-    df$ori_occurred <- TRUE
-
     # Calculate fraction of cases to be averted via vaccination
     # Based on direct and indirect effects for under 5 and 5+ age groups
     fa_u5 <- 1 - (vacc_cov*(1-dve[1])*(1-ive)+(1-vacc_cov)*(1-ive))
@@ -1872,118 +1896,16 @@ vacc_impact_outbreak_weekly <- function(data = NULL,
                                           (1-prop_u5) * frac_averted_5p)
   }
 
+  # Indicator if the ORI has ocurred
+  # ORI might occurr if ORI has occurred
+  if (week_delay < nrow(data) + no_ori_delay_outbreak_end) {
+    df$ori_occurred <- TRUE
+  } else{
+    df$ori_occurred <- FALSE
+  }
   # Remove unnecessary columns
   return(subset(df, select = -c(ive, prop_u5)))
 }
-
-#' Run Vaccine Impact Model for Multiple Outbreaks (Weekly)
-#'
-#' Computes vaccine impact across multiple outbreaks with age-specific effects
-#'
-#' @param outbreak_data Time series data for multiple outbreaks
-#' @param ive_data Indirect vaccine effectiveness data
-#' @param parameters Parameter values for the model
-#' @param age_dist Age distribution data
-#' @param vacc_week Week of vaccination
-#' @param case_trigger Case threshold to trigger vaccination
-#' @param vacc_cov Vaccination coverage
-#' @param runid Run ID for parameter set
-#' @return Data frame with aggregated vaccine impact results
-# run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
-#                                             ive_data = NULL,
-#                                             parameters = NULL,
-#                                             age_dist = NULL,
-#                                             vacc_week = NULL,
-#                                             case_trigger = NULL,
-#                                             vacc_cov = NULL,
-#                                             runid = NULL) {
-#
-#   # Get unique outbreak IDs
-#   outbreak_ids <- unique(outbreak_data$id_outbreak)
-#
-#   # Create lists to store simulation results
-#   lst <- vector("list", length(outbreak_ids))
-#   lst2 <- vector("list", length(vacc_cov))
-#   lst3 <- vector("list", length(vacc_week))
-#
-#   # Extract parameters for this run
-#   p <- parameters[runid, c("dur_campaign", "delay_vacc_effect",
-#                            "vacc_effect_direct_u5", "vacc_effect_direct_5p",
-#                            "vacc_effect_indirect_id")]
-#
-#   # Get direct vaccine effectiveness values
-#   dve <- c(p$vacc_effect_direct_u5, p$vacc_effect_direct_5p)
-#
-#   # Time-triggered vaccination scenario
-#   if (!is.null(vacc_week) & is.null(case_trigger)) {
-#     for (k in 1:length(vacc_week)) {
-#       # Calculate time to vaccine effect
-#       time_to_vacc <- (vacc_week[k] - 1)*7 + 3.5 # vaccinations start at mid-day
-#       week_delay <- round((time_to_vacc + p$dur_campaign/2 + p$delay_vacc_effect)/7)
-#
-#       for (j in 1:length(vacc_cov)) {
-#         for (i in 1:length(outbreak_ids)) {
-#           # Calculate impact for this outbreak
-#           d <- vacc_impact_outbreak_weekly(
-#             data = outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],],
-#             age_dist = age_dist,
-#             vacc_week = vacc_week[k],
-#             case_trigger = case_trigger,
-#             vacc_cov = vacc_cov[j],
-#             dve = dve,
-#             ive_data = ive_data,
-#             ive_rownum = p$vacc_effect_indirect_id,
-#             week_delay = week_delay)
-#
-#           lst[[i]] <- d
-#         }
-#         lst2[[j]] <- rbindlist(lst)
-#       }
-#       lst3[[k]] <- rbindlist(lst2)
-#     }
-#   }
-#   # Case-triggered vaccination scenario
-#   else if (!is.null(case_trigger) & is.null(vacc_week)) {
-#     for (k in 1:length(case_trigger)) {
-#       for (j in 1:length(vacc_cov)) {
-#         for (i in 1:length(outbreak_ids)) {
-#           # Get data for this outbreak
-#           data <- outbreak_data[outbreak_data$id == outbreak_ids[i],]
-#
-#           # Calculate when vaccination would be triggered
-#           cum_case <- cumsum(data$s_ch)
-#           vacc_week <- min(which(cum_case >= case_trigger[k])) # could be Inf
-#
-#           # Calculate time to vaccine effect
-#           time_to_vacc <- (vacc_week - 1)*7 + 3.5 # vaccinations start at mid-day
-#           week_delay <- round((time_to_vacc + p$dur_campaign/2 + p$delay_vacc_effect)/7)
-#
-#           # Calculate impact for this outbreak
-#           d <- vacc_impact_outbreak_weekly(
-#             data = data,
-#             age_dist = age_dist,
-#             vacc_week = vacc_week,
-#             case_trigger = case_trigger[k],
-#             vacc_cov = vacc_cov[j],
-#             dve = dve,
-#             ive_data = ive_data,
-#             ive_rownum = p$vacc_effect_indirect_id,
-#             week_delay = week_delay)
-#
-#           lst[[i]] <- d
-#         }
-#         lst2[[j]] <- rbindlist(lst)
-#       }
-#       lst3[[k]] <- rbindlist(lst2)
-#     }
-#   }
-#
-#   # Combine results and add run ID
-#   res <- rbindlist(lst3)
-#   res$runid <- runid
-#
-#   return(as.data.frame(res))
-# }
 
 
 #' Run Vaccine Impact Model for Multiple Outbreaks (Weekly)
@@ -2004,6 +1926,7 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
                                             parameters = NULL,
                                             age_dist = NULL,
                                             vacc_week = NULL,
+                                            no_ori_delay_outbreak_end = 0,
                                             case_trigger = NULL,
                                             vacc_cov = NULL,
                                             runid = NULL) {
@@ -2036,15 +1959,17 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
         for (i in 1:length(outbreak_ids)) {
           # Calculate impact for this outbreak
           d <- vacc_impact_outbreak_weekly(
-            data = outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],],
-            age_dist = age_dist,
-            # vacc_week = vacc_week[k],
-            # case_trigger = case_trigger,
-            vacc_cov = vacc_cov[j],
-            dve = dve,
-            ive_data = ive_data,
-            ive_rownum = p$vacc_effect_indirect_id,
-            week_delay = week_delay)
+              data = outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],],
+              age_dist = age_dist,
+              # vacc_week = vacc_week[k],
+              # case_trigger = case_trigger,
+              vacc_cov = vacc_cov[j],
+              dve = dve,
+              ive_data = ive_data,
+              ive_rownum = p$vacc_effect_indirect_id,
+              week_delay = week_delay,
+              no_ori_delay_outbreak_end = no_ori_delay_outbreak_end
+            )
 
           d$vacc_week = vacc_week[k]
           d$case_trigger = case_trigger
