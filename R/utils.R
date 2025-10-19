@@ -1863,7 +1863,7 @@ vacc_impact_outbreak_weekly <- function(data = NULL,
   df$ive <- ive
   df$prop_u5 <- prop_u5
   df$ori_occurred <- FALSE
-
+  df$no_ori_delay_outbreak_end <- no_ori_delay_outbreak_end
   # If vaccination happens after outbreak ended, no cases are averted
   if (week_delay > nrow(data)) {
     df$s_ch_averted <- 0
@@ -1903,6 +1903,7 @@ vacc_impact_outbreak_weekly <- function(data = NULL,
   } else{
     df$ori_occurred <- FALSE
   }
+
   # Remove unnecessary columns
   return(subset(df, select = -c(ive, prop_u5)))
 }

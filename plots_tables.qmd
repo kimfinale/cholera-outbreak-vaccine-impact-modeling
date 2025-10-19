@@ -60,6 +60,12 @@ conflicts_prefer(ggplot2::margin)
 save_plot <- FALSE
 save_table <- FALSE
 
+# Configure figure size settings
+figure_size <- data.frame(
+  journal = "Lancet",
+  single = 85,   # Width for single-column figures (mm)
+  double = 178   # Width for double-column figures (mm)
+)
 
 fgw1 <- figure_size[figure_size$journal == "Lancet",]$single
 fgw2 <- figure_size[figure_size$journal == "Lancet",]$double
@@ -3918,160 +3924,226 @@ rm(cea_subsets_by_size_q1, cea_subsets_by_size_q2,
 
 ## Figure 4: Cumulative OCV Impact during OCV stockpile deployment
 
-Total suspected cases averted (s_ch_averted_tot)
+Plotting data
 ```{r}
 # summary by subset_id in addition to the grouping variables # 
 # grouping variables \in c("vacc_cov","vacc_week","target_vacc_doses",
 # "vacc_priority","priority_prob", "subset_id","pp_r")
-fls <- c("outputs/paper/cea_summary_subsets_1_100_20251017.rds",
-         "outputs/paper/cea_summary_subsets_101_200_20251017.rds")
-cea_subsets <- map_dfr(fls, read_rds)
 
-pri <- "AR"
-pr_model <- c(0.0, 0.5)
+# inputs you already have upstream:
+# VW, VC
+subset_files <- c(
+  "outputs/paper/cea_summary_subsets_1_100_20251017.rds",
+  "outputs/paper/cea_summary_subsets_101_200_20251017.rds"
+)
+cea_subsets <- map_dfr(subset_files, read_rds)
 
+# columns you pivot on / keep
 keys <- c("vacc_cov","vacc_week","target_vacc_doses",
-          "vacc_priority","priority_prob", "subset_id","pp_r")
+          "vacc_priority","priority_prob","subset_id","pp_r")
+value_col <- c("doses_used", "outbreak_count", "s_ch_averted_tot", 
+               "case_averted_per_1000_OCV", "cost_per_daly_averted")
 
-value_col <- c("doses_used", "s_ch_averted_tot")
+# --- configuration for the four scenarios ---
+x_prob  <- 0.7                # “top 30%” means keep >= 70th percentile
+x_pct   <- 70L
+vars_3  <- c("AR","dur","size")
 
+# optional: a tiny helper to map to the exact labels you want
+make_scenario_label <- function(vacc_priority, pp_r) {
+  if (pp_r == 0) return("All")
+  if (pp_r == x_prob && vacc_priority %in% vars_3) {
+    switch(vacc_priority,
+      "AR"   = sprintf("Q[%d%%](AR)",   x_pct),
+      "dur"  = sprintf("Q[%d%%](Dur)",  x_pct),
+      "size" = sprintf("Q[%d%%](Size)", x_pct)
+    )
+  } else NA_character_
+}
+
+# filter to the four scenarios and build the plotting factor
 d <- cea_subsets %>%
-  mutate(pp_r = round(priority_prob, 1), 
-         pp_f = factor(round(priority_prob, 1))) %>% 
-  filter(vacc_priority == pri,
-         pp_r %in% pr_model,
-         vacc_week == VW,
-         vacc_cov == VC,
-         value_column %in% value_col)
-  
-dr <- d %>% 
-  filter(value_column == value_col[1]) %>%
-  select(any_of(keys), "q500")
+  mutate(pp_r = round(priority_prob, 1)) %>%
+  filter(
+    vacc_week == VW,
+    vacc_cov  == VC,
+    value_column %in% value_col,
+    # keep either "All" (pp=0) OR the x=70% slice for the three variables
+    (pp_r == 0) | (pp_r == x_prob & vacc_priority %in% vars_3)
+  ) %>%
+  mutate(
+    scenario = mapply(make_scenario_label, vacc_priority, pp_r)
+  ) %>%
+  filter(!is.na(scenario)) %>%
+  mutate(
+    # order in legend: AAR, dur, size, All
+    scenario = factor(
+      scenario,
+      levels = c(sprintf("Q[%d%%](AR)", x_pct),
+                 sprintf("Q[%d%%](Dur)", x_pct),
+                 sprintf("Q[%d%%](Size)", x_pct),
+                 "All")
+    )
+  )
 
-names(dr) <- c(keys, "doses_used")  
-dw <- d %>% 
-  filter(value_column == value_col[2]) %>%
-  left_join(dr, by = keys)
+# split and join to bring doses_used alongside outcomes
+dr <- d %>%
+  filter(value_column == value_col[1]) %>%
+  select(any_of(keys), scenario, q500)
+names(dr) <- c(keys, "scenario", "doses_used")
+
+dw <- d %>%
+  filter(value_column == value_col[2:length(value_col)]) %>%
+  left_join(dr, by = c(keys, "scenario"))
+
+
+levs <- levels(dw$scenario)  # expects: Q[70%](AR), Q[70%](Dur), Q[70%](Size), All
+expr_labels <- setNames(
+  list(
+    bquote(Q[70 * "%"](AR)),
+    bquote(Q[70 * "%"](Dur)),
+    bquote(Q[70 * "%"](Size)),
+    expression(All)
+  ),
+  c("Q[70%](AR)", "Q[70%](Dur)", "Q[70%](Size)", "All")
+)
+set.seed(42)
+ids <- sample(200, 30) # just to reduce plotting load
+
+# create nudges to prevent too much overlap between subset id's
+dw[, doses_used_plot := doses_used * rnorm(length(dw$doses_used), 
+                                         mean = 1, sd = 1.3e-1)]
 ```
 
+Total suspected cases averted (s_ch_averted_tot)
 ```{r}
-set.seed(42)
-# ids <- sample(200,30) # just to reduce plotting load
-rf <- 0.4 # line withds and points scaled down compared to pca plots in Fig3
-# create nudges to prevent too much overlap betwen subset id's
-dw[, doses_used_plot := doses_used * rnorm(length(dw$doses_used), 
-                                           mean=1,sd=1e-1)]
+rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
+df <- data.frame(x=sort(unique(dw$doses_used_plot)))
+df$y <- df$x
+
 p1 <- dw %>%
-  ggplot(aes(x = doses_used_plot, y = q500+1e-3, color = as.factor(pp_r))) +
+  filter(dw$value_column == "s_ch_averted_tot") %>% 
+  filter(subset_id %in% ids) %>% 
+  ggplot(aes(x = doses_used_plot, 
+             y = q500+1e-3, color = scenario)) +
   ci_layers_from_summary(
     lw95 = line_width_95 * rf,
     lw50 = line_width_50 * rf,
     pr_size = 2.4 * rf,
     mean_size = 0,
     mean_stroke = 0,
-    alpha95 = 0.3, alpha50 = 0.3,   # more see-through intervals
-    alpha_med = 0.3, alpha_mean = 0.3, # keep centers strong
-    x_discrete = FALSE,
-    use_jitter_points = FALSE,   # <- important
-    dodge_width = 0              # <- not used but kept explicit
+    alpha = 0.3
   ) +
+  # add reference line
+  geom_line(data=df, aes(x, y/1000), linetype = "dashed", inherit.aes = FALSE)+
+  geom_line(data=df, aes(x, 3*y/1000), linetype = "dashed", inherit.aes = FALSE)+
+  geom_line(data=df, aes(x, y/3/1000), linetype = "dashed", inherit.aes = FALSE)+
   scale_x_log10("Vaccine doses deployed") +
   scale_y_log10("Total cases averted") +
-  scale_color_manual(
-    name = "", values = my_discrete_colors[1:3],
-    labels = c(paste0(format_num(pr_model*100, 1), "%"))
-  ) +
-  theme_light()
+  scale_color_manual("",
+    breaks = levs,
+    labels = unname(expr_labels[levs]),
+    values = my_discrete_colors[1:4]
+  )+
+  theme_light() +
+  theme(legend.position = "top")
 p1
 ```
 
 Case averted per 1,000 OCV doses (case_averte_per_dose)
 ```{r}
-cea_subsets <- 
-  read_rds("outputs/paper/cea_summary_subsets_1_100_20251017.rds")
+rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
 
-pri <- "AR"
-pr_model <- c(0.0, 0.5)
-
-keys <- c("vacc_cov","vacc_week","target_vacc_doses",
-          "vacc_priority","priority_prob", "subset_id","pp_r")
-
-value_col <- c("doses_used", "case_averted_per_1000_OCV")
-
-d <- cea_subsets %>%
-  mutate(pp_r = round(priority_prob, 1), 
-         pp_f = factor(round(priority_prob, 1))) %>% 
-  filter(vacc_priority == pri,
-         pp_r %in% pr_model,
-         vacc_week == VW,
-         vacc_cov == VC,
-         value_column %in% value_col)
-  
-dr <- d %>% 
-  filter(value_column == value_col[1]) %>%
-  select(any_of(keys), "q500")
-
-names(dr) <- c(keys, "doses_used")  
-dw <- d %>% 
-  filter(value_column == value_col[2]) %>%
-  left_join(dr, by = keys)
-```
-
-```{r}
-set.seed(42)
-
-dw[, doses_used_plot := doses_used * rnorm(length(dw$doses_used), 
-                                           mean=1,sd=1.3e-1)]
-rf <- 0.4 # reduction factor
 p2 <- dw %>%
+  filter(dw$value_column == "outbreak_count") %>% 
+  filter(subset_id %in% ids) %>% 
   ggplot(aes(x = doses_used_plot, 
-             color = as.factor(pp_r), 
-             group = as.factor(pp_r)), alpha=0.2) +
-   ci_layers_from_summary(
+             y = q500, color = scenario)) +
+  ci_layers_from_summary(
     lw95 = line_width_95 * rf,
     lw50 = line_width_50 * rf,
     pr_size = 2.4 * rf,
     mean_size = 0,
     mean_stroke = 0,
-    alpha95 = 0.3, alpha50 = 0.3,   # more see-through intervals
-    alpha_med = 0.3, alpha_mean = 0.3, # keep centers strong
-    x_discrete = FALSE,
-    use_jitter_points = FALSE,   # <- important
-    dodge_width = 0              # <- not used but kept explicit
-  )+
+    alpha = 0.3
+  ) +
   scale_x_log10("Vaccine doses deployed") +
-  scale_y_continuous("Cases averted\nper 1000 OCV") +
-  scale_color_manual(
-    name = "",
-    values = my_discrete_colors[1:3],
-    labels = c(paste0(format_num(pr_model*100, 1), "%")))+
-  theme_light()
-
+  scale_y_log10("Number of targeted outbreaks") +
+  scale_color_manual("",
+    breaks = levs,
+    labels = unname(expr_labels[levs]),
+    values = my_discrete_colors[1:4]
+  )+
+  theme_light() +
+  theme(legend.position = "top")
 p2
 ```
 
 
-```{r fig4, eval=FALSE}
-subset_data <- 
-  read_rds("outputs/paper/subsets_dose_proritization_20251002.rds")
+Case averted per 1,000 OCV doses (case_averte_per_dose)
+```{r}
+rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
 
-subset_data %>% 
-  filter(sampled == FALSE) %>% 
-  group_by(vacc_priority) %>% 
-  summarize(min_dose = min(ocv_dose), 
-            max_prob = max(prob))
+df <- data.frame(x=sort(unique(dw$doses_used_plot)))
+df$y <- 1
 
-subset_data %>% 
-  filter(vacc_priority == "AR", id_sample == 1, prob > 0.69, prob < 0.71) %>%
-  filter(prob == 0.6) %>%
-  group_by(prob, ocv_dose) %>% 
-  summarize(capacity = first(capacity),
-            n_outbreaks = n(),
-            min_dose = min(ocv_dose), 
-            max_prob = max(prob)) -> d
-View(d)
+p3 <- dw %>%
+  filter(dw$value_column == "case_averted_per_1000_OCV") %>% 
+  filter(subset_id %in% ids) %>% 
+  ggplot(aes(x = doses_used_plot, 
+             y = q500+1e-3, color = scenario)) +
+  ci_layers_from_summary(
+    lw95 = line_width_95 * rf,
+    lw50 = line_width_50 * rf,
+    pr_size = 2.4 * rf,
+    mean_size = 0,
+    mean_stroke = 0,
+    alpha = 0.3
+  ) +
+  scale_x_log10("Vaccine doses deployed") +
+  scale_y_continuous("Case averted per 1,000 OCVs") +
+  scale_color_manual("",
+    breaks = levs,
+    labels = unname(expr_labels[levs]),
+    values = my_discrete_colors[1:4]
+  )++
+  theme_light() +
+  theme(legend.position = "top")
+p3
 ```
 
+
+Cost per DALY averted (cost_per_daly_averted)
+```{r}
+rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
+
+df <- data.frame(x=sort(unique(dw$doses_used_plot)))
+df$y <- 1
+
+p4 <- dw %>%
+  filter(dw$value_column == "cost_per_daly_averted") %>% 
+  filter(subset_id %in% ids) %>% 
+  ggplot(aes(x = doses_used_plot, 
+             y = q500+1e-3, color = scenario)) +
+  ci_layers_from_summary(
+    lw95 = line_width_95 * rf,
+    lw50 = line_width_50 * rf,
+    pr_size = 2.4 * rf,
+    mean_size = 0,
+    mean_stroke = 0,
+    alpha = 0.3
+  ) +
+  scale_x_log10("Vaccine doses deployed") +
+  scale_y_continuous("Cost per DALY averted", limits=c(0,100000)) +
+  scale_color_manual("",
+    breaks = levs,
+    labels = unname(expr_labels[levs]),
+    values = my_discrete_colors[1:4]
+  )+
+  theme_light() +
+  theme(legend.position = "top")
+p4
+```
 
 ```{r}
 subset_data %>% filter(vacc_cov == 0.75) %>% pull(median_value) %>% range()
