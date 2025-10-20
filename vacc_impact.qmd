@@ -1145,6 +1145,162 @@ saveRDS(cea_summary_subsets,
                  ".rds"))
 ```
 
+## Exponential decy fit
+
+Fit an exponential decay function for percentage case reduction across delay in ORI implementation
+
+### Outbreak onset-triggered
+```{r}
+dat <- 
+  left_join(cea[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
+                         "week_delay_to_vacc_effect", "runid", "vacc_cov")],
+            outbk_data_summary[, c("ar_per_10e3","duration_weeks",
+                                  "spatial_scale", "rural_urban",
+                                  "id_outbreak")],
+            by="id_outbreak")
+
+
+# some outbreaks show no decrease and we treat them separate from fitting a decay model
+is_constant_impact <- function(df, y_var = "pct_reduc_case") {
+  sd(df[[y_var]], na.rm = TRUE) < 1e-6
+}
+
+fit_or_constant <- function(df) {
+  if (is_constant_impact(df)) {
+    tibble(k_hat = 0, half_life = Inf, constant = TRUE)
+  } else {
+    fit <- fit_decay_model(df, y_var = "pct_reduc_case", x_var = "vacc_week")
+    fit$constant <- FALSE
+    fit
+  }
+}
+
+summary(outbk_data_summary$duration_weeks)
+cut_points <- c(5, 9, 14, 21) # min, Q1,Q2,Q3
+
+res <- list()
+for (wk_cut in cut_points) {
+
+  eligible_ids <- dat %>%
+    filter(vacc_week <= wk_cut) %>%
+    group_by(id_outbreak) %>%
+    summarise(
+      max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
+      duration = first(duration_weeks)
+    ) %>%
+    filter(duration > max_delay) %>%
+    pull(id_outbreak)
+
+  subset_df <- dat %>%
+    filter(vacc_week <= wk_cut, id_outbreak %in% eligible_ids) %>%
+    # Group by outbreak characteristics
+    group_by(runid, id_outbreak, vacc_cov) %>%
+    nest() %>%
+
+    # Apply decay model to each group
+    # mutate(fit = map(data, fit_decay_model)) %>%
+    mutate(fit = map(data, fit_or_constant)) %>%
+    unnest(fit) %>%
+    ungroup()
+
+  # Store results for the current cut point
+  res[[as.character(wk_cut)]] <- subset_df
+}
+
+# res$`15` %>% filter(vacc_cov == 0.9) -> x
+# 
+# for (i in 1:200) {
+#   x %>% filter(runid == i) %>% summarize(n_c = sum(constant)) -> nc
+#   if (nc$n_c != 0) cat(i, nc$n_c, "\n")
+# }
+# 
+# res$`15` %>% filter(vacc_cov == 0.9, runid == 2) -> x
+# which(x$constant == TRUE)
+
+saveRDS(res, paste0("outputs/fit_decay_model_", tstamp(), ".rds"))
+```
+
+### Case-triggered
+```{r}
+dat_ct <- left_join(cea_ct[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
+                      "runid", "case_trigger", "ori_occurred", "vacc_cov",
+                      "week_delay_to_vacc_effect")],
+               outbk_data_summary[, c("ar_per_10e3", "duration_weeks", 
+                                  "spatial_scale", "rural_urban", 
+                                  "id_outbreak")],
+               by="id_outbreak")
+
+
+# some outbreaks show no decrease and we treat them separate from fitting a decay model
+is_constant_impact <- function(df, y_var = "pct_reduc_case") {
+  sd(df[[y_var]], na.rm = TRUE) < 1e-6
+}
+
+fit_or_constant <- function(df) {
+  if (is_constant_impact(df)) {
+    tibble(k_hat = 0, half_life = Inf, constant = TRUE)
+  } else {
+    fit <- fit_decay_model(df, y_var = "pct_reduc_case", x_var = "vacc_week")
+    fit$constant <- FALSE
+    fit
+  }
+}
+
+vacc_wks <- VW_seq[1:5]
+# ct_values <- c(1, 5, seq(10, 100, by=10))  # decay across first 50 cases
+ct_values <- c(1, 10, 100)
+res <- list()
+
+# for (vacc_wk in vacc_wks) {
+for (ct_val in ct_values) {
+  # Step 1: Identify outbreak IDs that are long enough for the max case_trigger (50)
+  eligible_ids <- dat_ct %>%
+    filter(vacc_week <= max(vacc_wks), case_trigger == ct_val) %>%
+    group_by(id_outbreak) %>%
+    summarise(
+      max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
+      duration = first(duration_weeks)
+    ) %>%
+    filter(duration > max_delay) %>%
+    pull(id_outbreak)
+
+    # eligible_ids <- dat %>%
+    # filter(vacc_week <= wk_cut) %>%
+    # group_by(id_outbreak) %>%
+    # summarise(
+    #   max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
+    #   duration = first(duration_weeks)
+    # ) %>%
+    # filter(duration > max_delay) %>%
+    # pull(id_outbreak)
+  
+  # Step 2: Subset to eligible outbreaks for this vacc_wk and ct range
+  subset_df <- dat_ct %>%
+    filter(vacc_week %in% vacc_wks,
+           id_outbreak %in% eligible_ids,
+           case_trigger == ct_val) %>%
+
+    # Step 3: Group by run and outbreak
+    group_by(runid, id_outbreak) %>%
+    nest() %>%
+    # Step 4: Apply decay model across case_trigger
+    # mutate(fit = map(data, ~ fit_decay_model(.x, y_var = "pct_reduc_case",
+    #                                          x_var = "case_trigger"))) %>%
+    mutate(fit = map(data, fit_or_constant)) %>%
+    unnest(fit) %>%
+    ungroup() %>%
+
+    # Optional: annotate vacc_week
+    mutate(case_trigger = ct_val,
+           n_obs = map_int(data, nrow))
+
+  # Store in results list
+  res[[as.character(ct_val)]] <- subset_df
+}
+saveRDS(res, paste0("outputs/fit_decay_model_case_trigger_vw_9_", tstamp(), ".rds"))
+```
+
+
 
 ---------------------------------------------------------------------------
 
@@ -1463,165 +1619,6 @@ if (save_plot) {
          device = cairo_pdf, width = fgw1*fac,
          height = fgw1*fac, units = "mm")
 }
-```
-
-
-
-
-
-## Exponential decy fit
-
-Fit an exponential decay function for percentage case reduction across delay in ORI implementation
-
-### Outbreak onset-triggered
-```{r}
-dat <- left_join(cea[, c("vacc_week", "pct_reduc_case", "id_outbreak",
-                         "week_delay_to_vacc_effect", "runid",
-                       "vacc_cov")],
-               outbk_data_summary[, c("ar_per_10e3","duration_weeks",
-                                  "spatial_scale", "rural_urban",
-                                  "id_outbreak")],
-               by="id_outbreak")
-
-
-# some outbreaks show no decrease and we treat them separate from fitting a decay model
-is_constant_impact <- function(df, y_var = "pct_reduc_case") {
-  sd(df[[y_var]], na.rm = TRUE) < 1e-6
-}
-
-fit_or_constant <- function(df) {
-  if (is_constant_impact(df)) {
-    tibble(k_hat = 0, half_life = Inf, constant = TRUE)
-  } else {
-    fit <- fit_decay_model(df, y_var = "pct_reduc_case", x_var = "vacc_week")
-    fit$constant <- FALSE
-    fit
-  }
-}
-
-summary(outbk_data_summary$duration_weeks)
-cut_points <- c(5, 9, 14, 21) # min, Q1,Q2,Q3
-
-res <- list()
-for (wk_cut in cut_points) {
-
-  eligible_ids <- dat %>%
-    filter(vacc_week <= wk_cut) %>%
-    group_by(id_outbreak) %>%
-    summarise(
-      max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
-      duration = first(duration_weeks)
-    ) %>%
-    filter(duration > max_delay) %>%
-    pull(id_outbreak)
-
-  subset_df <- dat %>%
-    filter(vacc_week <= wk_cut, id_outbreak %in% eligible_ids) %>%
-    # Group by outbreak characteristics
-    group_by(runid, id_outbreak, vacc_cov) %>%
-    nest() %>%
-
-    # Apply decay model to each group
-    # mutate(fit = map(data, fit_decay_model)) %>%
-    mutate(fit = map(data, fit_or_constant)) %>%
-    unnest(fit) %>%
-    ungroup()
-
-  # Store results for the current cut point
-  res[[as.character(wk_cut)]] <- subset_df
-}
-
-# res$`15` %>% filter(vacc_cov == 0.9) -> x
-# 
-# for (i in 1:200) {
-#   x %>% filter(runid == i) %>% summarize(n_c = sum(constant)) -> nc
-#   if (nc$n_c != 0) cat(i, nc$n_c, "\n")
-# }
-# 
-# res$`15` %>% filter(vacc_cov == 0.9, runid == 2) -> x
-# which(x$constant == TRUE)
-
-saveRDS(res, paste0("outputs/fit_decay_model_", tstamp(), ".rds"))
-```
-
-### Case-triggered
-```{r}
-dat_ct <- left_join(cea_ct[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
-                      "runid", "case_trigger", "ori_occurred", "vacc_cov",
-                      "week_delay_to_vacc_effect")],
-               outbk_data_summary[, c("ar_per_10e3", "duration_weeks", 
-                                  "spatial_scale", "rural_urban", 
-                                  "id_outbreak")],
-               by="id_outbreak")
-
-
-# some outbreaks show no decrease and we treat them separate from fitting a decay model
-is_constant_impact <- function(df, y_var = "pct_reduc_case") {
-  sd(df[[y_var]], na.rm = TRUE) < 1e-6
-}
-
-fit_or_constant <- function(df) {
-  if (is_constant_impact(df)) {
-    tibble(k_hat = 0, half_life = Inf, constant = TRUE)
-  } else {
-    fit <- fit_decay_model(df, y_var = "pct_reduc_case", x_var = "vacc_week")
-    fit$constant <- FALSE
-    fit
-  }
-}
-
-vacc_wks <- VW_seq[1:5]
-# ct_values <- c(1, 5, seq(10, 100, by=10))  # decay across first 50 cases
-ct_values <- c(1, 10, 100)
-res <- list()
-
-# for (vacc_wk in vacc_wks) {
-for (ct_val in ct_values) {
-  # Step 1: Identify outbreak IDs that are long enough for the max case_trigger (50)
-  eligible_ids <- dat_ct %>%
-    filter(vacc_week <= max(vacc_wks), case_trigger == ct_val) %>%
-    group_by(id_outbreak) %>%
-    summarise(
-      max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
-      duration = first(duration_weeks)
-    ) %>%
-    filter(duration > max_delay) %>%
-    pull(id_outbreak)
-
-    # eligible_ids <- dat %>%
-    # filter(vacc_week <= wk_cut) %>%
-    # group_by(id_outbreak) %>%
-    # summarise(
-    #   max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
-    #   duration = first(duration_weeks)
-    # ) %>%
-    # filter(duration > max_delay) %>%
-    # pull(id_outbreak)
-  
-  # Step 2: Subset to eligible outbreaks for this vacc_wk and ct range
-  subset_df <- dat_ct %>%
-    filter(vacc_week %in% vacc_wks,
-           id_outbreak %in% eligible_ids,
-           case_trigger == ct_val) %>%
-
-    # Step 3: Group by run and outbreak
-    group_by(runid, id_outbreak) %>%
-    nest() %>%
-    # Step 4: Apply decay model across case_trigger
-    # mutate(fit = map(data, ~ fit_decay_model(.x, y_var = "pct_reduc_case",
-    #                                          x_var = "case_trigger"))) %>%
-    mutate(fit = map(data, fit_or_constant)) %>%
-    unnest(fit) %>%
-    ungroup() %>%
-
-    # Optional: annotate vacc_week
-    mutate(case_trigger = ct_val,
-           n_obs = map_int(data, nrow))
-
-  # Store in results list
-  res[[as.character(ct_val)]] <- subset_df
-}
-saveRDS(res, paste0("outputs/fit_decay_model_case_trigger_vw_9_", tstamp(), ".rds"))
 ```
 
 

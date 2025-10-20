@@ -4098,8 +4098,8 @@ p2 <- dw %>%
 p2
 ```
 
-
 Case averted per 1,000 OCV doses (case_averte_per_dose)
+
 ```{r}
 rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
 
