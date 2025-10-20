@@ -15,18 +15,25 @@ editor_options:
 
 # Introduction
 
-This document provides a comprehensive analysis of oral cholera vaccine (OCV) impact using data from outbreaks in sub-Saharan Africa. We model three vaccination strategies:
+This document presents a comprehensive analysis of the impact of oral cholera vaccine (OCV) using outbreak data from sub-Saharan Africa. Two reactive vaccination strategies are modeled:
 
-1. **Outbreak onset-triggered vaccination**: Outbreak response immunization (ORI)  is triggered at outbreak onset but can be implemented after a delay.
-2. **Case-triggered vaccination**: ORI is triggered only after the cumulative cases reach specific thresholds and can be implemented again after additional delay
+ - **Outbreak onset-triggered** vaccination: Outbreak response immunization (ORI) is initiated at outbreak onset but implemented after a variable delay.
 
-We evaluate these strategies at various coverage levels (60%, 75%, and 90%) and quantify impacts in terms of:
-- Cases averted
-- Deaths averted
-- Disability-adjusted life years (DALYs) averted
-- Cost-effectiveness metrics
+ - **Case-triggered** vaccination: ORI is triggered when cumulative reported cases reach defined thresholds, with an additional implementation delay thereafter.
 
-This analysis is organized into sections for parameter preparation, data loading, simulation execution, and results analysis.
+We evaluate these strategies across a range of vaccine coverage levels (60%, 75%, and 90%) and implementation delays (in weeks). Impacts are quantified in terms of:
+
+ - Cases, deaths, and disability-adjusted life years (DALYs) averted
+
+ - Percentage of each outcome averted
+
+ - Outcomes averted per 1,000 OCV doses (or per 1,000 people vaccinated)
+
+ - Cost-effectiveness indicators
+
+The analysis is structured into sections covering parameter preparation, data loading, simulation execution, and results analysis.
+
+We further stratify results by outbreak characteristics—including attack rate, duration, and size—to identify differential effects across epidemiological contexts. Finally, we assess outcomes in subsets of outbreaks selected to represent specified total target OCV doses. Sampling is performed either across all outbreaks or within subsets defined by outbreak attack rate, duration, or size.
 
 # Setup
 
@@ -35,7 +42,8 @@ This analysis is organized into sections for parameter preparation, data loading
 ```{r setup}
 #| warning: false
 #| message: false
-
+# Load utility functions
+source("R/utils.R")  # Custom utility functions
 # Core packages
 library(data.table)
 library(magrittr)
@@ -59,13 +67,10 @@ conflict_prefer("select", "dplyr")
 conflicts_prefer(data.table::first)
 conflicts_prefer(data.table::year)
 
-# Load utility functions
-source("R/utils.R")  # Custom utility functions for vaccine impact calculations
-
 # Global parameters
-VC3 <- c(0.6, 0.75, 0.9)      # Standard vaccine coverage values (60%, 75%, 90%)
-VC <- VC3[2]                  # Reference coverage (75%) 
-VW <- 9                       # Reference vaccination week (median from GTFCC data)
+VC3 <- c(0.6, 0.75, 0.9)  # Standard vaccine coverage values (60%, 75%, 90%)
+VC <- VC3[2]  # Reference coverage (75%) 
+VW <- 9       # Reference vaccination week (median from GTFCC data)
 VW_seq <- seq(1, 19, 2)       # Sequence of vaccination weeks to evaluate
 PROBS <- c(0.025, 0.25, 0.5, 0.75, 0.975)  # Probability quantiles for uncertainty
 YEAR <- as.Date("2020-12-28") # Most recent date with OCV campaign data
@@ -75,34 +80,26 @@ save_csv <- FALSE             # Whether to save results as CSV
 save_rds <- FALSE             # Whether to save results as RDS
 save_plot <- FALSE            # Whether to save generated plots
 save_table <- FALSE           # Whether to save generated tables
-
-# Figure dimensions
-figure_size <- data.frame(
-  journal = c("Lancet"),
-  single = c(85),
-  double = c(178)
-)
-fgw1 <- figure_size[figure_size$journal == "Lancet",]$single
-fgw2 <- figure_size[figure_size$journal == "Lancet",]$double
 ```
 
 # Parameter Preparation
 
-## Parameter Samples for Simulation
+## Parameter samples for simulation
 
-```{r params-sample}
-# Load parameter definitions
-dat_params <- data.table::fread("data/paper/parameters.csv")
+```{r eval=FALSE, params-sample}
+# # Load parameter definitions
+# dat_params <- data.table::fread("data/paper/parameters.csv")
+# 
+# # Draw parameter samples for multiple simulation runs
+# nruns <- 200  # Number of simulation runs
+# params <- draw_parameter_samples(nruns = nruns, parameter_data = dat_params)
+# 
+# # Save parameter samples
+# if(save_csv) {
+#   data.table::fwrite(params, paste0("outputs/paper/params_", tstamp(), ".csv"))
+# }
 
-# Draw parameter samples for multiple simulation runs
-nruns <- 200  # Number of simulation runs
-params <- draw_parameter_samples(nruns = nruns, parameter_data = dat_params)
-
-# Save parameter samples
-if(save_csv) {
-  data.table::fwrite(params, paste0("outputs/params_", tstamp(), ".csv"))
-}
-
+params <- fread("outputs/paper/params_20251020.csv")
 ```
 
 ## Vaccine Coverage Data
@@ -132,13 +129,10 @@ vacc_cov_data |>
 
 ```{r ive-model}
 # Load previously fitted Bayesian model for indirect vaccine effectiveness (IVE)
-# ive_fit <- readRDS("outputs/ive_yrep_20241010.rds")
-# ive_data2 <- ive_fit$yrep
-# rm(ive_fit)  # Remove large object to save memory
 
 ive_fit <- readRDS("outputs/paper/ive_yhat_yrep_20250919.rds")
 
-# 50 colums from 0 to 0.98 with the increment of 0.2
+# 50 columns from 0 to 0.98 with the increment of 0.2
 # 60% coverage
 # > quantile(ive_fit$yhat[,31], probs=c(0.025, 0.5, 0.975), na.rm=T)
 #      2.5%       50%     97.5% 
@@ -166,7 +160,8 @@ rm(ive_fit)
 ```{r load-data}
 #| warning: false
 # Load outbreak time series data
-outbreak_data_all <- as.data.frame(fread("outputs/paper/outbreak_data_all_20250228.csv"))
+outbreak_data_all <- 
+  as.data.frame(fread("outputs/paper/outbreak_data_all_20250228.csv"))
 
 # Load outbreaks not affected by OCVs (for modeling)
 outbreak_data <- fread("outputs/paper/outbreak_data_20250228.csv") 
@@ -174,20 +169,23 @@ outbreaks_filtered <-
   readRDS("outputs/paper/outbreak_summary_filtered_20250418.rds")
 
 # Load OCV usage data
-ocv_campaign_events <- fread("data/paper/GTFCC_Dashboard_23April2025.csv")
+ocv_campaigns <- fread("data/paper/GTFCC_Dashboard_23April2025.csv")
 # Filter outbreak-response (i.e., ICG-approved) events
-ocv_campaign_events %>% 
-  filter(APPROVED_BY == "ICG") %>% 
-  select(COUNTRY, DATE_ROUND_ONE, DOSE_DELIVERED_ROUND_ONE) %>% 
-  mutate(DATE_ROUND_ONE = as.Date(DATE_ROUND_ONE)) -> ori_events
+ocv_campaigns %>%
+  filter(APPROVED_BY == "ICG") %>% # outbreak response
+  select(COUNTRY, DATE_ROUND_ONE, DOSE_DELIVERED_ROUND_ONE) %>%
+  mutate(DATE_ROUND_ONE = as.Date(DATE_ROUND_ONE)) -> ori_R1
 
-ori_events <- ori_events[complete.cases(ori_events),]
-ori_events <- clean_names(ori_events)
-ori_events$year <- lubridate::year(ori_events$date_round_one)
+ori_R1 <- ori_R1[complete.cases(ori_R1),]
+ori_R1 <- clean_names(ori_R1)
+ori_R1$year <- lubridate::year(ori_R1$date_round_one)
+ori_R1 %>% 
+  group_by(year) %>% 
+  summarize(num_ocv = sum(dose_delivered_round_one)) -> ori_R1_year
 
-# Calculate delay statistics between request and vaccination
-delay_req_r1 <- as.integer(ocv_campaign_events$DATE_ROUND_ONE - ocv_campaign_events$DATE_REQUEST)
-ocv_delay <- quantile(delay_req_r1, probs=c(0.25,0.5,0.75,0.9), na.rm=TRUE)
+ori_R1_year$cum_num_ocv <- cumsum(ori_R1_year$num_ocv)
+
+# # Calculate delay statistics between request and vaccination
 
 # Historical OCV doses deployed by year
 d <- clean_names(fread("data/paper/OCV_Use_GTFCC_Dashboard.csv"))
@@ -216,17 +214,19 @@ ds |>
 # Join outbreak data with summary details
 outbk_data_summary <- 
   left_join(filter(outbreak_data, week == 1), 
-            ds[, c("outbreak_pop", "total_s_ch", "total_c_ch", "total_deaths", "duration_weeks", 
-                  "peak_week_incidence", "time_to_peak_week", "peak_week_incidence_per_100percent", 
-                  "peak_week_incidence_per_10e3", "mean_r0_1st_week", "area_per_1km2", 
-                  "rural_urban", "ar_per_10e3", "cfr_per_100percent", "id_outbreak")], 
+            ds[, c("outbreak_pop", "total_s_ch", "total_c_ch", "total_deaths", 
+                   "duration_weeks", 
+                  "peak_week_incidence", "time_to_peak_week", 
+                  "peak_week_incidence_per_100percent", 
+                  "peak_week_incidence_per_10e3", "mean_r0_1st_week", 
+                  "area_per_1km2", 
+                  "rural_urban", "ar_per_10e3", "cfr_per_100percent", 
+                  "id_outbreak")], 
             by = "id_outbreak")
 
 outbk_data_summary %>% 
   group_by(spatial_scale) %>% 
   summarize_quantiles(variable=cfr_per_100percent)
-# outbreaks that do not provide deaths information
-sum(is.na(outbreaks_filtered$total_deaths))
 ```
 
 ## Load Economic and Demographic Data
@@ -378,8 +378,8 @@ dat <- outbreak_data %>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
 vacc_covs <- c(0.6, 0.75, 0.9)    # Vaccine coverage levels to simulate
 vacc_weeks <- seq(1, 15, by = 2)  # Vaccination weeks to simulate
 nruns <- 200                      # Number of simulation runs per configuration
-batch_size <- 10                  # Number of runs per parallel batch
-
+batch_size <- 10  # Number of runs per parallel batch
+delay <- 2        # No ORI after two or more weeks after outbreak end
 # Loop through batches of runs for parallel execution
 for (batch_id in seq(1, nruns, by = batch_size)) {
   message(paste("Processing batch ID:", batch_id))
@@ -401,14 +401,13 @@ for (batch_id in seq(1, nruns, by = batch_size)) {
         case_trigger = NULL,
         vacc_cov = vacc_covs,
         runid = i,
-        no_ori_delay_outbreak_end = 3)
+        no_ori_delay_outbreak_end = delay)
     }
   stopCluster(cl)
 
   # Save batch results
   fwrite(rbindlist(svim_week_list), 
-         paste0("outputs/svim_delay_", delay,
-                "_week_list_vacc_week_batch_", batch_id, "_",
+         paste0("outputs/svim__week_list_vacc_week_batch_", batch_id, "_",
                 tstamp(), ".csv"))
 }
 
@@ -455,7 +454,7 @@ for (delay in no_ori_delays) {
           case_trigger = NULL,
           vacc_cov = vacc_covs,
           runid = i,
-          no_ori_delay_outbreak_end = 3)
+          no_ori_delay_outbreak_end = delay)
       }
     stopCluster(cl)
   
@@ -470,7 +469,6 @@ toc <- Sys.time()
 message(paste("Total execution time:", toc - tic))
 ```
 
-
 ## Case-Triggered Vaccination Strategy
 
 ```{r case-trigger-sim, eval=FALSE}
@@ -479,15 +477,15 @@ dat <- outbreak_data
 dat <- dat %>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
 
 # Define case thresholds that trigger vaccination
-case_triggers <- c(1, 5, seq(10,100,10), seq(150, 300,50))
+case_triggers <- c(1, 5, seq(10, 90, 20), seq(90, 300, 50))
 vacc_covs <- c(0.75)
-# vacc_weeks <- c(1, 5, 9, 13)
-vacc_weeks <- c(3, 7, 11, 15)
+vacc_weeks <- seq(1, 15, by=2)
+# vacc_weeks <- c(3, 7, 11, 15)
 nruns <- 200               # Number of simulation runs
-batch_size <- 10            # Number of runs per batch
-
+batch_size <- 10           # Number of runs per batch
+delay <- 2                 # No ORI if two or more weeks pass since an outbreak ends.  
 # Loop through batches of runs for parallel execution
-for (batch_id in seq(41, nruns, by = batch_size)) {
+for (batch_id in seq(1, nruns, by = batch_size)) {
   message(paste("Processing batch ID:", batch_id))
   run_ids <- batch_id:(batch_id + batch_size - 1)
 
@@ -507,7 +505,8 @@ for (batch_id in seq(41, nruns, by = batch_size)) {
         vacc_week = vacc_weeks,
         case_trigger = case_triggers,  # Case-triggered vaccination
         vacc_cov = vacc_covs,
-        runid = i)
+        runid = i,
+        no_ori_delay_outbreak_end = delay)
     }
   stopCluster(cl)
   
@@ -519,8 +518,9 @@ for (batch_id in seq(41, nruns, by = batch_size)) {
 toc <- Sys.time()
 message(paste("Total execution time:", round(toc - tic, digits=2), "minutes"))
 ```
-
 ## Combine Simulation Results
+
+### Onset-triggered 
 
 This section combines results from batch processing and organizes them for analysis.
 
@@ -530,22 +530,33 @@ id_begin <- 1
 id_end <- 200
 batch_size <- 10
 batch_ids <- seq(id_begin, id_end, by = batch_size)
-
-svim_df <- data.frame()
-for (i in 1:length(batch_ids)) {
-  message(paste("Processing batch", i, "of", length(batch_ids)))
-  # d <- read_rds(paste0("outputs/svim_week_list_vacc_week_batch_",
-  #                      batch_ids[i], "_20250514.rds"))
-  d <- fread(paste0("outputs/svim_week_list_vacc_week_batch_",
-                       batch_ids[i], "_20250514.csv"))
-  svim_df <- rbindlist(list(svim_df, sum_over_week(d)))
-  rm(d)  # Free memory
-}
+# delays <- 0:7
+# for (delay in delays){
+  svim_df <- data.frame()
+  for (i in 1:length(batch_ids)) {
+    message(paste("Processing batch", i, "of", length(batch_ids)))
+    
+    d <- fread(paste0("outputs/svim_week_list_vacc_week_batch_",
+                         batch_ids[i], "_20251019.csv"))
+    # d <- fread(paste0("outputs/svim_delay_", delay, "_week_list_vacc_week_batch_",
+    #                      batch_ids[i], "_20251019.csv"))
+    svim_df <- rbindlist(list(svim_df, sum_over_week(d)))
+    rm(d)  # Free memory
+  }
 
 # Save combined results
-saveRDS(svim_df, 
+saveRDS(svim_df,
         paste0("outputs/svim_onset_trigger_sum_over_week_runid_1_200_",
                tstamp(), ".rds"))
+```
+
+### Case-triggered
+```{r}
+  # saveRDS(svim_df, 
+  #         paste0("outputs/svim_delay_", delay, 
+  #                "_onset_trigger_sum_over_week_runid_1_200_",
+  #                tstamp(), ".rds"))
+# }
 
 # ---- 2. Case-triggered vaccination results ----
 id_begin <- 1
@@ -570,57 +581,60 @@ saveRDS(svim_df,
 
 # Cost-Effectiveness Analysis
 
-## Calculate Impact Metrics for Outbreak Onset-Triggered Vaccination
+Calculate Impact Metrics 
+
+## Onset-triggered
 
 ```{r cea-time-trigger}
-# Load summarized time-triggered vaccination results
-d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20250716.rds")
-# d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20250520.rds")
-# Process each vaccine coverage level
-for (vc in VC3) {
-  message(paste("Processing results for vaccine coverage =", vc))
-  
-  # Full cost-effectiveness analysis
-  svim_tt_cea <- add_cea_variables(d[vacc_cov == vc], 
-                                   mean_age_inf = mean_age_inf)
-  svim_tt_cea <- add_cea_results(svim_tt_cea)
-  
-  # Save detailed results
-  saveRDS(svim_tt_cea,
-         paste0("outputs/cea_", vc, "_onset_trigger_", 
-                tstamp(), ".rds"))
-  
-  rm(svim_tt_cea)
-  
-  # # Calculate mean across simulation runs
-  # svim_tt_mean <- mean_across_runid(d[vacc_cov == vc])
-  # svim_tt_mean_cea <- add_cea_variables(svim_tt_mean, 
-  #                                       mean_age_inf = mean_age_inf)
-  # svim_tt_mean_cea <- add_cea_results(svim_tt_mean_cea)
-  # 
-  # # Save average results
-  # saveRDS(svim_tt_mean_cea,
-  #        paste0("outputs/cea_", vc, "_onset_trigger_mean_across_runid_", 
-  #               tstamp(), ".rds"))
-  
-  # Clean up to save memory
-  # rm(svim_tt_cea, svim_tt_mean, svim_tt_mean_cea)
-}
-rm(d)  # Free memory
+# delays <- 0:7
+# for (delay in delays) {
+  # Load summarized time-triggered vaccination results
+  d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20251019.rds")
+  # d <- read_rds(paste0("outputs/svim_delay_", delay, 
+  #               "_onset_trigger_sum_over_week_runid_1_200_20251019.rds"))
+  # Process each vaccine coverage level
+  for (vc in VC3) {
+    message(paste("Processing results for vaccine coverage =", vc))
+    
+    # Full cost-effectiveness analysis
+    svim_tt_cea <- add_cea_variables(d[vacc_cov == vc], 
+                                     mean_age_inf = mean_age_inf)
+    svim_tt_cea <- add_cea_results(svim_tt_cea)
+    
+    # Save detailed results
+    saveRDS(svim_tt_cea,
+           paste0("outputs/cea_", vc, "_onset_trigger_",
+                  tstamp(), ".rds"))
+    # saveRDS(svim_tt_cea,
+    #        paste0("outputs/cea_delay_", delay, "_", vc, "_onset_trigger_", 
+    #               tstamp(), ".rds"))
+    rm(svim_tt_cea)
+    
+    # # Calculate mean across simulation runs
+    # svim_tt_mean <- mean_across_runid(d[vacc_cov == vc])
+    # svim_tt_mean_cea <- add_cea_variables(svim_tt_mean, 
+    #                                       mean_age_inf = mean_age_inf)
+    # svim_tt_mean_cea <- add_cea_results(svim_tt_mean_cea)
+    # 
+    # # Save average results
+    # saveRDS(svim_tt_mean_cea,
+    #        paste0("outputs/cea_", vc, "_onset_trigger_mean_across_runid_", 
+    #               tstamp(), ".rds"))
+    
+    # Clean up to save memory
+    # rm(svim_tt_cea, svim_tt_mean, svim_tt_mean_cea)
+  }
+  rm(d)  # Free memory
+# }
+
 ```
 
-## Calculate Impact Metrics for Case-Triggered Vaccination
+## Case-triggered 
 
 ```{r cea-case-trigger}
 # Load summarized case-triggered vaccination results
 d_ct <- 
   read_rds("outputs/svim_case_trigger_sum_over_week_runid_1_200_20250810.rds")
-# d_ct <- 
-#   read_rds("outputs/svim_case_trigger_sum_over_week_runid_1_200_20250809.rds")
-# d_ct <- 
-#   read_rds("outputs/svim_case_trigger_sum_over_week_runid_1_200_20250523.rds")
-# d_ct <- 
-#   read_rds("outputs/svim_case_trigger_sum_over_week_runid_1_200_20250716.rds")
 
 # Process each vaccine coverage level
 # for (vc in VC3) {
@@ -646,7 +660,56 @@ for (vc in unique(d_ct$vacc_cov)) {
 #                 tstamp(), ".rds"))
 ```
 
-# Summary by prioritization
+
+## Summary data for plotting 
+
+### Quantile values for plotting
+
+```{r}
+VC3    <- c(0.6, 0.75, 0.9)
+VW_seq <- 1:15
+
+build_plot_summary <- function(data, value_col,
+                               by = c("vacc_cov", "vacc_week"),
+                               round_digits = 3) {
+  val <- rlang::enquo(value_col)
+  
+  data %>%
+    group_by(across(all_of(by))) %>%
+    summarise(
+      mean = mean(!!val, na.rm = TRUE),
+      q025 = quantile(!!val, 0.025, na.rm = TRUE),
+      q250 = quantile(!!val, 0.25,  na.rm = TRUE),
+      q500 = quantile(!!val, 0.50,  na.rm = TRUE),
+      q750 = quantile(!!val, 0.75,  na.rm = TRUE),
+      q975 = quantile(!!val, 0.975, na.rm = TRUE),
+      n    = sum(!is.na(!!val)),
+      .groups = "drop"
+    ) %>%
+    mutate(across(c(mean, q025, q250, q500, q750, q975),
+                  ~ round(.x, round_digits)))
+}
+
+# In case cea files were not loaded
+cea_files <- c(
+  "outputs/paper/cea_delay_2_0.6_onset_trigger_20251020.rds",
+  "outputs/paper/cea_delay_2_0.75_onset_trigger_20251020.rds",
+  "outputs/paper/cea_delay_2_0.9_onset_trigger_20251020.rds"
+)
+cea <- map_dfr(cea_files, read_rds)
+cea_ori <- cea %>% filter(ori_occurred == TRUE)
+
+# Example: summarize % cases averted by week & coverage
+cea_summary_pca <- cea_ori %>%
+  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
+  build_plot_summary(pct_reduc_case, by = c("vacc_cov", "vacc_week"))
+
+saveRDS(cea_summary_pca, 
+        paste0("outputs/paper/cea_pca_summary_", tstamp(), ".rds"))
+```
+
+
+### Median values by prioritization
 
 ```{r}
 outbk_dat <- outbreaks_filtered |>
@@ -683,10 +746,10 @@ ids_list_cfr <- map(probs, ~ top_p_ids(outbk_dat, cfr, p = .x))
 ```
 
 ```{r}
-cea <- read_rds("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
-cea_ori <- cea %>% filter(ori_occurred == TRUE)
+cea_75 <- read_rds("outputs/paper/cea_delay_2_0.75_onset_trigger_20251020.rds")
+cea_75_ori <- cea_75 %>% filter(ori_occurred == TRUE)
 
-summarize_by_ids <- function(cea, ids_list, probs, metrics,
+median_by_ids <- function(cea, ids_list, probs, metrics,
                              id_col = "id_outbreak") {
   stopifnot(length(ids_list) == length(probs))
 
@@ -710,25 +773,36 @@ summarize_by_ids <- function(cea, ids_list, probs, metrics,
           .names = "med_{.col}"
         ),
         # n = n(),                     # how many rows contributed
-        n = length(ids),                     # how many rows contributed
+        n = length(ids),               
         .groups = "drop"
       ) %>%
       mutate(prob = p, .before = 1)
   })
 }
+cea_75_ori$daly_averted_per_1000_OCV <- 
+  1000 * cea_75_ori$daly_averted / cea_75_ori$vacc_dose
 
-cea_ori$daly_averted_per_1000_OCV <- 1000 * cea_ori$daly_averted / 
-  cea_ori$vacc_dose
+cea_metrics <- c("s_ch_averted_tot")  # add 
 
 cea_metrics <- c("s_ch_averted_tot", "pct_reduc_case",
                  "case_averted_per_1000_OCV", "daly_averted_per_1000_OCV")  # add 
-med_ar   <- summarize_by_ids(cea_ori, ids_list_ar, probs, 
+
+med_ar <- median_by_ids(cea_75_ori, ids_list_ar, probs, metrics = cea_metrics)
+
+# remove outbreaks if cost data is not available: GDP data area not available for Somalia and South Sudan 
+d <- filter(cea_75_ori, !is.na(gdp))
+d$daly_averted_per_1000_OCV <- 
+  1000 * d$daly_averted / d$vacc_dose
+med_ar2 <- median_by_ids(d, ids_list_ar, probs, metrics = cea_metrics)
+
+med_ar %>% filter(prob %in% c(0, 0.9), vacc_week == 9)
+med_ar2 %>% filter(prob %in% c(0, 0.9), vacc_week == 9)
+
+med_dur  <- median_by_ids(cea_75_ori, ids_list_dur, probs, 
                              metrics = cea_metrics)
-med_dur  <- summarize_by_ids(cea_ori, ids_list_dur, probs, 
+med_size <- median_by_ids(cea_75_ori, ids_list_size, probs, 
                              metrics = cea_metrics)
-med_size <- summarize_by_ids(cea_ori, ids_list_size, probs, 
-                             metrics = cea_metrics)
-med_cfr <- summarize_by_ids(cea_ori, ids_list_cfr, probs, 
+med_cfr <- median_by_ids(cea_75_ori, ids_list_cfr, probs, 
                             metrics = cea_metrics)
 # Optional: label and combine into one tidy table
 med_all <- bind_rows(
@@ -745,9 +819,10 @@ med_all_long <- med_all %>%
     values_to = "median_value")
 
 saveRDS(med_all_long, 
-        paste0("outputs/paper/summary_impact_delay_prioritization_", 
+        paste0("outputs/paper/summary_impact_0.75_delay_prioritization_", 
                tstamp(), ".rds"))
 ```
+
 
 # Sampling outbreaks
 
@@ -761,7 +836,7 @@ Outbreaks are randomly sampled for a given OCV budget. Outbreaks are eligible if
 ```{r}
 # Outbreak onset-triggered vaccination results
 cea_files <- 
-  c("outputs/paper/cea_0.75_onset_trigger_20250919.rds")
+  c("outputs/paper/cea_delay_2_0.75_onset_trigger_20251020.rds")
 
 cea <- map_dfr(cea_files, read_rds)
 
@@ -1070,6 +1145,8 @@ saveRDS(cea_summary_subsets,
                  ".rds"))
 ```
 
+
+---------------------------------------------------------------------------
 
 Analysis of median with IQR
 ```{r}
@@ -1387,6 +1464,166 @@ if (save_plot) {
          height = fgw1*fac, units = "mm")
 }
 ```
+
+
+
+
+
+## Exponential decy fit
+
+Fit an exponential decay function for percentage case reduction across delay in ORI implementation
+
+### Outbreak onset-triggered
+```{r}
+dat <- left_join(cea[, c("vacc_week", "pct_reduc_case", "id_outbreak",
+                         "week_delay_to_vacc_effect", "runid",
+                       "vacc_cov")],
+               outbk_data_summary[, c("ar_per_10e3","duration_weeks",
+                                  "spatial_scale", "rural_urban",
+                                  "id_outbreak")],
+               by="id_outbreak")
+
+
+# some outbreaks show no decrease and we treat them separate from fitting a decay model
+is_constant_impact <- function(df, y_var = "pct_reduc_case") {
+  sd(df[[y_var]], na.rm = TRUE) < 1e-6
+}
+
+fit_or_constant <- function(df) {
+  if (is_constant_impact(df)) {
+    tibble(k_hat = 0, half_life = Inf, constant = TRUE)
+  } else {
+    fit <- fit_decay_model(df, y_var = "pct_reduc_case", x_var = "vacc_week")
+    fit$constant <- FALSE
+    fit
+  }
+}
+
+summary(outbk_data_summary$duration_weeks)
+cut_points <- c(5, 9, 14, 21) # min, Q1,Q2,Q3
+
+res <- list()
+for (wk_cut in cut_points) {
+
+  eligible_ids <- dat %>%
+    filter(vacc_week <= wk_cut) %>%
+    group_by(id_outbreak) %>%
+    summarise(
+      max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
+      duration = first(duration_weeks)
+    ) %>%
+    filter(duration > max_delay) %>%
+    pull(id_outbreak)
+
+  subset_df <- dat %>%
+    filter(vacc_week <= wk_cut, id_outbreak %in% eligible_ids) %>%
+    # Group by outbreak characteristics
+    group_by(runid, id_outbreak, vacc_cov) %>%
+    nest() %>%
+
+    # Apply decay model to each group
+    # mutate(fit = map(data, fit_decay_model)) %>%
+    mutate(fit = map(data, fit_or_constant)) %>%
+    unnest(fit) %>%
+    ungroup()
+
+  # Store results for the current cut point
+  res[[as.character(wk_cut)]] <- subset_df
+}
+
+# res$`15` %>% filter(vacc_cov == 0.9) -> x
+# 
+# for (i in 1:200) {
+#   x %>% filter(runid == i) %>% summarize(n_c = sum(constant)) -> nc
+#   if (nc$n_c != 0) cat(i, nc$n_c, "\n")
+# }
+# 
+# res$`15` %>% filter(vacc_cov == 0.9, runid == 2) -> x
+# which(x$constant == TRUE)
+
+saveRDS(res, paste0("outputs/fit_decay_model_", tstamp(), ".rds"))
+```
+
+### Case-triggered
+```{r}
+dat_ct <- left_join(cea_ct[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
+                      "runid", "case_trigger", "ori_occurred", "vacc_cov",
+                      "week_delay_to_vacc_effect")],
+               outbk_data_summary[, c("ar_per_10e3", "duration_weeks", 
+                                  "spatial_scale", "rural_urban", 
+                                  "id_outbreak")],
+               by="id_outbreak")
+
+
+# some outbreaks show no decrease and we treat them separate from fitting a decay model
+is_constant_impact <- function(df, y_var = "pct_reduc_case") {
+  sd(df[[y_var]], na.rm = TRUE) < 1e-6
+}
+
+fit_or_constant <- function(df) {
+  if (is_constant_impact(df)) {
+    tibble(k_hat = 0, half_life = Inf, constant = TRUE)
+  } else {
+    fit <- fit_decay_model(df, y_var = "pct_reduc_case", x_var = "vacc_week")
+    fit$constant <- FALSE
+    fit
+  }
+}
+
+vacc_wks <- VW_seq[1:5]
+# ct_values <- c(1, 5, seq(10, 100, by=10))  # decay across first 50 cases
+ct_values <- c(1, 10, 100)
+res <- list()
+
+# for (vacc_wk in vacc_wks) {
+for (ct_val in ct_values) {
+  # Step 1: Identify outbreak IDs that are long enough for the max case_trigger (50)
+  eligible_ids <- dat_ct %>%
+    filter(vacc_week <= max(vacc_wks), case_trigger == ct_val) %>%
+    group_by(id_outbreak) %>%
+    summarise(
+      max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
+      duration = first(duration_weeks)
+    ) %>%
+    filter(duration > max_delay) %>%
+    pull(id_outbreak)
+
+    # eligible_ids <- dat %>%
+    # filter(vacc_week <= wk_cut) %>%
+    # group_by(id_outbreak) %>%
+    # summarise(
+    #   max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
+    #   duration = first(duration_weeks)
+    # ) %>%
+    # filter(duration > max_delay) %>%
+    # pull(id_outbreak)
+  
+  # Step 2: Subset to eligible outbreaks for this vacc_wk and ct range
+  subset_df <- dat_ct %>%
+    filter(vacc_week %in% vacc_wks,
+           id_outbreak %in% eligible_ids,
+           case_trigger == ct_val) %>%
+
+    # Step 3: Group by run and outbreak
+    group_by(runid, id_outbreak) %>%
+    nest() %>%
+    # Step 4: Apply decay model across case_trigger
+    # mutate(fit = map(data, ~ fit_decay_model(.x, y_var = "pct_reduc_case",
+    #                                          x_var = "case_trigger"))) %>%
+    mutate(fit = map(data, fit_or_constant)) %>%
+    unnest(fit) %>%
+    ungroup() %>%
+
+    # Optional: annotate vacc_week
+    mutate(case_trigger = ct_val,
+           n_obs = map_int(data, nrow))
+
+  # Store in results list
+  res[[as.character(ct_val)]] <- subset_df
+}
+saveRDS(res, paste0("outputs/fit_decay_model_case_trigger_vw_9_", tstamp(), ".rds"))
+```
+
 
 
 
@@ -1777,208 +2014,6 @@ fwrite(dfall,
        paste0("outputs/cea_0.75_case_trigger_case_weighted_subsets_by_year_", 
               tstamp(), ".csv"))
 ```
-
-## Exponential decy fit in percentage cases averted
-
-### Outbreak onset-triggered
-```{r}
-dat <- left_join(cea[, c("vacc_week", "pct_reduc_case", "id_outbreak",
-                         "week_delay_to_vacc_effect", "runid",
-                       "vacc_cov")],
-               outbk_data_summary[, c("ar_per_10e3","duration_weeks",
-                                  "spatial_scale", "rural_urban",
-                                  "id_outbreak")],
-               by="id_outbreak")
-
-
-# some outbreaks show no decrease and we treat them separate from fitting a decay model
-is_constant_impact <- function(df, y_var = "pct_reduc_case") {
-  sd(df[[y_var]], na.rm = TRUE) < 1e-6
-}
-
-fit_or_constant <- function(df) {
-  if (is_constant_impact(df)) {
-    tibble(k_hat = 0, half_life = Inf, constant = TRUE)
-  } else {
-    fit <- fit_decay_model(df, y_var = "pct_reduc_case", x_var = "vacc_week")
-    fit$constant <- FALSE
-    fit
-  }
-}
-
-summary(outbk_data_summary$duration_weeks)
-cut_points <- c(5, 9, 14, 21) # min, Q1,Q2,Q3
-
-res <- list()
-for (wk_cut in cut_points) {
-
-  eligible_ids <- dat %>%
-    filter(vacc_week <= wk_cut) %>%
-    group_by(id_outbreak) %>%
-    summarise(
-      max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
-      duration = first(duration_weeks)
-    ) %>%
-    filter(duration > max_delay) %>%
-    pull(id_outbreak)
-
-  subset_df <- dat %>%
-    filter(vacc_week <= wk_cut, id_outbreak %in% eligible_ids) %>%
-    # Group by outbreak characteristics
-    group_by(runid, id_outbreak, vacc_cov) %>%
-    nest() %>%
-
-    # Apply decay model to each group
-    # mutate(fit = map(data, fit_decay_model)) %>%
-    mutate(fit = map(data, fit_or_constant)) %>%
-    unnest(fit) %>%
-    ungroup()
-
-  # Store results for the current cut point
-  res[[as.character(wk_cut)]] <- subset_df
-}
-
-# res$`15` %>% filter(vacc_cov == 0.9) -> x
-# 
-# for (i in 1:200) {
-#   x %>% filter(runid == i) %>% summarize(n_c = sum(constant)) -> nc
-#   if (nc$n_c != 0) cat(i, nc$n_c, "\n")
-# }
-# 
-# res$`15` %>% filter(vacc_cov == 0.9, runid == 2) -> x
-# which(x$constant == TRUE)
-
-saveRDS(res, paste0("outputs/fit_decay_model_", tstamp(), ".rds"))
-```
-
-### Case-triggered
-```{r}
-dat_ct <- left_join(cea_ct[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
-                      "runid", "case_trigger", "ori_occurred", "vacc_cov",
-                      "week_delay_to_vacc_effect")],
-               outbk_data_summary[, c("ar_per_10e3", "duration_weeks", 
-                                  "spatial_scale", "rural_urban", 
-                                  "id_outbreak")],
-               by="id_outbreak")
-
-
-# some outbreaks show no decrease and we treat them separate from fitting a decay model
-is_constant_impact <- function(df, y_var = "pct_reduc_case") {
-  sd(df[[y_var]], na.rm = TRUE) < 1e-6
-}
-
-fit_or_constant <- function(df) {
-  if (is_constant_impact(df)) {
-    tibble(k_hat = 0, half_life = Inf, constant = TRUE)
-  } else {
-    fit <- fit_decay_model(df, y_var = "pct_reduc_case", x_var = "vacc_week")
-    fit$constant <- FALSE
-    fit
-  }
-}
-
-vacc_wks <- VW_seq[1:5]
-# ct_values <- c(1, 5, seq(10, 100, by=10))  # decay across first 50 cases
-ct_values <- c(1, 10, 100)
-res <- list()
-
-# for (vacc_wk in vacc_wks) {
-for (ct_val in ct_values) {
-  # Step 1: Identify outbreak IDs that are long enough for the max case_trigger (50)
-  eligible_ids <- dat_ct %>%
-    filter(vacc_week <= max(vacc_wks), case_trigger == ct_val) %>%
-    group_by(id_outbreak) %>%
-    summarise(
-      max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
-      duration = first(duration_weeks)
-    ) %>%
-    filter(duration > max_delay) %>%
-    pull(id_outbreak)
-
-    # eligible_ids <- dat %>%
-    # filter(vacc_week <= wk_cut) %>%
-    # group_by(id_outbreak) %>%
-    # summarise(
-    #   max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
-    #   duration = first(duration_weeks)
-    # ) %>%
-    # filter(duration > max_delay) %>%
-    # pull(id_outbreak)
-  
-  # Step 2: Subset to eligible outbreaks for this vacc_wk and ct range
-  subset_df <- dat_ct %>%
-    filter(vacc_week %in% vacc_wks,
-           id_outbreak %in% eligible_ids,
-           case_trigger == ct_val) %>%
-
-    # Step 3: Group by run and outbreak
-    group_by(runid, id_outbreak) %>%
-    nest() %>%
-    # Step 4: Apply decay model across case_trigger
-    # mutate(fit = map(data, ~ fit_decay_model(.x, y_var = "pct_reduc_case",
-    #                                          x_var = "case_trigger"))) %>%
-    mutate(fit = map(data, fit_or_constant)) %>%
-    unnest(fit) %>%
-    ungroup() %>%
-
-    # Optional: annotate vacc_week
-    mutate(case_trigger = ct_val,
-           n_obs = map_int(data, nrow))
-
-  # Store in results list
-  res[[as.character(ct_val)]] <- subset_df
-}
-saveRDS(res, paste0("outputs/fit_decay_model_case_trigger_vw_9_", tstamp(), ".rds"))
-```
-
-## Summary data for plotting 
-
-Create quantile values (0.025, 0.25, 0.5, 0.75, 0.975) for plotting
-```{r}
-# If you already define these elsewhere, remove/adjust here
-VC3    <- c(0.6, 0.75, 0.9)
-VW_seq <- 1:15
-
-build_plot_summary <- function(data, value_col,
-                               by = c("vacc_cov", "vacc_week"),
-                               round_digits = 3) {
-  val <- rlang::enquo(value_col)
-  
-  data %>%
-    group_by(across(all_of(by))) %>%
-    summarise(
-      mean = mean(!!val, na.rm = TRUE),
-      q025 = quantile(!!val, 0.025, na.rm = TRUE),
-      q250 = quantile(!!val, 0.25,  na.rm = TRUE),
-      q500 = quantile(!!val, 0.50,  na.rm = TRUE),
-      q750 = quantile(!!val, 0.75,  na.rm = TRUE),
-      q975 = quantile(!!val, 0.975, na.rm = TRUE),
-      n    = sum(!is.na(!!val)),
-      .groups = "drop"
-    ) %>%
-    mutate(across(c(mean, q025, q250, q500, q750, q975),
-                  ~ round(.x, round_digits)))
-}
-
-# In case cea files were not loaded
-# cea_files <- c(
-#   "outputs/paper/cea_0.6_onset_trigger_20250919.rds",
-#   "outputs/paper/cea_0.75_onset_trigger_20250919.rds",
-#   "outputs/paper/cea_0.9_onset_trigger_20250919.rds"
-# )
-# cea <- map_dfr(cea_files, read_rds)
-# 
-# cea_ori <- cea %>% filter(ori_occurred == TRUE)
-
-# Example: summarize % cases averted by week & coverage
-cea_summary_pca <- cea_ori %>%
-  filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-  build_plot_summary(pct_reduc_case, by = c("vacc_cov", "vacc_week"))
-
-saveRDS(cea_summary_pca, 
-        paste0("outputs/paper/cea_pca_summary_", tstamp(), ".rds"))
-```
-
 
 
 # Subset Analysis

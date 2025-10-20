@@ -60,22 +60,21 @@ conflicts_prefer(ggplot2::margin)
 save_plot <- FALSE
 save_table <- FALSE
 
-# Configure figure size settings
-figure_size <- data.frame(
-  journal = "Lancet",
-  single = 85,   # Width for single-column figures (mm)
-  double = 178   # Width for double-column figures (mm)
+# Figure dimensions
+figure_size <- data.table(
+  journal = c("Lancet"),
+  single = c(85),
+  double = c(178)
 )
-
-fgw1 <- figure_size[figure_size$journal == "Lancet",]$single
-fgw2 <- figure_size[figure_size$journal == "Lancet",]$double
+fgw1 <- figure_size[journal == "Lancet", single]
+fgw2 <- figure_size[journal == "Lancet", double]
 
 # Color palette for consistent visualization
 set1 <- brewer.pal(9, "Set1")  # color sets
 # my_discrete_colors <- c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00")
 
 # Define standard probability values for quantiles
-probs <- c(0.025, 0.25, 0.5, 0.75, 0.975)  # 2.5%, 25%, 50%, 75%, 97.5% quantiles
+PROBS <- c(0.025, 0.25, 0.5, 0.75, 0.975)  # 2.5%, 25%, 50%, 75%, 97.5% quantiles
 
 # Reference vaccination week
 VW <- 9  # representative vaccination week from GTFCC data
@@ -135,15 +134,24 @@ outbreak_data %<>%
 # outbreaks excluded
 outbreaks_excluded <- read_rds("outputs/paper/outbreaks_excluded_20250612.rds")
 
-# Load OCV campaign data
-ocv_use <- fread("outputs/paper/ocv_use_GTFCC_data_20241120.csv")
+# OCV campaign data
+ocv_campaigns <- fread("data/paper/GTFCC_Dashboard_23April2025.csv")
+# Filter outbreak-response (i.e., ICG-approved) events
+ocv_campaigns %>%
+  filter(APPROVED_BY == "ICG") %>% # outbreak response
+  select(COUNTRY, DATE_ROUND_ONE, DOSE_DELIVERED_ROUND_ONE) %>%
+  mutate(DATE_ROUND_ONE = as.Date(DATE_ROUND_ONE)) -> reactive_R1_events
 
-# Calculate delay statistics between request and round 1 vaccination
-# delay_req_r1 <- as.integer(ocv_use$DATE_ROUND_ONE - ocv_use$DATE_REQUEST)
-# # Compute key percentiles of the delay distribution
-# ocv_delay <- quantile(delay_req_r1, probs = c(0.25, 0.5, 0.75, 0.9), na.rm = TRUE)
+reactive_R1_events <- reactive_R1_events[complete.cases(reactive_R1_events),]
+reactive_R1_events <- clean_names(reactive_R1_events)
+reactive_R1_events$year <- lubridate::year(reactive_R1_events$date_round_one)
+reactive_R1_events %>% 
+  group_by(year) %>% 
+  summarize(num_ocv = sum(dose_delivered_round_one)) -> R1_events_by_year
 
-# Get historical OCV deployment data
+R1_events_by_year$cum_num_ocv <- cumsum(R1_events_by_year$num_ocv)
+
+# Historical OCV deployment data
 ocv_use_dashboard <- clean_names(fread("outputs/paper/OCV_Use_GTFCC_Dashboard.csv"))
 ocv_use_dashboard |> 
   filter(shipped == "Shipped", type == "Reactive") |> 
@@ -199,9 +207,9 @@ outbk_data_summary %<>%
 ```{r load-results}
 # Outbreak onset-triggered vaccination results
 cea_files <- c(
-  "outputs/paper/cea_0.6_onset_trigger_20250919.rds",
-  "outputs/paper/cea_0.75_onset_trigger_20250919.rds",
-  "outputs/paper/cea_0.9_onset_trigger_20250919.rds"
+  "outputs/paper/cea_delay_2_0.6_onset_trigger_20251020.rds",
+  "outputs/paper/cea_delay_2_0.75_onset_trigger_20251020.rds",
+  "outputs/paper/cea_delay_2_0.9_onset_trigger_20251020.rds"
 )
 cea <- map_dfr(cea_files, read_rds)
 
@@ -1301,7 +1309,6 @@ format_median_iqr(onset_impact, digits=3, row=16)
 format_median_iqr(onset_impact, row=21)
 format_median_iqr(onset_impact, row=22)
 
-
 # outbreaks missed by delayed vaccination
 wks_delay <- c(1, 5, 9, 14) # de
 dur_missed_id <- vector('list', length(wks_delay))
@@ -1387,6 +1394,10 @@ fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
   summarize_group(vars=c("rate_reduc"), group_name="> 5 weeks") %>% 
   format_median_iqr(digits=1)
 
+fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
+  filter(vacc_cov == VC) %>% 
+  summarize_group(vars=c("decay_rate_k"), group_name="> 5 weeks") %>% 
+  format_median_iqr(digits=3)
 
 fit_decay[["9"]] %>%  # outbreaks 5 weeks or longer
   filter(vacc_cov == VC) %>% 
@@ -1423,7 +1434,8 @@ rm(d, d1, d2, d3, d4, res, onset_impact)
 Percent cases averted
 
 ```{r}
-cea_ori_sum <- read_rds("outputs/paper/cea_pca_summary_20251015.rds")
+cea_ori_sum <- read_rds("outputs/paper/cea_pca_summary_20251020.rds")
+
 ymean  <- 95 
 ymedian<- 87.5
 y50    <- c(82, 93)
@@ -1436,13 +1448,14 @@ p1 <- cea_ori_sum %>%
   ggplot(aes(x = vacc_week, color = as.factor(vacc_cov), 
              group = as.factor(vacc_cov))) +
   ci_layers_from_summary(
+    x_discrete = TRUE,
     dodge_width = 1.4,
     lw95 = line_width_95,
     lw50 = line_width_50,
     pr_size = 2.4,
     mean_size = x_size,
     mean_stroke = x_stroke
-  )+
+  ) +
   add_summary_braces(
     x0 = 13,
     ymean = ymean, ymedian = ymedian,
@@ -1640,7 +1653,7 @@ p2 <- ggplot() +
 # plot 3
 # Calculate proportion of outbreaks included
 # outbreaks missed by delayed vaccination
-wks_delay <- 1:15
+wks_delay <- seq(1, 15, 2)
 dur_missed_id <- vector('list', length(wks_delay))
 vax_missed_id <- vector('list', length(wks_delay))
 
@@ -1659,7 +1672,7 @@ n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
 
 n_outbreaks <- nrow(outbk_data_summary)
 prop_df <- data.frame(
-  vacc_week = 1:15, 
+  vacc_week = seq(1, 15, 2), 
   prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
   prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
 
@@ -1758,18 +1771,24 @@ if (save_plot) {
 
 Summary values referred in the manuscript
 ```{r}
-capd_data <- 
-  read_rds("outputs/paper/summary_case_averted_per_1000_OCV_20251001.rds")
+impact_data <-
+  read_rds("outputs/paper/summary_impact_0.75_delay_prioritization_20251020.rds")
 
-capd_data %>% 
-  filter(prob == 0.9, vacc_cov == 0.75, percentile_by == "ar", vacc_week == 1)
+impact_data %>% 
+  filter(vacc_cov == 0.75, vacc_week %in% c(1,9), 
+         percentile_by == "size", 
+         metric == "med_s_ch_averted_tot",             
+         prob %in% c(0,0.9))
+  
+impact_data %>% 
+  filter(vacc_cov == 0.75, vacc_week %in%  c(1,9), 
+         percentile_by == "ar", 
+         metric == "med_case_averted_per_1000_OCV",             
+         prob %in% c(0,0.9))
 ```
 
 
 ```{r}
-impact_data <-
-  read_rds("outputs/paper/summary_impact_delay_prioritization_20251004.rds")
-
 # Create the color palette function (your code was correct here)
 myPalette <- colorRampPalette(brewer.pal(9, "YlOrBr"))
 
@@ -1784,9 +1803,10 @@ y_annots <- c("Prioritizing higher AR outbreaks",
 
 plot_data <- impact_data %>% filter(metric == "med_s_ch_averted_tot")
 
-# plot_data %>% 
-#   filter(vacc_cov == 0.75) %>%
-#   pull(median_value) %>% range()
+plot_data %>%
+  filter(vacc_cov == 0.75, vacc_week == 9, percentile_by = "size") %>%
+  group_by(prob) %>% 
+  summarize(med_case_averted = median_value) 
 
 # Create the color palette function (your code was correct here)
 myPalette <- colorRampPalette(brewer.pal(9, "YlOrBr"))
@@ -1799,6 +1819,11 @@ pct_by <- c("ar", "duration", "size", "cfr")
 
 plts_ca <- vector('list', 4)
 
+q_labels <- c(expression(Q[0*"%"]),
+                 expression(Q[20*"%"]),
+                 expression(Q[40*"%"]),
+                 expression(Q[60*"%"]),
+                 expression(Q[80*"%"]))
 i <- 3
 plt_1  <- plot_data %>% 
     filter(percentile_by == pct_by[i], vacc_cov == 0.75) %>%
@@ -1815,11 +1840,7 @@ plt_1  <- plot_data %>%
     scale_y_continuous(
       expand = c(0, 0), 
       breaks = seq(0, 0.8, 0.2),
-      labels = c(expression(">="*P[0*"%"]),
-                 expression(">="*P[20*"%"]),
-                 expression(">="*P[40*"%"]),
-                 expression(">="*P[60*"%"]),
-                 expression(">="*P[80*"%"]))) +
+      labels = q_labels) +
       
     scale_x_continuous(expand = c(0, 0), breaks = seq(1, 15, 2)) +
     annotate(
@@ -1914,11 +1935,7 @@ plt_2  <- plot_data %>%
     scale_y_continuous(
       expand = c(0, 0), 
       breaks = seq(0, 0.8, 0.2),
-      labels = c(expression(">="*P[0*"%"]),
-                 expression(">="*P[20*"%"]),
-                 expression(">="*P[40*"%"]),
-                 expression(">="*P[60*"%"]),
-                 expression(">="*P[80*"%"]))) +
+      labels = q_labels) +
       
     scale_x_continuous(expand = c(0, 0), breaks = seq(1, 15, 2)) +
     annotate(
@@ -2009,11 +2026,7 @@ plt_3  <- plot_data %>%
     scale_y_continuous(
       expand = c(0, 0), 
       breaks = seq(0, 0.8, 0.2),
-      labels = c(expression(">="*P[0*"%"]),
-                 expression(">="*P[20*"%"]),
-                 expression(">="*P[40*"%"]),
-                 expression(">="*P[60*"%"]),
-                 expression(">="*P[80*"%"]))) +
+      labels = q_labels) +
       
     scale_x_continuous(expand = c(0, 0), breaks = seq(1, 15, 2)) +
     annotate(
@@ -4020,7 +4033,9 @@ Total suspected cases averted (s_ch_averted_tot)
 rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
 df <- data.frame(x=sort(unique(dw$doses_used_plot)))
 df$y <- df$x
-
+ocv_dose_2020 <- ocv_year[year == 2020, cum_num_ocv]
+ocv_dose_2024 <- ocv_year[year == 2024, cum_num_ocv]
+     
 p1 <- dw %>%
   filter(dw$value_column == "s_ch_averted_tot") %>% 
   filter(subset_id %in% ids) %>% 
@@ -4038,6 +4053,10 @@ p1 <- dw %>%
   geom_line(data=df, aes(x, y/1000), linetype = "dashed", inherit.aes = FALSE)+
   geom_line(data=df, aes(x, 3*y/1000), linetype = "dashed", inherit.aes = FALSE)+
   geom_line(data=df, aes(x, y/3/1000), linetype = "dashed", inherit.aes = FALSE)+
+  geom_vline(xintercept = ocv_dose_2020, 
+             linetype = "dashed", color = "firebrick")+
+  geom_vline(xintercept = ocv_dose_2024, 
+             linetype = "dashed", color = "firebrick")+
   scale_x_log10("Vaccine doses deployed") +
   scale_y_log10("Total cases averted") +
   scale_color_manual("",
@@ -4100,15 +4119,29 @@ p3 <- dw %>%
     mean_stroke = 0,
     alpha = 0.3
   ) +
+  # geom_hline(yintercept = 1, linetype = "dashed", color = "firebrick")+
   scale_x_log10("Vaccine doses deployed") +
   scale_y_continuous("Case averted per 1,000 OCVs") +
   scale_color_manual("",
     breaks = levs,
     labels = unname(expr_labels[levs]),
     values = my_discrete_colors[1:4]
-  )++
+  )+
   theme_light() +
   theme(legend.position = "top")
+
+p3 <- p3 + 
+  scale_y_continuous(
+    "Case averted per 1,000 OCVs",
+    breaks = function(lims) {
+      # default "pretty" breaks for the full range
+      b <- pretty(lims)
+      # force 0:5 and keep only the default breaks that are > 5
+      unique(c(0:5, b[b > 5]))
+    },
+    # minor_breaks = waiver()  # keep default minor gridlines
+    minor_breaks = NULL
+  )
 p3
 ```
 

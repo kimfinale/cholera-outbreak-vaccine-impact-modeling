@@ -1792,7 +1792,6 @@ draw_parameter_samples <- function(nruns = 200, parameter_data = NULL) {
   }
 
   # Get pre-calculated indirect effectiveness data
-  # ive_data <- readRDS("outputs/ive_yrep_20241010.rds")
   ive_data <- readRDS("outputs/paper/ive_yhat_yrep_20250919.rds")
   n_ive_sample <- nrow(ive_data$yhat)
 
