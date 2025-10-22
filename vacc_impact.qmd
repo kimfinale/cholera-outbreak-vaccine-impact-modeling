@@ -234,31 +234,37 @@ ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
 #   group_by(spatial_scale) %>% 
 #   summarize_quantiles(variable=cfr_per_100percent)
 
-# fwrite(outbk_data_summary,
-#        "outputs/outbreak_data_summary_20251022.csv")
-
-outbk_data_summary <- fread("outputs/outbreak_data_summary_20251022.csv")
+# fwrite(outbk_data_summary, "outputs/paper/outbreak_data_summary_20251022.csv")
+outbk_data_summary <- fread("outputs/paper/outbreak_data_summary_20251022.csv")
 ```
 
 ## Load Economic and Demographic Data
 
 ```{r econ-demo-data}
 # Load life expectancy and GDP data
-life_exp_data <- as.data.frame(fread("outputs/paper/wpp_life_expectancy_20241022.csv"))
+life_exp_data <- 
+  as.data.frame(fread("outputs/paper/wpp_life_expectancy_20241022.csv"))
+# life expectancy at age 25 during 2010-2020, mean age for cholera
 life_exp_data %>% 
-  filter(Year >= 2010, Year <= 2020, `Region, subregion, country or area *` == "Sub-Saharan Africa") %>% 
+  filter(Year >= 2010, Year <= 2020, 
+         `Region, subregion, country or area *` == "Sub-Saharan Africa") %>% 
   pull(`25`) %>%  
   as.numeric() -> life_exp_25
 
 summary(life_exp_25)
 
 # Load population by age data 
-age_dist <- as.data.frame(fread("outputs/paper/wpp_pop_by_age_20241022.csv"))
+# prop of under 5 during 2010-2020
+age_dist <- 
+  as.data.frame(fread("outputs/paper/wpp_pop_by_age_20241022.csv"))
 age_dist %>% 
-  filter(Year >= 2010, Year <= 2020, `Region, subregion, country or area *` == "Sub-Saharan Africa") %>% 
+  filter(Year >= 2010, Year <= 2020,
+         `Region, subregion, country or area *` == "Sub-Saharan Africa") %>% 
   pull(prop_u5) -> prop_U5
 
 summary(prop_U5)
+
+# gdp data from World Bank during 2010-2020
 
 gdp_data <- read_xls("data/paper/GDP_WorldBank.xls")
 gdp_data %>% 
@@ -268,6 +274,7 @@ gdp_data %>%
 
 summary(gdp_ssa)
 
+# workforce data
 workforce_data <- read_xls("data/paper/Workforce_Worldbank.xls")
 workforce_data %>% 
   filter(`Country Name` == "Sub-Saharan Africa (excluding high income)")%>%
@@ -276,8 +283,6 @@ workforce_data %>%
 
 summary(wf_ssa)
 
-# Consumer price index for cost adjustment (2015 to 2023)
-dis_params <- as.data.frame(data.table::fread("data/paper/parameters.csv"))
 
 # Standardize country code variable names
 names(life_exp_data)[names(life_exp_data) == "ISO3 Alpha-code"] <- "country"
@@ -302,41 +307,78 @@ gdp_long$year <- as.integer(gdp_long$year)
 
 ## Cost-Effectiveness Parameters
 
+
 ```{r cost-params}
-# Disease-specific parameters
-# convert to data.frame because extracting a column of the data.table as numbers gives me troubles
-parms <- as.data.frame(fread("data/paper/parameters.csv"))
-parms <- filter(parms, Disease == "Cholera")
+parm <- fread("data/paper/parameters.csv")
+parm <- parm[Disease == "Cholera"]
 # GBD data deleted and replaced with Mbewe (2025) Open Forum Infect Dis data
-parms <- filter(parms, !(Parameter == "Prop_Moderate" & Value == 0.289))
-parms <- filter(parms, !(Parameter == "Prop_Severe" & Value == 0.069))
+# it is assumed that moderate and severe cases are reported 
+parm <- parm[!(Parameter == "Prop_Moderate" & Value == 0.289)]
+parm <- parm[!(Parameter == "Prop_Severe" & Value == 0.069)]
 
 # Disease burden parameters
 # pr_asymp <- parms[Parameter == "Prop_Asymptomatic", "Value"]
 # pr_mild <- parms[Parameter == "Prop_Mild", "Value"]
-pr_moderate <- parms[parms$Parameter == "Prop_Moderate", "Value"]
-pr_severe <- parms[parms$Parameter == "Prop_Severe", "Value"]
-dur <- parms[parms$Parameter == "Duration_Illness", "Value"]
+pr_moderate <- parm[Parameter == "Prop_Moderate", Value]
+pr_severe <- parm[Parameter == "Prop_Severe", Value]
+dur <- parm[Parameter == "Duration_Illness", Value]
 # wt_asymp <- parms[Parameter == "Disability_Weight_Asymptomatic", "Value"]
 # wt_mild <- parms[Parameter == "Disability_Weight_Mild", "Value"]
-wt_moderate <- parms[parms$Parameter == "Disability_Weight_Moderate", "Value"]
-wt_severe <- parms[parms$Parameter == "Disability_Weight_Severe", "Value"]
+wt_moderate <- parm[Parameter == "Disability_Weight_Moderate", Value]
+wt_severe <- parm[Parameter == "Disability_Weight_Severe", Value]
 
 # Vaccination costs
-vacc_cost_per_dose <- parms[parms$Parameter == "Vaccine_Cost", "Value"]
-vacc_delivery_cost <- parms[parms$Parameter == "Vaccine_Delivery_Cost", "Value"]
-vacc_shipping_cost <- parms[parms$Parameter == "Vaccine_Shipping_Cost", "Value"]
+vacc_cost_per_dose <- parm[Parameter == "Vaccine_Cost", Value]
+vacc_delivery_cost <- parm[Parameter == "Vaccine_Delivery_Cost", Value]
+vacc_shipping_cost <- parm[Parameter == "Vaccine_Shipping_Cost", Value]
 
 # Direct medical costs
-patient_cost_hosp <- parms[parms$Parameter == "Patient_Cost_Hosp", "Value"]
-patient_cost_outpt <- parms[parms$Parameter == "Patient_Cost_Outpt", "Value"]
-public_cost_hosp <- parms[parms$Parameter == "Public_Cost_Hosp", "Value"]
-public_cost_outpt <- parms[parms$Parameter == "Public_Cost_Outpt", "Value"] 
+patient_cost_hosp <- parm[Parameter == "Patient_Cost_Hosp", Value]
+patient_cost_outpt <- parm[Parameter == "Patient_Cost_Outpt", Value]
+public_cost_hosp <- parm[Parameter == "Public_Cost_Hosp", Value]
+public_cost_outpt <- parm[Parameter == "Public_Cost_Outpt", Value] 
 
 # Productivity costs
-patient_workday_lost <- parms[parms$Parameter == "Pt_Workdays_Lost", "Value"]
-caregiver_workday_lost <- parms[parms$Parameter == "Caregiver_Workdays_Lost", "Value"]
-mean_age_inf <- parms[parms$Parameter == "Mean_Age_Infection", "Value"]
+patient_workday_lost <- parm[Parameter == "Pt_Workdays_Lost", Value]
+caregiver_workday_lost <- parm[Parameter == "Caregiver_Workdays_Lost", Value]
+mean_age_inf <- parm[Parameter == "Mean_Age_Infection", Value]
+
+# # Disease-specific parameters
+# # dis_params <- as.data.frame(data.table::fread("data/paper/parameters.csv"))
+# # convert to data.frame because extracting a column of the data.table as numbers gives me troubles
+# parms <- as.data.frame(fread("data/paper/parameters.csv"))
+# parms <- filter(parms, Disease == "Cholera")
+# # GBD data deleted and replaced with Mbewe (2025) Open Forum Infect Dis data
+# # it is assumed that moderate and severe cases are reported 
+# parms <- filter(parms, !(Parameter == "Prop_Moderate" & Value == 0.289))
+# parms <- filter(parms, !(Parameter == "Prop_Severe" & Value == 0.069))
+# 
+# # Disease burden parameters
+# # pr_asymp <- parms[Parameter == "Prop_Asymptomatic", "Value"]
+# # pr_mild <- parms[Parameter == "Prop_Mild", "Value"]
+# pr_moderate <- parms[parms$Parameter == "Prop_Moderate", "Value"]
+# pr_severe <- parms[parms$Parameter == "Prop_Severe", "Value"]
+# dur <- parms[parms$Parameter == "Duration_Illness", "Value"]
+# # wt_asymp <- parms[Parameter == "Disability_Weight_Asymptomatic", "Value"]
+# # wt_mild <- parms[Parameter == "Disability_Weight_Mild", "Value"]
+# wt_moderate <- parms[parms$Parameter == "Disability_Weight_Moderate", "Value"]
+# wt_severe <- parms[parms$Parameter == "Disability_Weight_Severe", "Value"]
+# 
+# # Vaccination costs
+# vacc_cost_per_dose <- parms[parms$Parameter == "Vaccine_Cost", "Value"]
+# vacc_delivery_cost <- parms[parms$Parameter == "Vaccine_Delivery_Cost", "Value"]
+# vacc_shipping_cost <- parms[parms$Parameter == "Vaccine_Shipping_Cost", "Value"]
+# 
+# # Direct medical costs
+# patient_cost_hosp <- parms[parms$Parameter == "Patient_Cost_Hosp", "Value"]
+# patient_cost_outpt <- parms[parms$Parameter == "Patient_Cost_Outpt", "Value"]
+# public_cost_hosp <- parms[parms$Parameter == "Public_Cost_Hosp", "Value"]
+# public_cost_outpt <- parms[parms$Parameter == "Public_Cost_Outpt", "Value"] 
+# 
+# # Productivity costs
+# patient_workday_lost <- parms[parms$Parameter == "Pt_Workdays_Lost", "Value"]
+# caregiver_workday_lost <- parms[parms$Parameter == "Caregiver_Workdays_Lost", "Value"]
+# mean_age_inf <- parms[parms$Parameter == "Mean_Age_Infection", "Value"]
 
 # Vaccination regimen
 dose_regimen <- 1  # Single-dose regimen
@@ -348,7 +390,7 @@ coi_per_patient <-
     pr_moderate / pr_tot * (patient_cost_outpt + public_cost_outpt) + 
     pr_severe / pr_tot * (patient_cost_hosp + public_cost_hosp)
 
-# Adjust costs for inflation (2015 to 2023)
+# Consumer price index for cost adjustment for inflation(2015 to 2023)
 cpi_percent <- read_xls("data/paper/imf-dm-export-20241028.xls")
 cpi_percent <- cpi_percent %>%
   pivot_longer(cols = `2015`:`2029`, names_to = "year", values_to = "value")
