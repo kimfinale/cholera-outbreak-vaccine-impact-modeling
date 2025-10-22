@@ -427,8 +427,8 @@ tic <- Sys.time()  # Start timer
 
 # Setup for parallel processing
 vacc_covs <- c(0.6, 0.75, 0.9)    # Vaccine coverage levels to simulate
-vacc_covs <- c(0.75)
-vacc_weeks <- seq(1, 15, by = 1)  # Vaccination weeks to simulate
+# vacc_covs <- c(0.75)
+vacc_weeks <- seq(1, 15, by = 2)  # Vaccination weeks to simulate
 nruns <- 200                      # Number of simulation runs per configuration
 batch_size <- 10  # Number of runs per parallel batch
 delay <- 2        # No ORI after two or more weeks after outbreak end
@@ -567,6 +567,7 @@ for (batch_id in seq(1, nruns, by = batch_size)) {
 toc <- Sys.time()
 message(paste("Total execution time:", round(toc - tic, digits=2), "minutes"))
 ```
+
 ## Combine Simulation Results
 
 ### Onset-triggered 
@@ -675,7 +676,6 @@ Calculate Impact Metrics
   }
   rm(d)  # Free memory
 # }
-
 ```
 
 ## Case-triggered 
@@ -831,21 +831,11 @@ median_by_ids <- function(cea, ids_list, probs, metrics,
 cea_75_ori$daly_averted_per_1000_OCV <- 
   1000 * cea_75_ori$daly_averted / cea_75_ori$vacc_dose
 
-cea_metrics <- c("s_ch_averted_tot")  # add 
 
 cea_metrics <- c("s_ch_averted_tot", "pct_reduc_case",
                  "case_averted_per_1000_OCV", "daly_averted_per_1000_OCV")  # add 
 
 med_ar <- median_by_ids(cea_75_ori, ids_list_ar, probs, metrics = cea_metrics)
-
-# remove outbreaks if cost data is not available: GDP data area not available for Somalia and South Sudan 
-d <- filter(cea_75_ori, !is.na(gdp))
-d$daly_averted_per_1000_OCV <- 
-  1000 * d$daly_averted / d$vacc_dose
-med_ar2 <- median_by_ids(d, ids_list_ar, probs, metrics = cea_metrics)
-
-med_ar %>% filter(prob %in% c(0, 0.9), vacc_week == 9)
-med_ar2 %>% filter(prob %in% c(0, 0.9), vacc_week == 9)
 
 med_dur  <- median_by_ids(cea_75_ori, ids_list_dur, probs, 
                              metrics = cea_metrics)
@@ -872,6 +862,22 @@ saveRDS(med_all_long,
                tstamp(), ".rds"))
 ```
 
+### CEA across delays
+
+```{r}
+cea_delay_files <- c(
+  "outputs/cea_delay_7_0.75_onset_trigger_20251019.rds",
+  "outputs/cea_delay_6_0.75_onset_trigger_20251019.rds",
+  "outputs/cea_delay_5_0.75_onset_trigger_20251019.rds",
+  "outputs/cea_delay_4_0.75_onset_trigger_20251019.rds",
+  "outputs/cea_delay_3_0.75_onset_trigger_20251019.rds",
+  "outputs/cea_delay_2_0.75_onset_trigger_20251019.rds",
+  "outputs/cea_delay_1_0.75_onset_trigger_20251019.rds",
+  "outputs/cea_delay_0_0.75_onset_trigger_20251019.rds"
+)
+d <- map_dfr(cea_delay_files, read_rds)
+
+```
 
 # Sampling outbreaks
 

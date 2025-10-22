@@ -498,6 +498,7 @@ sum_over_week <- function(d, case_trigger=FALSE) {
     pop = first(pop),
     ori_occurred = first(ori_occurred),
     week_delay_to_vacc_effect = first(week_delay_to_vacc_effect),
+    no_ori_delay_outbreak_end = first(no_ori_delay_outbreak_end),
     # Sum across weeks for weekly variables
     s_ch_tot = sum(s_ch),
     s_ch_averted_tot = sum(s_ch_averted),
