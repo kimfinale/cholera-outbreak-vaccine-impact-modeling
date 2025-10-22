@@ -227,6 +227,8 @@ outbk_data_summary <-
 outbk_data_summary %>% 
   group_by(spatial_scale) %>% 
   summarize_quantiles(variable=cfr_per_100percent)
+
+# fwrite(outbk_data_summary, "outputs/outbreak_data_summary_20251022.csv")
 ```
 
 ## Load Economic and Demographic Data
@@ -1151,8 +1153,10 @@ Fit an exponential decay function for percentage case reduction across delay in 
 
 ### Outbreak onset-triggered
 ```{r}
+cea_data <- read_rds("outputs\\paper\\cea_delay_2_0.75_onset_trigger_20251020.rds")
+
 dat <- 
-  left_join(cea[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
+  left_join(cea_data[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
                          "week_delay_to_vacc_effect", "runid", "vacc_cov")],
             outbk_data_summary[, c("ar_per_10e3","duration_weeks",
                                   "spatial_scale", "rural_urban",
