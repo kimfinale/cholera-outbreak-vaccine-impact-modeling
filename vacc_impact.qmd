@@ -1,5 +1,5 @@
 ---
-title: "Vaccine Impact Simulation"
+title: "Cholera Vaccine Impact Modeling: Simulations"
 author: "Jong-Hoon Kim"
 date: "2025-06-18"
 format: 
@@ -649,11 +649,11 @@ Calculate Impact Metrics
     # Full cost-effectiveness analysis
     svim_tt_cea <- add_cea_variables(d[vacc_cov == vc], 
                                      mean_age_inf = mean_age_inf)
-    svim_tt_cea <- add_cea_results(svim_tt_cea)
+    svim_tt_cea <- add_cea_results(svim_tt_cea, parms = as.data.frame(parm))
     
     # Save detailed results
     saveRDS(svim_tt_cea,
-           paste0("outputs/cea_", vc, "_onset_trigger_",
+           paste0("outputs/paper/cea_weekly_", vc, "_onset_trigger_",
                   tstamp(), ".rds"))
     # saveRDS(svim_tt_cea,
     #        paste0("outputs/cea_delay_", delay, "_", vc, "_onset_trigger_", 
@@ -710,13 +710,13 @@ for (vc in unique(d_ct$vacc_cov)) {
 ```
 
 
-## Summary data for plotting 
+# Summary results for plotting 
 
-### Quantile values for plotting
+## Quantile values for plotting
 
 ```{r}
 VC3    <- c(0.6, 0.75, 0.9)
-VW_seq <- 1:15
+VW_seq <- seq(1, 15, 2)
 
 build_plot_summary <- function(data, value_col,
                                by = c("vacc_cov", "vacc_week"),
@@ -741,9 +741,9 @@ build_plot_summary <- function(data, value_col,
 
 # In case cea files were not loaded
 cea_files <- c(
-  "outputs/paper/cea_delay_2_0.6_onset_trigger_20251020.rds",
-  "outputs/paper/cea_delay_2_0.75_onset_trigger_20251020.rds",
-  "outputs/paper/cea_delay_2_0.9_onset_trigger_20251020.rds"
+  "outputs/paper/cea_0.6_onset_trigger_20251022.rds",
+  "outputs/paper/cea_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_0.9_onset_trigger_20251022.rds"
 )
 cea <- map_dfr(cea_files, read_rds)
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
@@ -757,8 +757,7 @@ saveRDS(cea_summary_pca,
         paste0("outputs/paper/cea_pca_summary_", tstamp(), ".rds"))
 ```
 
-
-### Median values by prioritization
+## Median values by prioritization
 
 ```{r}
 outbk_dat <- outbreaks_filtered |>
@@ -795,7 +794,7 @@ ids_list_cfr <- map(probs, ~ top_p_ids(outbk_dat, cfr, p = .x))
 ```
 
 ```{r}
-cea_75 <- read_rds("outputs/paper/cea_delay_2_0.75_onset_trigger_20251020.rds")
+cea_75 <- read_rds("outputs/paper/cea_0.75_onset_trigger_20251022.rds")
 cea_75_ori <- cea_75 %>% filter(ori_occurred == TRUE)
 
 median_by_ids <- function(cea, ids_list, probs, metrics,
@@ -862,23 +861,6 @@ saveRDS(med_all_long,
                tstamp(), ".rds"))
 ```
 
-### CEA across delays
-
-```{r}
-cea_delay_files <- c(
-  "outputs/cea_delay_7_0.75_onset_trigger_20251019.rds",
-  "outputs/cea_delay_6_0.75_onset_trigger_20251019.rds",
-  "outputs/cea_delay_5_0.75_onset_trigger_20251019.rds",
-  "outputs/cea_delay_4_0.75_onset_trigger_20251019.rds",
-  "outputs/cea_delay_3_0.75_onset_trigger_20251019.rds",
-  "outputs/cea_delay_2_0.75_onset_trigger_20251019.rds",
-  "outputs/cea_delay_1_0.75_onset_trigger_20251019.rds",
-  "outputs/cea_delay_0_0.75_onset_trigger_20251019.rds"
-)
-d <- map_dfr(cea_delay_files, read_rds)
-
-```
-
 # Sampling outbreaks
 
 This section creates and analyzes subsets of outbreaks to simulate different targeting strategies.
@@ -889,10 +871,9 @@ Outbreaks are randomly sampled for a given OCV budget. Outbreaks are eligible if
 
 
 ```{r}
-# Outbreak onset-triggered vaccination results
+# Default outbreak onset-triggered vaccination results (delay = 2, VC=0.75)
 cea_files <- 
-  c("outputs/paper/cea_delay_2_0.75_onset_trigger_20251020.rds")
-
+  c("outputs/paper/cea_0.75_onset_trigger_20251022.rds")
 cea <- map_dfr(cea_files, read_rds)
 
 outbk_dat <- outbreaks_filtered |>
@@ -1006,82 +987,16 @@ plan(sequential)
 Aggregate metrics across sampled outbreaks
 
 ```{r}
-# ocv_doses <- c(1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6)
-# priorities <- c("AR", "dur", "size")
+cea_files <- 
+  c("outputs/paper/cea_0.75_onset_trigger_20251022.rds")
+cea <- map_dfr(cea_files, read_rds)
 
-subset_list <- vector('list', length(priorities) * length(ocv_doses))
-
-i <- 1
-for (priority in priorities) {
-  for (ocv_dose in ocv_doses) {
-    # filename
-    fn <- paste0("outputs/subsets_", 
-               round(ocv_dose/1e6), "M_", priority, "_20251015.rds")
-    if (ocv_dose < 1e6) {
-       fn <- paste0("outputs/subsets_", 
-                    round(ocv_dose/1e3), "K_", priority, "_20251015.rds")
-    }
-    
-    subset_list[[i]] <- readRDS(fn)
-    i <- i + 1
-  }
-}
-subsets <- rbindlist(subset_list)
-setDT(subsets)
-
-
-probs <- seq(0, 0.9, 0.1)
-
-for (priority in priorities) {
-  i <- 1
-  subsets_cea_list <- vector("list", length(ocv_doses) * 
-                             length(probs) * length(unique(subsets$id_sample)))  
-  
-  for (dose in ocv_doses) {
-    for (pr in probs) {
-      for (id in unique(subsets$id_sample)) {
-        # Get outbreaks in this subset up to specified year
-        sub <- subsets[(id_sample == id & prob == pr & 
-                          vacc_priority == priority & ocv_dose == dose)]
-      
-        # Extract impact results for these outbreaks
-        cea_sub <- cea[id_outbreak %in% sub$id_outbreak]
- 
-        # Sum impact across outbreaks
-        cea_sub_sum <- sum_over_outbreaks_by_runid(cea_sub, ori_occurred = T)
-      
-        # Tag with subset metadata
-        cea_sub_sum$subset_id <- id
-        cea_sub_sum$vacc_priority <- priority
-        cea_sub_sum$priority_prob <- pr
-        cea_sub_sum$target_vacc_doses <- dose
-        cea_sub_sum$outbreak_count <- sub$outbreak_count[1]
-        cea_sub_sum$doses_used <- sub$doses_used[1]
-      
-        # Store results
-        subsets_cea_list[[i]] <- cea_sub_sum
-        i <- i + 1 
-      }
-    }
-  }
-  subsets_cea_priority <- rbindlist(subsets_cea_list)
-  saveRDS(subsets_cea_priority, 
-          paste0("outputs/cea_subsets_", priority, "_onset_trigger_",
-                         tstamp(), ".rds"))
-}
-```
-
- - data.table way
-```{r}
-## ---------- 4) Worker that computes one group ----------
+##  Worker that computes one group ----------
 compute_one_grp <- function(g, cea_data) {
   ids <- grp2ids[grp == g, id_outbreak][[1L]]
   if (length(ids) == 0L) return(NULL)
-  
   # Fast keyed subset on CEA
   cea_sub <- cea_data[.(ids), nomatch = 0L]
-  
-  # Your existing aggregator
   out <- sum_over_outbreaks_by_runid(cea_sub, ori_occurred = TRUE)
   
   # Attach metadata
@@ -1095,14 +1010,14 @@ compute_one_grp <- function(g, cea_data) {
     doses_used       = m$doses_used
   )]
   
-    out[]
+  out[]
 }
+
 ## ---------- 2) Prepare CEA for fast lookup ----------
 cea_data <- cea %>% filter(vacc_cov == 0.75, vacc_week == 9) 
 setDT(cea_data)
 setkey(cea_data, id_outbreak)  
 
-## ---------- 1) Read all subset files efficiently ----------
 # Grid of filenames
 grid <- CJ(vacc_priority = priorities, ocv_dose = ocv_doses)
 grid[, fn := ifelse(ocv_dose < 1e6, 
@@ -1122,7 +1037,7 @@ ids_list <- lapply(id0, function(x) seq(x, x+99))
 
 for (ids in ids_list) {
   subsets <- subsets_all[id_sample %in% ids]
-  ## ---------- 3) Build group index & metadata ----------
+  # Build group index & metadata
   # One group per (priority, dose, prob, id_sample)
   subsets[, grp := .GRP, by = .(vacc_priority, ocv_dose, prob, id_sample)]
   
@@ -1133,13 +1048,10 @@ for (ids in ids_list) {
   # Map each group to its vector of outbreak IDs (list column)
   grp2ids <- subsets[, .(id_outbreak = list(unique(id_outbreak))), by = grp]
   
-  ## ---------- 5) Compute & save per priority (flat lapply, no nested loops) ----------
+  # Compute & save per priority (flat lapply, no nested loops) ----------
   for (p in priorities) {
     grp_p <- meta[vacc_priority == p, grp]
-  
-    # Optional: parallelize this lapply with future.apply if desired
-    # library(future.apply); plan(multisession)
-    # res_list <- future_lapply(grp_p, compute_one_grp, future.seed = TRUE)
+
     res_list <- lapply(grp_p, compute_one_grp, cea_data)
   
     subsets_cea_priority <- rbindlist(res_list, fill = TRUE)
@@ -1206,7 +1118,7 @@ Fit an exponential decay function for percentage case reduction across delay in 
 
 ### Outbreak onset-triggered
 ```{r}
-cea_data <- read_rds("outputs\\paper\\cea_delay_2_0.75_onset_trigger_20251020.rds")
+cea_data <- read_rds("outputs/paper/cea_weekly_0.75_onset_trigger_20251022.rds")
 
 dat <- 
   left_join(cea_data[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
@@ -1274,7 +1186,7 @@ for (wk_cut in cut_points) {
 # res$`15` %>% filter(vacc_cov == 0.9, runid == 2) -> x
 # which(x$constant == TRUE)
 
-saveRDS(res, paste0("outputs/fit_decay_model_", tstamp(), ".rds"))
+saveRDS(res, paste0("outputs/paper/fit_decay_model_", tstamp(), ".rds"))
 ```
 
 ### Case-triggered

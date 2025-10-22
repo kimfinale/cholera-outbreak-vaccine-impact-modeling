@@ -1,5 +1,5 @@
 ---
-title: "Cholera Vaccine Impact Visualization and Tables"
+title: "Cholera Vaccine Impact Modeling: Visualization and Tables"
 author: "Jong-Hoon Kim"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 format:
@@ -15,7 +15,7 @@ editor_options:
 # Introduction
 
 This document creates visualizations and tables to summarize the results from 
-our cholera vaccine impact simulations. It processes results from different vaccination strategies (outbreak onset-triggered, case-triggered, and preemptive) and coverage levels, and produces figures and tables for the final report.
+cholera vaccine impact simulations. 
 
 # Setup
 
@@ -129,7 +129,7 @@ outbreak_data <- fread("outputs/paper/outbreak_data_20250228.csv")
 outbreaks_filtered <-
   readRDS("outputs/paper/outbreak_summary_filtered_20250418.rds")
 
-outbreak_data %<>% 
+outbreak_data <- outbreak_data %>%
   filter(id_outbreak %in% outbreaks_filtered$id_outbreak) 
 # outbreaks excluded
 outbreaks_excluded <- read_rds("outputs/paper/outbreaks_excluded_20250612.rds")
@@ -161,11 +161,6 @@ ocv_use_dashboard |>
 
 ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
 
-# # Load OCV campaign dataset
-# docv_ <- clean_names(fread("data/paper/outbreak_files_Oct2024/ocv_long_dataset.csv"))
-# docv <- docv_[(ocv_before_1 == TRUE | ocv_before_2 == TRUE | 
-#                ocv_before_3 == TRUE | ocv_during == TRUE)]
-
 # Load model parameters
 dis_params <- as.data.frame(fread("data/paper/parameters.csv"))
 
@@ -196,7 +191,9 @@ outbk_data_summary <-
   )
 
 outbk_data_summary %<>% 
-  filter(id_outbreak %in% outbreaks_filtered$id_outbreak) 
+  filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
+
+outbk_data_summary <- fread("outputs/paper/outbreak_data_summary_20251022.csv")
 # Summarize attack rates and population sizes
 # summary(outbk_data_summary$ar_per_10e3)
 # summary(outbk_data_summary$outbreak_pop)
@@ -207,16 +204,16 @@ outbk_data_summary %<>%
 ```{r load-results}
 # Outbreak onset-triggered vaccination results
 cea_files <- c(
-  "outputs/paper/cea_delay_2_0.6_onset_trigger_20251020.rds",
-  "outputs/paper/cea_delay_2_0.75_onset_trigger_20251020.rds",
-  "outputs/paper/cea_delay_2_0.9_onset_trigger_20251020.rds"
+  "outputs/paper/cea_0.6_onset_trigger_20251022.rds",
+  "outputs/paper/cea_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_0.9_onset_trigger_20251022.rds"
 )
 cea <- map_dfr(cea_files, read_rds)
 
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
 # weekly decline
-fit_decay <- read_rds("outputs/paper/fit_decay_model_20250923.rds")
+fit_decay <- read_rds("outputs/paper/fit_decay_model_20251022.rds")
 
 # Case-triggered vaccination results
 # cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250716.rds")
@@ -263,47 +260,19 @@ format_median_iqr(onset_impact, digits=0, row=10)
 
 
 # weekly reduction rate
-fit_decay[["5"]] %>% 
+fit_decay[["9"]] %>% 
   filter(vacc_cov == VC) %>% 
-  mutate(rate_reduc = 1 - exp(-decay_rate_k)) %>% 
+  mutate(rate_reduc = 1 - exp(-k_hat)) %>% 
   summarize_quantiles(rate_reduc*100) %>% 
   format_median_iqr(digits=1)
 
+
 # half_life                  
-fit_decay[["5"]] %>% 
+fit_decay[["9"]] %>%
   filter(vacc_cov == VC) %>%  
-  summarize_quantiles(half_life_weeks) %>% 
+  summarize_quantiles(half_life) %>% 
   format_median_iqr(digits=1)
 
-# # stockpile impact
-# stockpile_impact <- cea_stockpile_subsets_q1 %>%
-#   filter(vacc_cov %in% c(0.75), vacc_week %in% c(9)) %>%
-#   group_by(vacc_cov, vacc_week) %>%
-#   summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
-#                       case_averted_per_1000_OCV, cost_per_case_averted, 
-#                       cost_per_daly_averted)
-#   
-# stockpile_impact
-# # cases averted for vaccine coverage of 75%
-# format_median_iqr(stockpile_impact, row=1)
-# # percentage cases averted
-# format_median_iqr(stockpile_impact, row=2)
-# 
-# 
-# format_median_iqr(stockpile_impact, digits=2, row=3)
-# format_median_iqr(stockpile_impact, row=4)
-# 
-# stockpile_impact_q4 <- cea_stockpile_subsets_q4 %>%
-#   filter(vacc_cov %in% c(0.75), vacc_week %in% c(9)) %>%
-#   group_by(vacc_cov, vacc_week) %>%
-#   summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
-#                       case_averted_per_1000_OCV, cost_per_case_averted, 
-#                       cost_per_daly_averted)
-# # cases averted for vaccine coverage of 75%
-# format_median_iqr(stockpile_impact_q4, row=1)
-# # percentage cases averted
-# format_median_iqr(stockpile_impact_q4, row=2)
-# 
 # rm(onset_impact, stockpile_impact, stockpile_impact_q4)
 ```
 
@@ -1434,7 +1403,7 @@ rm(d, d1, d2, d3, d4, res, onset_impact)
 Percent cases averted
 
 ```{r}
-cea_ori_sum <- read_rds("outputs/paper/cea_pca_summary_20251020.rds")
+cea_ori_sum <- read_rds("outputs/paper/cea_pca_summary_20251022.rds")
 
 ymean  <- 95 
 ymedian<- 87.5
@@ -3350,6 +3319,43 @@ if (save_plot) {
 }
 ```
 
+CEA across delays in no ORI after the outbreak end
+
+```{r}
+cea_delay_files <- c(
+  "outputs/paper/cea_delay_7_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_delay_6_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_delay_5_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_delay_4_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_delay_3_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_delay_2_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_delay_1_0.75_onset_trigger_20251022.rds",
+  "outputs/paper/cea_delay_0_0.75_onset_trigger_20251022.rds"
+)
+d <- map_dfr(cea_delay_files, read_rds)
+names(d)
+d$daly_averted_per_1000_OCV <- 1000 * d$daly_averted / d$vacc_dose
+
+
+cea_across_delay <- d %>% 
+  filter(ori_occurred == TRUE) %>% 
+  group_by(vacc_week, no_ori_delay_outbreak_end) %>%
+  summarize(med_s_ch_averted_tot = median(s_ch_averted_tot, na.rm=T), 
+            med_death_averted_tot = median(death_averted_tot, na.rm=T),
+            med_daly_averted = median(daly_averted, na.rm=T),
+            med_pca = median(pct_reduc_case, na.rm=T),
+            med_capd = median(case_averted_per_1000_OCV, na.rm=T),
+            med_dapd = median(daly_averted_per_1000_OCV, na.rm=T),
+            med_cpca = median(cost_per_case_averted, na.rm=T),
+            med_dapd = median(cost_per_daly_averted, na.rm=T))
+
+cea_across_delay %>% 
+  ggplot(aes(vacc_week, med_pca, 
+             group = as.factor(no_ori_delay_outbreak_end),
+             color = as.factor(no_ori_delay_outbreak_end))) +
+  geom_line() +
+  theme_light()
+```
 
 ## Figure S3: Case Reduction in Case-Triggered Scenario
 

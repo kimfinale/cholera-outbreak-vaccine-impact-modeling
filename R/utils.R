@@ -614,7 +614,7 @@ add_cea_variables <- function(d, mean_age_inf=NULL) {
 #'
 #' @param d Data frame with vaccination impact results and CEA variables
 #' @return Data frame with CEA results
-add_cea_results <- function(d) {
+add_cea_results <- function(d, parms=NULL) {
   d %>%
     mutate(
       # Health outcomes
