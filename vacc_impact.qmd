@@ -86,7 +86,7 @@ save_table <- FALSE           # Whether to save generated tables
 
 ## Parameter samples for simulation
 
-```{r eval=FALSE, params-sample}
+```{r params-sample}
 # # Load parameter definitions
 # dat_params <- data.table::fread("data/paper/parameters.csv")
 # 
@@ -160,15 +160,21 @@ rm(ive_fit)
 ```{r load-data}
 #| warning: false
 # Load outbreak time series data
-outbreak_data_all <- 
-  as.data.frame(fread("outputs/paper/outbreak_data_all_20250228.csv"))
+# outbreak_data_all <- 
+#   as.data.frame(fread("outputs/paper/outbreak_data_all_20250228.csv"))
 
 # Load outbreaks not affected by OCVs (for modeling)
+# weekly data
 outbreak_data <- fread("outputs/paper/outbreak_data_20250228.csv") 
+# summary data
 outbreaks_filtered <-
   readRDS("outputs/paper/outbreak_summary_filtered_20250418.rds")
+# filter outbreaks that are unique
+# outbreaks selected through a series of selection filters described in # data_prep.qmd
+outbreak_data <- outbreak_data %>% 
+  filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
 
-# Load OCV usage data
+# Load OCV usage data extracted from GTFCC dashboard
 ocv_campaigns <- fread("data/paper/GTFCC_Dashboard_23April2025.csv")
 # Filter outbreak-response (i.e., ICG-approved) events
 ocv_campaigns %>%
@@ -198,37 +204,40 @@ d |>
 ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
 
 # OCV campaign data
-docv_ <- clean_names(fread("data/paper/outbreak_files_Oct2024/ocv_long_dataset.csv"))
-docv <- docv_[(ocv_before_1 == TRUE | ocv_before_2 == TRUE | 
-              ocv_before_3 == TRUE | ocv_during == TRUE)]
+# docv_ <- clean_names(fread("data/paper/outbreak_files_Oct2024/ocv_long_dataset.csv"))
+# docv <- docv_[(ocv_before_1 == TRUE | ocv_before_2 == TRUE | 
+#               ocv_before_3 == TRUE | ocv_during == TRUE)]
 
-# Get outbreak summary data
-ds <- clean_names(as.data.frame(fread("data/paper/outbreak_files_Oct2024/outbreak_summary.csv")))
+# # Get outbreak summary data
+# ds <- clean_names(as.data.frame(fread("data/paper/outbreak_files_Oct2024/outbreak_summary.csv")))
+# 
+# # Create unique IDs for each outbreak
+# ds |>
+#   group_by(location, outbreak_number) |>
+#   mutate(id_outbreak = paste0(location, "-", start_date, "-", end_date)) |> 
+#   ungroup() -> ds
+# 
+# # Join outbreak data with summary details
+# outbk_data_summary <- 
+#   left_join(filter(outbreak_data, week == 1), 
+#             ds[, c("outbreak_pop", "total_s_ch", "total_c_ch", "total_deaths", 
+#                    "duration_weeks", 
+#                   "peak_week_incidence", "time_to_peak_week", 
+#                   "peak_week_incidence_per_100percent", 
+#                   "peak_week_incidence_per_10e3", "mean_r0_1st_week", 
+#                   "area_per_1km2", 
+#                   "rural_urban", "ar_per_10e3", "cfr_per_100percent", 
+#                   "id_outbreak")], 
+#             by = "id_outbreak")
+# 
+# outbk_data_summary %>% 
+#   group_by(spatial_scale) %>% 
+#   summarize_quantiles(variable=cfr_per_100percent)
 
-# Create unique IDs for each outbreak
-ds |>
-  group_by(location, outbreak_number) |>
-  mutate(id_outbreak = paste0(location, "-", start_date, "-", end_date)) |> 
-  ungroup() -> ds
+# fwrite(outbk_data_summary,
+#        "outputs/outbreak_data_summary_20251022.csv")
 
-# Join outbreak data with summary details
-outbk_data_summary <- 
-  left_join(filter(outbreak_data, week == 1), 
-            ds[, c("outbreak_pop", "total_s_ch", "total_c_ch", "total_deaths", 
-                   "duration_weeks", 
-                  "peak_week_incidence", "time_to_peak_week", 
-                  "peak_week_incidence_per_100percent", 
-                  "peak_week_incidence_per_10e3", "mean_r0_1st_week", 
-                  "area_per_1km2", 
-                  "rural_urban", "ar_per_10e3", "cfr_per_100percent", 
-                  "id_outbreak")], 
-            by = "id_outbreak")
-
-outbk_data_summary %>% 
-  group_by(spatial_scale) %>% 
-  summarize_quantiles(variable=cfr_per_100percent)
-
-# fwrite(outbk_data_summary, "outputs/outbreak_data_summary_20251022.csv")
+outbk_data_summary <- fread("outputs/outbreak_data_summary_20251022.csv")
 ```
 
 ## Load Economic and Demographic Data
@@ -370,15 +379,14 @@ This section models vaccination initiated at specific weeks after outbreak onset
 
 ```{r onset-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
-dat <- outbreak_data %>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
-
 # sensitivity analyses 
 # outbreaks_excl <- read_rds("outputs/outbreaks_excluded_20250612.rds")
 # dat <- outbreak_data_all %>% filter(id_outbreak %in% outbreaks_excl$id_outbreak) 
 
 # Setup for parallel processing
 vacc_covs <- c(0.6, 0.75, 0.9)    # Vaccine coverage levels to simulate
-vacc_weeks <- seq(1, 15, by = 2)  # Vaccination weeks to simulate
+vacc_covs <- c(0.75)
+vacc_weeks <- seq(1, 15, by = 1)  # Vaccination weeks to simulate
 nruns <- 200                      # Number of simulation runs per configuration
 batch_size <- 10  # Number of runs per parallel batch
 delay <- 2        # No ORI after two or more weeks after outbreak end
@@ -395,7 +403,7 @@ for (batch_id in seq(1, nruns, by = batch_size)) {
   svim_week_list <-
     foreach(i = run_ids, .packages = c("data.table")) %dopar% {
       run_vacc_impact_outbreak_weekly(
-        outbreak_data = dat,
+        outbreak_data = outbreak_data,
         ive_data = ive_data,
         parameters = params,
         age_dist = age_dist,
@@ -421,7 +429,6 @@ Sensitivity analyses of no ORI x weeks after the outbreak end
 
 ```{r onset-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
-dat <- outbreak_data %>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
 
 # sensitivity analyses 
 # outbreaks_excl <- read_rds("outputs/outbreaks_excluded_20250612.rds")
@@ -448,7 +455,7 @@ for (delay in no_ori_delays) {
     svim_week_list <-
       foreach(i = run_ids, .packages = c("data.table")) %dopar% {
         run_vacc_impact_outbreak_weekly(
-          outbreak_data = dat,
+          outbreak_data = outbreak_data,
           ive_data = ive_data,
           parameters = params,
           age_dist = age_dist,
@@ -475,8 +482,6 @@ message(paste("Total execution time:", toc - tic))
 
 ```{r case-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
-dat <- outbreak_data
-dat <- dat %>% filter(id_outbreak %in% outbreaks_filtered$id_outbreak)
 
 # Define case thresholds that trigger vaccination
 case_triggers <- c(1, 5, seq(10, 90, 20), seq(90, 300, 50))
@@ -500,7 +505,7 @@ for (batch_id in seq(1, nruns, by = batch_size)) {
   svim_week_list <-
     foreach(i = run_ids, .packages = c("data.table")) %dopar% {
       run_vacc_impact_outbreak_weekly(
-        outbreak_data = dat,
+        outbreak_data = outbreak_data,
         ive_data = ive_data,
         parameters = params,
         age_dist = age_dist,
