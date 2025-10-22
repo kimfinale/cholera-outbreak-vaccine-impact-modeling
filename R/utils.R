@@ -41,109 +41,75 @@ calculate_impact_by_subset <- function(data,
   return(result)
 }
 
-#' Fit an exponential decay model to vaccine impact
-#'
-#' This function estimates the rate of exponential decay (\eqn{k}) in vaccine impact
-#' over time and calculates the corresponding halving time ("weeks to 50\%" of the original effect).
-#' The decay model assumes that the change in vaccine-attributable case reduction
-#' follows an exponential pattern over \code{vacc_week}.
-#'
-#' @param df A data frame containing at least:
-#'   \describe{
-#'     \item{\code{pct_reduc_case}}{Numeric vector of proportional case reduction (0–1).}
-#'     \item{\code{vacc_week}}{Numeric vector of time in weeks since vaccination.}
-#'   }
-#' @param min_weeks Minimum number of weekly observations required to fit the model.
-#'   Defaults to 3.
-#'
-#' @details
-#' The model fitted is:
-#' \deqn{\log(\text{impact}) = \alpha - k \cdot \text{week}}
-#' where \eqn{k} is the per-week decay rate. The half-life is calculated as:
-#' \deqn{\text{Half-life} = \frac{\log(2)}{k}}
-#' If the estimated \eqn{k \le 0}, the half-life is returned as \code{NA}.
-#'
-#' @return
-#' A tibble with two columns:
-#' \describe{
-#'   \item{\code{k_hat}}{Estimated weekly decay rate in log scale.}
-#'   \item{\code{half_life}}{Weeks until the effect is halved. \code{NA} if decay rate is non-positive.}
-#' }
-#'
-#' @examples
-#' library(dplyr)
-#' df <- data.frame(
-#'   vacc_week = 1:6,
-#'   pct_reduc_case = c(0.12, 0.10, 0.08, 0.07, 0.05, 0.04)
-#' )
-#' fit_decay_model(df)
-#'
-#' @export
-# fit_decay_model <- function(df, min_weeks = 3) {
-#   # Return NA values if not enough data points
-#   if (nrow(df) < min_weeks) {
-#     return(tibble(k_hat = NA_real_, half_life = NA_real_))
-#   }
-#
-#   # Avoid taking log(0) by adding a very small constant
-#   eps <- 1e-6
-#   df <- df %>%
-#     mutate(impact_adj = pct_reduc_case + eps)
-#
-#   # Fit the exponential decay model: log(impact) = intercept - k * week
-#   fit <- try(lm(log(impact_adj) ~ vacc_week, data = df), silent = TRUE)
-#
-#   # Return NA values if model fitting fails
-#   if (inherits(fit, "try-error")) {
-#     return(tibble(k_hat = NA_real_, half_life = NA_real_))
-#   }
-#
-#   # Extract slope (negative of decay rate)
-#   slope <- coef(fit)[["vacc_week"]] # or slope <- coef(fit)[2]
-#   k_hat <- -slope
-#
-#   # Calculate half-life only if k_hat > 0
-#   half_life <- ifelse(k_hat > 0, log(2) / k_hat, NA_real_)
-#
-#   tibble(k_hat = k_hat, half_life = half_life)
-# }
-
 #' Fit Exponential Decay Model
 #'
-#' Fits a simple exponential decay model: log(y) ~ x
-#' where y = dependent variable (e.g., vaccine impact)
-#'       x = independent variable (e.g., delay week or case trigger)
+#' Fits log(y + eps) = alpha + beta * x, with k = -beta.
+#' Returns k_hat, half_life, r_squared, n, and a boolean `model_ok`.
 #'
-#' @param df Dataframe containing the data
-#' @param y_var Name of the dependent variable (character)
-#' @param x_var Name of the independent variable (character)
-#' @param min_rows Minimum number of rows required to fit the model
+#' @param df Data frame containing the data.
+#' @param y_var Dependent variable (default "pct_reduc_case").
+#' @param x_var Independent variable (default "vacc_week").
+#' @param min_rows Minimum rows required (default 3).
 #'
-#' @return A tibble with estimated decay rate (k_hat) and half-life
+#' @return tibble(k_hat, half_life, r_squared, n, model_ok)
 #' @export
-fit_decay_model <- function(df, y_var = "pct_reduc_case",
-                            x_var = "vacc_week", min_rows = 3) {
-  if (nrow(df) < min_rows) {
-    return(tibble(k_hat = NA_real_, half_life = NA_real_))
-  }
+fit_decay_model <- function(df,
+                            y_var = "pct_reduc_case",
+                            x_var = "vacc_week",
+                            min_rows = 3) {
+
+  # Quick NA-shaped return
+  .na_out <- function(nr) tibble::tibble(
+    k_hat = NA_real_, half_life = NA_real_,
+    r_squared = NA_real_, n = nr, model_ok = FALSE
+  )
+
+  if (!is.data.frame(df) || nrow(df) < min_rows) return(.na_out(nrow(df)))
+
+  # need ≥ 2 unique x to estimate a slope
+  x_vals <- df[[x_var]]
+  if (length(unique(x_vals[is.finite(x_vals)])) < 2) return(.na_out(nrow(df)))
 
   eps <- 1e-6
-  df <- df %>%
-    mutate(impact_adj = .data[[y_var]] + eps)
+  df2 <- df %>%
+    dplyr::mutate(impact_adj = .data[[y_var]] + eps) %>%
+    dplyr::filter(is.finite(impact_adj), is.finite(.data[[x_var]]))
 
-  formula <- as.formula(paste("log(impact_adj) ~", x_var))
+  if (nrow(df2) < min_rows ||
+      length(unique(df2[[x_var]])) < 2) return(.na_out(nrow(df2)))
 
-  fit <- try(lm(formula, data = df), silent = TRUE)
+  # Fit log-linear model
+  form <- stats::as.formula(paste("log(impact_adj) ~", x_var))
+  fit <- try(stats::lm(form, data = df2), silent = TRUE)
+  if (inherits(fit, "try-error")) return(.na_out(nrow(df2)))
 
-  if (inherits(fit, "try-error")) {
-    return(tibble(k_hat = NA_real_, half_life = NA_real_))
-  }
+  # Extract slope and decay quantities
+  slope <- stats::coef(fit)[[x_var]]
+  if (is.null(slope) || !is.finite(slope)) return(.na_out(nrow(df2)))
 
-  slope <- coef(fit)[[x_var]]
-  k_hat <- -slope
+  k_hat <- -as.numeric(slope)
   half_life <- ifelse(k_hat > 0, log(2) / k_hat, NA_real_)
 
-  tibble(k_hat = k_hat, half_life = half_life)
+  # Goodness of fit on log scale
+  sm <- summary(fit)
+  r2 <- as.numeric(sm$r.squared)
+  if (!is.finite(r2)) r2 <- NA_real_
+
+  # Simple pass/fail indicator for a "good" model fit
+  # Criteria: finite k_hat and R^2, residual df >= 1, and slope p-value < 0.05
+  slope_p <- suppressWarnings(sm$coefficients[x_var, "Pr(>|t|)"])
+  resid_df <- tryCatch(sm$df[2], error = function(...) NA_real_)
+  model_ok <- is.finite(k_hat) && is.finite(r2) &&
+    is.finite(resid_df) && resid_df >= 1 &&
+    is.finite(slope_p) && slope_p < 0.05
+
+  tibble::tibble(
+    k_hat = k_hat,
+    half_life = half_life,
+    r_squared = r2,
+    n = nrow(df2),
+    model_ok = model_ok
+  )
 }
 
 

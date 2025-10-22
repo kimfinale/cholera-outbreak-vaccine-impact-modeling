@@ -1157,7 +1157,7 @@ for (wk_cut in cut_points) {
       max_delay = max(week_delay_to_vacc_effect, na.rm = TRUE),
       duration = first(duration_weeks)
     ) %>%
-    filter(duration > max_delay) %>%
+    filter(duration > max_delay) %>% # only those outbreaks that we observe vacc effects
     pull(id_outbreak)
 
   subset_df <- dat %>%
