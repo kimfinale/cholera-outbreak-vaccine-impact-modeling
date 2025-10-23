@@ -870,7 +870,9 @@ This section creates and analyzes subsets of outbreaks to simulate different tar
 
 Outbreaks are randomly sampled for a given OCV budget. Outbreaks are eligible if the underlying population factored by the vaccine coverage proportion is smaller than the remaining vaccine doses. 
 
+## Sample 
 
+Random sampling of outbreaks from all or subsets of outbreaks
 ```{r}
 # Default outbreak onset-triggered vaccination results (delay = 2, VC=0.75)
 cea_files <- 
@@ -985,7 +987,9 @@ for (priority in priorities) {
 plan(sequential)
 ```
 
-Aggregate metrics across sampled outbreaks using the `sum_over_outbreaks_by_runid` function
+## Aggregate 
+
+Various impact metrics are aggregated across outbreaks within each sample using the `sum_over_outbreaks_by_runid` function
 
 ```{r}
 priorities <- c("AR", "dur", "size")
@@ -1069,7 +1073,9 @@ for (ids in ids_list) {
 }
 ```
 
-Calculate statistics (mean, quantiles) by grouping variables
+## Derived statistics 
+
+Calculate simple statistics (mean, quantiles) for variables across samples by grouping variables
 
 We group by subset_id in addition to other grouping variables (c("vacc_cov", "vacc_week", "target_vacc_doses", "vacc_priority"). The variability in the results, therefore, comes from runid's, for the same set of outbreaks (i.e., the same subset_id). This has the benefit of same or similar vaccine doses are deployed within the subset and therefore comparable. For the delayed vaccination (e.g., week 9), for some outbreaks may have ended and therefore, different number of vaccine doses could have been deployed. 
 
