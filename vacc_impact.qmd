@@ -868,8 +868,6 @@ saveRDS(med_all_long,
 
 This section creates and analyzes subsets of outbreaks to simulate different targeting strategies.
 
-## Varying OCV budgets
-
 Outbreaks are randomly sampled for a given OCV budget. Outbreaks are eligible if the underlying population factored by the vaccine coverage proportion is smaller than the remaining vaccine doses. 
 
 
@@ -987,12 +985,15 @@ for (priority in priorities) {
 plan(sequential)
 ```
 
-Aggregate metrics across sampled outbreaks
+Aggregate metrics across sampled outbreaks using the `sum_over_outbreaks_by_runid` function
 
 ```{r}
+priorities <- c("AR", "dur", "size")
+ocv_doses  <- c(1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6)
+
 cea_files <- 
   c("outputs/paper/cea_0.75_onset_trigger_20251022.rds")
-cea <- map_dfr(cea_files, read_rds)
+cea_75 <- map_dfr(cea_files, read_rds)
 
 ##  Worker that computes one group ----------
 compute_one_grp <- function(g, cea_data) {
@@ -1017,7 +1018,8 @@ compute_one_grp <- function(g, cea_data) {
 }
 
 ## ---------- 2) Prepare CEA for fast lookup ----------
-cea_data <- cea %>% filter(vacc_cov == 0.75, vacc_week == 9) 
+vw <- 1
+cea_data <- cea_75 %>% filter(vacc_cov == 0.75, vacc_week == vw) 
 setDT(cea_data)
 setkey(cea_data, id_outbreak)  
 
@@ -1035,7 +1037,7 @@ subsets_all <- rbindlist(subset_list)
 setDT(subsets_all)
 setkey(subsets_all, vacc_priority, ocv_dose, vacc_cov, prob, id_sample)
 
-id0 <- seq(1, 1901, by=100)
+id0 <- seq(1, 101, by=100)
 ids_list <- lapply(id0, function(x) seq(x, x+99))
 
 for (ids in ids_list) {
@@ -1060,12 +1062,11 @@ for (ids in ids_list) {
     subsets_cea_priority <- rbindlist(res_list, fill = TRUE)
     saveRDS(
       subsets_cea_priority,
-      sprintf("outputs/cea_subsets_%d_%d_%s_onset_trigger_%s.rds", 
-              dplyr::first(ids),  dplyr::last(ids), p, tstamp())
+      sprintf("outputs/cea_subsets_vw_%d_id_%d_%d_%s_onset_trigger_%s.rds", 
+              vw, dplyr::first(ids),  dplyr::last(ids), p, tstamp())
     )
   }
 }
-
 ```
 
 Calculate statistics (mean, quantiles) by grouping variables
@@ -1080,25 +1081,27 @@ summary_cols <- c("pct_reduc_case",
                   "n_outbreaks", "outbreak_count",
                   "vacc_dose", "doses_used",
                   "s_ch_averted_tot",  "death_averted_tot",
+                  "daly_averted",
                   "case_averted_per_1000_OCV", "death_averted_per_1000_OCV",
                   "cost_per_daly_averted",
                   "cost_per_case_averted", "cost_per_death_averted")
 
 priorities <- c("AR", "dur", "size")
 
-id0 <- seq(1, 1901, by=100)
+id0 <- c(1, 101)
 ids_list <- lapply(id0, function(x) seq(x, x+99))
 
-ids <- ids_list[[2]]
+ids <- ids_list[[1]]
 
 cea_summary_subsets_list <- vector('list', length(priorities))
+
 i <- 1
 for (pri in priorities) {
 #  subset_data <- 
 #    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
 subset_data <- 
   read_rds(paste0("outputs/paper/cea_subsets_", ids[1], "_", ids[length(ids)],  "_", pri, "_onset_trigger_20251022.rds"))
-  
+
   cea_summary_subsets_list[[i]] <- subset_data %>%
     filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
     build_summary(value_col = summary_cols, by=group_var) 

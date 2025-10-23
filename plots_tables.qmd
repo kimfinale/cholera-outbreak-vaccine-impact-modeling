@@ -2179,8 +2179,8 @@ plt_1 <- dw %>%
     data = dose_marks,
     inherit.aes = FALSE,
     aes(x = x, y = Inf, label = lab),
-    vjust = 1.3,           # push slightly down from the top
-    hjust = 1.3, 
+    vjust = 1.4,           # push slightly down from the top
+    hjust = 1.25, 
     nudge_x = 0,           # no horizontal nudge
     size = 3
   )+
@@ -2194,7 +2194,7 @@ plt_1 <- dw %>%
   theme_light() +
   theme_x_blank() +
   theme(legend.position = "top") +
-  theme_tight_legend(box_space_pt = 2)
+  theme_tight_legend(box_space_pt = 4)
 # plt_1
 ```
 
@@ -2320,6 +2320,9 @@ if (save_plot) {
 }
 ```
 
+
+### Left panel
+
 ```{r}
 rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
 
@@ -2396,7 +2399,6 @@ plt_4 <- dw %>%
   theme(legend.position = "top")
 plt_4
 ```
-
 
 
 ## Figure 3.1

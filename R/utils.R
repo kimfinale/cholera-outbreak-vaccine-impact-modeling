@@ -648,24 +648,33 @@ sum_over_outbreaks_by_runid <- function(d, ori_occurred=TRUE, case_trigger=FALSE
     vacc_dose = sum(ifelse(ori_occurred, pop * vacc_cov, 0)),
 
     # Sum across outbreaks
-    c_ch_tot = sum(c_ch_tot, na.rm=TRUE),
-    death_tot = sum(death_tot, na.rm=TRUE),
-    death_averted_tot = sum(death_averted_tot, na.rm=TRUE),
-    pct_reduc_death = 100 * sum(death_averted_tot, na.rm=TRUE)/sum(death_tot, na.rm=TRUE),
+    c_ch_tot = sum(c_ch_tot),
+    death_tot = sum(death_tot),
+    death_averted_tot = sum(death_averted_tot),
+    pct_reduc_death = 100 * sum(death_averted_tot) / sum(death_tot),
     s_ch_tot = sum(s_ch_tot),
     s_ch_averted_tot = sum(s_ch_averted_tot),
-    pct_reduc_case = 100 * sum(s_ch_averted_tot) / sum(s_ch_tot),
+    s_ch_averted_tot = sum(s_ch_averted_tot),
+    daly_averted_tot = sum(daly_averted),
 
     # Calculate impact per 1000 doses
     case_averted_per_1000_OCV =
       1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
     death_averted_per_1000_OCV =
-      1000 * sum(death_averted_tot, na.rm=TRUE) /sum(vacc_dose),
+      1000 * sum(death_averted_tot) /sum(vacc_dose),
+    daly_averted_per_1000_OCV =
+      1000 * sum(daly_averted) / sum(vacc_dose),
 
     # Calculate cost-effectiveness ratios
-    cost_per_daly_averted = sum(net_cost, na.rm=TRUE) / sum(daly_averted, na.rm=TRUE),
-    cost_per_case_averted = sum(net_cost, na.rm=TRUE) / sum(s_ch_averted_tot, na.rm=TRUE),
-    cost_per_death_averted = sum(net_cost, na.rm=TRUE) / sum(death_averted_tot, na.rm=TRUE)),
+    # note that we don't cost values for some outbreaks because
+    # we don't have gdp values for Ethiopia, South Sudan, and Somalia
+    cost_per_daly_averted =
+      sum(net_cost, na.rm=TRUE) / sum(daly_averted[!is.na(net_cost)]),
+    cost_per_case_averted =
+      sum(net_cost, na.rm=TRUE) / sum(s_ch_averted_tot[!is.na(net_cost)]),
+    cost_per_death_averted =
+      sum(net_cost, na.rm=TRUE) / sum(death_averted_tot[!is.na(net_cost)])
+    ),
     by = by_cols]
 }
 
