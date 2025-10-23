@@ -426,43 +426,46 @@ tic <- Sys.time()  # Start timer
 # dat <- outbreak_data_all %>% filter(id_outbreak %in% outbreaks_excl$id_outbreak) 
 
 # Setup for parallel processing
-vacc_covs <- c(0.6, 0.75, 0.9)    # Vaccine coverage levels to simulate
-# vacc_covs <- c(0.75)
-vacc_weeks <- seq(1, 15, by = 2)  # Vaccination weeks to simulate
+# vacc_covs <- c(0.6, 0.75, 0.9)    # Vaccine coverage levels to simulate
+vacc_covs <- c(0.75)
+vacc_weeks <- seq(1, 15, by = 1)  # Vaccination weeks to simulate
 nruns <- 200                      # Number of simulation runs per configuration
 batch_size <- 10  # Number of runs per parallel batch
-delay <- 2        # No ORI after two or more weeks after outbreak end
+delays <- 0:7        # No ORI after two or more weeks after outbreak end
 # Loop through batches of runs for parallel execution
-for (batch_id in seq(1, nruns, by = batch_size)) {
-  message(paste("Processing batch ID:", batch_id))
-  run_ids <- batch_id:(batch_id + batch_size - 1)  # Run IDs in current batch
-
-  # Create and register parallel cluster
-  cl <- makeCluster(getOption("cl.cores", detectCores() - 3))
-  registerDoParallel(cl)
-
-  # Run simulations in parallel
-  svim_week_list <-
-    foreach(i = run_ids, .packages = c("data.table")) %dopar% {
-      run_vacc_impact_outbreak_weekly(
-        outbreak_data = outbreak_data,
-        ive_data = ive_data,
-        parameters = params,
-        age_dist = age_dist,
-        vacc_week = vacc_weeks,    # Outbreak onset-triggered vaccination
-        case_trigger = NULL,
-        vacc_cov = vacc_covs,
-        runid = i,
-        no_ori_delay_outbreak_end = delay)
-    }
-  stopCluster(cl)
-
-  # Save batch results
-  fwrite(rbindlist(svim_week_list), 
-         paste0("outputs/svim__week_list_vacc_week_batch_", batch_id, "_",
-                tstamp(), ".csv"))
+for (delay in delays) {
+  message(paste("delay:", delay))
+  for (batch_id in seq(1, nruns, by = batch_size)) {
+    message(paste("batch ID:", batch_id))
+    run_ids <- batch_id:(batch_id + batch_size - 1)  # Run IDs in current batch
+  
+    # Create and register parallel cluster
+    cl <- makeCluster(getOption("cl.cores", detectCores() - 3))
+    registerDoParallel(cl)
+  
+    # Run simulations in parallel
+    svim_week_list <-
+      foreach(i = run_ids, .packages = c("data.table")) %dopar% {
+        run_vacc_impact_outbreak_weekly(
+          outbreak_data = outbreak_data,
+          ive_data = ive_data,
+          parameters = params,
+          age_dist = age_dist,
+          vacc_week = vacc_weeks,    # Outbreak onset-triggered vaccination
+          case_trigger = NULL,
+          vacc_cov = vacc_covs,
+          runid = i,
+          no_ori_delay_outbreak_end = delay)
+      }
+    stopCluster(cl)
+  
+    # Save batch results
+    fwrite(rbindlist(svim_week_list), 
+           paste0("outputs/svim_delay_", delay, 
+                  "_week_list_vacc_week_batch_", batch_id, "_",
+                  tstamp(), ".csv"))
+  }
 }
-
 toc <- Sys.time()
 message(paste("Total execution time:", toc - tic))
 ```
@@ -1086,7 +1089,7 @@ priorities <- c("AR", "dur", "size")
 id0 <- seq(1, 1901, by=100)
 ids_list <- lapply(id0, function(x) seq(x, x+99))
 
-ids <- ids_list[[3]]
+ids <- ids_list[[2]]
 
 cea_summary_subsets_list <- vector('list', length(priorities))
 i <- 1
@@ -1094,10 +1097,7 @@ for (pri in priorities) {
 #  subset_data <- 
 #    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
 subset_data <- 
-  read_rds(paste0("outputs/cea_subsets_", ids[1], "_", ids[length(ids)],  "_", pri, "_onset_trigger_20251017.rds"))
-  
-  # forgot to include this column when generating the data
-#  subset_data$vacc_priority <- pri
+  read_rds(paste0("outputs/paper/cea_subsets_", ids[1], "_", ids[length(ids)],  "_", pri, "_onset_trigger_20251022.rds"))
   
   cea_summary_subsets_list[[i]] <- subset_data %>%
     filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%

@@ -1139,9 +1139,9 @@ theme_y_blank <- function() {
 #' Reduces spacing in legend for compact plots
 #'
 #' @return ggplot2 theme object
-theme_tight_legend <- function() {
+theme_tight_legend <- function(box_space_pt=2) {
   theme(
-    legend.box.spacing = unit(0, "pt"),
+    legend.box.spacing = unit(box_space_pt, "pt"),
     legend.margin = margin(0, 0, 0, 0),
     legend.key.size = unit(0.5, "cm"),
     legend.key.spacing = unit(0.1, "cm")
