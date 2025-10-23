@@ -987,6 +987,7 @@ for (priority in priorities) {
 plan(sequential)
 ```
 
+
 ## Aggregate 
 
 Various impact metrics are aggregated across outbreaks within each sample using the `sum_over_outbreaks_by_runid` function
@@ -1022,53 +1023,56 @@ compute_one_grp <- function(g, cea_data) {
 }
 
 ## ---------- 2) Prepare CEA for fast lookup ----------
-vw <- 1
-cea_data <- cea_75 %>% filter(vacc_cov == 0.75, vacc_week == vw) 
-setDT(cea_data)
-setkey(cea_data, id_outbreak)  
+vacc_weeks <- c(1, 5, 9, 13) 
 
-# Grid of filenames
-grid <- CJ(vacc_priority = priorities, ocv_dose = ocv_doses)
-grid[, fn := ifelse(ocv_dose < 1e6, 
-                    sprintf("outputs/subsets_n2000_%sK_%s_20251017.rds",
-                            round(ocv_dose/1e3), vacc_priority),
-                    sprintf("outputs/subsets_n2000_%sM_%s_20251017.rds", 
-                            round(ocv_dose/1e6), vacc_priority))]
-
-subset_list <- lapply(grid$fn, readRDS)
-subsets_all <- rbindlist(subset_list) 
-
-setDT(subsets_all)
-setkey(subsets_all, vacc_priority, ocv_dose, vacc_cov, prob, id_sample)
-
-id0 <- seq(1, 101, by=100)
-ids_list <- lapply(id0, function(x) seq(x, x+99))
-
-for (ids in ids_list) {
-  subsets <- subsets_all[id_sample %in% ids]
-  # Build group index & metadata
-  # One group per (priority, dose, prob, id_sample)
-  subsets[, grp := .GRP, by = .(vacc_priority, ocv_dose, prob, id_sample)]
+for (vw in vacc_weeks) {
+  cea_data <- cea_75 %>% filter(vacc_cov == 0.75, vacc_week == vw) 
+  setDT(cea_data)
+  setkey(cea_data, id_outbreak)  
   
-  # Metadata to re-attach later (one row per group)
-  meta <- unique(subsets[, .(grp, vacc_priority, ocv_dose, prob, id_sample,
-                             outbreak_count, doses_used)])
+  # Grid of filenames
+  grid <- CJ(vacc_priority = priorities, ocv_dose = ocv_doses)
+  grid[, fn := ifelse(ocv_dose < 1e6, 
+                      sprintf("outputs/subsets_n2000_%sK_%s_20251017.rds",
+                              round(ocv_dose/1e3), vacc_priority),
+                      sprintf("outputs/subsets_n2000_%sM_%s_20251017.rds", 
+                              round(ocv_dose/1e6), vacc_priority))]
   
-  # Map each group to its vector of outbreak IDs (list column)
-  grp2ids <- subsets[, .(id_outbreak = list(unique(id_outbreak))), by = grp]
+  subset_list <- lapply(grid$fn, readRDS)
+  subsets_all <- rbindlist(subset_list) 
   
-  # Compute & save per priority (flat lapply, no nested loops) ----------
-  for (p in priorities) {
-    grp_p <- meta[vacc_priority == p, grp]
-
-    res_list <- lapply(grp_p, compute_one_grp, cea_data)
+  setDT(subsets_all)
+  setkey(subsets_all, vacc_priority, ocv_dose, vacc_cov, prob, id_sample)
   
-    subsets_cea_priority <- rbindlist(res_list, fill = TRUE)
-    saveRDS(
-      subsets_cea_priority,
-      sprintf("outputs/cea_subsets_vw_%d_id_%d_%d_%s_onset_trigger_%s.rds", 
-              vw, dplyr::first(ids),  dplyr::last(ids), p, tstamp())
-    )
+  id0 <- seq(1, 101, by=100)
+  ids_list <- lapply(id0, function(x) seq(x, x+99))
+  
+  for (ids in ids_list) {
+    subsets <- subsets_all[id_sample %in% ids]
+    # Build group index & metadata
+    # One group per (priority, dose, prob, id_sample)
+    subsets[, grp := .GRP, by = .(vacc_priority, ocv_dose, prob, id_sample)]
+    
+    # Metadata to re-attach later (one row per group)
+    meta <- unique(subsets[, .(grp, vacc_priority, ocv_dose, prob, id_sample,
+                               outbreak_count, doses_used)])
+    
+    # Map each group to its vector of outbreak IDs (list column)
+    grp2ids <- subsets[, .(id_outbreak = list(unique(id_outbreak))), by = grp]
+    
+    # Compute & save per priority (flat lapply, no nested loops) ----------
+    for (p in priorities) {
+      grp_p <- meta[vacc_priority == p, grp]
+  
+      res_list <- lapply(grp_p, compute_one_grp, cea_data)
+    
+      subsets_cea_priority <- rbindlist(res_list, fill = TRUE)
+      saveRDS(
+        subsets_cea_priority,
+        sprintf("outputs/cea_subsets_vw_%d_id_%d_%d_%s_onset_trigger_%s.rds", 
+                vw, dplyr::first(ids),  dplyr::last(ids), p, tstamp())
+      )
+    }
   }
 }
 ```
@@ -1089,6 +1093,7 @@ summary_cols <- c("pct_reduc_case",
                   "s_ch_averted_tot",  "death_averted_tot",
                   "daly_averted",
                   "case_averted_per_1000_OCV", "death_averted_per_1000_OCV",
+                  "daly_averted_per_1000_OCV",
                   "cost_per_daly_averted",
                   "cost_per_case_averted", "cost_per_death_averted")
 
@@ -1097,28 +1102,33 @@ priorities <- c("AR", "dur", "size")
 id0 <- c(1, 101)
 ids_list <- lapply(id0, function(x) seq(x, x+99))
 
-ids <- ids_list[[1]]
-
-cea_summary_subsets_list <- vector('list', length(priorities))
-
-i <- 1
-for (pri in priorities) {
-#  subset_data <- 
-#    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
-subset_data <- 
-  read_rds(paste0("outputs/paper/cea_subsets_", ids[1], "_", ids[length(ids)],  "_", pri, "_onset_trigger_20251022.rds"))
-
-  cea_summary_subsets_list[[i]] <- subset_data %>%
-    filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
-    build_summary(value_col = summary_cols, by=group_var) 
-  i <- i + 1
+for (idx in 1:2) {
+  ids <- ids_list[[idx]]
+  
+  vacc_weeks <- c(1, 5, 9, 13)
+  
+  for (vw in vacc_weeks) {
+    cea_summary_subsets_list <- vector('list', length(priorities))
+    
+    i <- 1
+    for (pri in priorities) {
+    #  subset_data <- 
+    #    read_rds(paste0("outputs/cea_subsets_", pri, "_onset_trigger_20251016.rds"))
+    subset_data <- 
+      read_rds(paste0("outputs/cea_subsets_vw_", vw,"_id_", ids[1], "_", ids[length(ids)],  "_", pri, "_onset_trigger_20251023.rds"))
+    
+      cea_summary_subsets_list[[i]] <- subset_data %>%
+        filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
+        build_summary(value_col = summary_cols, by=group_var) 
+      i <- i + 1
+    }
+    
+    cea_summary_subsets <- rbindlist(cea_summary_subsets_list) 
+    saveRDS(cea_summary_subsets, 
+              paste0("outputs/paper/cea_summary_subsets_vw_", vw, "_id_", 
+                     ids[1], "_", ids[length(ids)],  "_", tstamp(),".rds"))
+  }
 }
-
-cea_summary_subsets <- rbindlist(cea_summary_subsets_list) 
-saveRDS(cea_summary_subsets, 
-          paste0("outputs/paper/cea_summary_subsets_", ids[1], "_", 
-                ids[length(ids)],  "_", tstamp(),
-                 ".rds"))
 ```
 
 ## Exponential decy fit

@@ -654,7 +654,6 @@ sum_over_outbreaks_by_runid <- function(d, ori_occurred=TRUE, case_trigger=FALSE
     pct_reduc_death = 100 * sum(death_averted_tot) / sum(death_tot),
     s_ch_tot = sum(s_ch_tot),
     s_ch_averted_tot = sum(s_ch_averted_tot),
-    s_ch_averted_tot = sum(s_ch_averted_tot),
     daly_averted_tot = sum(daly_averted),
 
     # Calculate impact per 1000 doses
