@@ -581,6 +581,9 @@ add_cea_variables <- function(d, mean_age_inf=NULL) {
 #' @param d Data frame with vaccination impact results and CEA variables
 #' @return Data frame with CEA results
 add_cea_results <- function(d, parms=NULL) {
+  safediv <- function(num, den) {
+    data.table::fifelse(is.finite(den) & den > 0, num / den, NA_real_)
+  }
   d %>%
     mutate(
       # Health outcomes
@@ -598,32 +601,27 @@ add_cea_results <- function(d, parms=NULL) {
                                     (caregiver_workday_lost/365)),
 
       # Vaccine costs
-      vacc_dose = ifelse(ori_occurred, pop * vacc_cov * dose_regimen, 0),
+      vacc_dose = ori_occurred * pop * vacc_cov * dose_regimen,
       vacc_cost = (vacc_cost_per_dose + vacc_delivery_cost) * vacc_dose,
       net_cost = vacc_cost - coi_averted - cod_averted - productivity_lost_averted,
 
       # Cost-effectiveness ratios
-      cost_per_daly_averted =
-        ifelse(daly_averted > 0, net_cost / daly_averted, NA),
-      cost_per_case_averted =
-        ifelse(s_ch_averted_tot > 0, net_cost / s_ch_averted_tot, NA),
-      cost_per_death_averted =
-        ifelse(death_averted_tot > 0, net_cost / death_averted_tot, NA),
-
+      cost_per_case_averted = safediv(net_cost, s_ch_averted_tot),
+      cost_per_death_averted = safediv(net_cost, death_averted_tot),
+      cost_per_daly_averted = safediv(net_cost, daly_averted),
       # Impact per 1000 vaccine doses
-      case_averted_per_1000_OCV =
-        ifelse(vacc_dose > 0, 1000 * s_ch_averted_tot / vacc_dose, NA),
-      death_averted_per_1000_OCV =
-        ifelse(vacc_dose > 0, 1000 * death_averted_tot / vacc_dose, NA),
-
+      case_averted_per_1000_OCV =safediv(1000 * s_ch_averted_tot, vacc_dose),
+      death_averted_per_1000_OCV = safediv(1000 * death_averted_tot, vacc_dose),
+      daly_averted_per_1000_OCV = safediv(1000 * daly_averted, vacc_dose),
       # Classification of cost-effectiveness
       cost_eff_threshold = 3 * gdp,
-      ratio_cost_per_daly_averted_to_gdp =
-        ifelse(gdp > 0, cost_per_daly_averted / gdp, NA),
+      ratio_cost_per_daly_averted_to_gdp = safediv(cost_per_daly_averted, gdp),
       cost_effective =
         ifelse(cost_per_daly_averted > cost_eff_threshold, FALSE, TRUE)
     )
+  return(d)
 }
+
 
 #' Summarize Results Across Outbreaks by Run ID
 #'
@@ -642,39 +640,64 @@ sum_over_outbreaks_by_runid <- function(d, ori_occurred=TRUE, case_trigger=FALSE
 
   if (ori_occurred) d <- d[ori_occurred == TRUE, ]
   # Aggregate across outbreaks
-  d[, .(
-    n_outbreaks = .N,                          # rows per group
-    pop_tot = sum(pop),
-    vacc_dose = sum(ifelse(ori_occurred, pop * vacc_cov, 0)),
+  d[, {
+    # --- Step 1: Pre-calculate all sums ONCE per group ---
+    # Vectorized calculation for vacc_dose sum (much faster than ifelse)
+    total_doses <- sum((pop * vacc_cov) * ori_occurred)
 
-    # Sum across outbreaks
-    c_ch_tot = sum(c_ch_tot),
-    death_tot = sum(death_tot),
-    death_averted_tot = sum(death_averted_tot),
-    pct_reduc_death = 100 * sum(death_averted_tot) / sum(death_tot),
-    s_ch_tot = sum(s_ch_tot),
-    s_ch_averted_tot = sum(s_ch_averted_tot),
-    daly_averted_tot = sum(daly_averted),
+    total_s_ch_averted <- sum(s_ch_averted_tot)
+    total_death_averted <- sum(death_averted_tot)
+    total_daly_averted <- sum(daly_averted)
+    total_s_ch <- sum(s_ch_tot)
+    total_death <- sum(death_tot)
 
-    # Calculate impact per 1000 doses
-    case_averted_per_1000_OCV =
-      1000 * sum(s_ch_averted_tot) / sum(vacc_dose),
-    death_averted_per_1000_OCV =
-      1000 * sum(death_averted_tot) /sum(vacc_dose),
-    daly_averted_per_1000_OCV =
-      1000 * sum(daly_averted) / sum(vacc_dose),
+    # Calculate cost-related sums, handling NAs efficiently
+    # We only want to sum metrics where cost data is available
+    idx_has_cost <- !is.na(net_cost)
+    total_net_cost <- sum(net_cost[idx_has_cost]) # na.rm=TRUE is implicit now
 
-    # Calculate cost-effectiveness ratios
-    # note that we don't cost values for some outbreaks because
-    # we don't have gdp values for Ethiopia, South Sudan, and Somalia
-    cost_per_daly_averted =
-      sum(net_cost, na.rm=TRUE) / sum(daly_averted[!is.na(net_cost)]),
-    cost_per_case_averted =
-      sum(net_cost, na.rm=TRUE) / sum(s_ch_averted_tot[!is.na(net_cost)]),
-    cost_per_death_averted =
-      sum(net_cost, na.rm=TRUE) / sum(death_averted_tot[!is.na(net_cost)])
-    ),
-    by = by_cols]
+    # Denominators for cost-effectiveness, using the pre-computed index
+    daly_averted_costed <- sum(daly_averted[idx_has_cost])
+    case_averted_costed <- sum(s_ch_averted_tot[idx_has_cost])
+    death_averted_costed <- sum(death_averted_tot[idx_has_cost])
+
+    # --- Step 2: Return the list of results using the pre-calculated variables ---
+    .(
+      n_outbreaks = .N,
+      pop_tot = sum(pop),
+      vacc_dose = total_doses,
+
+      # Sum across outbreaks
+      c_ch_tot = sum(c_ch_tot),
+      death_tot = total_death,
+      death_averted_tot = total_death_averted,
+      pct_reduc_case = 100 * total_s_ch_averted / total_s_ch,
+      pct_reduc_death = 100 * total_death_averted / total_death,
+      s_ch_tot = total_s_ch,
+      s_ch_averted_tot = total_s_ch_averted,
+      daly_averted_tot = total_daly_averted,
+
+      # Calculate impact per 1000 doses
+      # Use a check to avoid division by zero if total_doses is 0
+      case_averted_per_1000_OCV =
+        if (total_doses > 0) 1000 * total_s_ch_averted / total_doses else 0,
+      death_averted_per_1000_OCV =
+        if (total_doses > 0) 1000 * total_death_averted / total_doses else 0,
+      daly_averted_per_1000_OCV =
+        if (total_doses > 0) 1000 * total_daly_averted / total_doses else 0,
+
+      # Calculate cost-effectiveness ratios
+      cost_per_daly_averted = if (daly_averted_costed > 0)
+        total_net_cost / daly_averted_costed else NA_real_,
+      cost_per_case_averted = if (case_averted_costed > 0)
+        total_net_cost / case_averted_costed else NA_real_,
+      cost_per_death_averted = if (death_averted_costed > 0)
+        total_net_cost / death_averted_costed else NA_real_
+    )
+  },
+  by = by_cols]
+
+
 }
 
 #' Add CEA Results for All Outbreaks
@@ -1009,6 +1032,7 @@ impact_summary <- function(d, nrow=1,
     list(col="death_averted_tot", out="DA", digits=0),
     list(col="pct_reduc_death", out="PDR", digits=1),
     list(col="case_averted_per_1000_OCV", out="CAPD", digits=3),
+    list(col="case_averted_per_1000_OCV", out="DALYPD", digits=3),
     list(col="death_averted_per_1000_OCV", out="DAPD", digits=3),
     list(col="cost_per_case_averted", out="CPCA", digits=1),
     list(col="cost_per_death_averted", out="CPDA", digits=1),
@@ -1147,12 +1171,13 @@ theme_y_blank <- function() {
 #' Reduces spacing in legend for compact plots
 #'
 #' @return ggplot2 theme object
-theme_tight_legend <- function(box_space_pt=2) {
+theme_tight_legend <- function(box_space_pt=2,
+                               key_space_cm = 0.2) {
   theme(
     legend.box.spacing = unit(box_space_pt, "pt"),
     legend.margin = margin(0, 0, 0, 0),
     legend.key.size = unit(0.5, "cm"),
-    legend.key.spacing = unit(0.1, "cm")
+    legend.key.spacing = unit(key_space_cm, "cm")
   )
 }
 

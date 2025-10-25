@@ -639,10 +639,36 @@ Calculate Impact Metrics
 ## Onset-triggered
 
 ```{r cea-time-trigger}
+# > sapply(d, function(x) sum(x == 0, na.rm=T))
+#                     runid               id_outbreak                 vacc_week 
+#                         0                         0                         0 
+#                  vacc_cov                   country                      year 
+#                         0                         0                         0 
+#                       pop              ori_occurred week_delay_to_vacc_effect 
+#                         0                    771670                         0 
+# no_ori_delay_outbreak_end                  s_ch_tot          s_ch_averted_tot 
+#                         0                         0                   1297551 
+#                  c_ch_tot                 death_tot         death_averted_tot 
+#                   3216000                    981000                   2417604 
+#           pct_reduc_death            pct_reduc_case 
+#                   1436604                   1297551 
+# > sapply(d, function(x) sum(is.na(x)))
+#                     runid               id_outbreak                 vacc_week 
+#                         0                         0                         0 
+#                  vacc_cov                   country                      year 
+#                         0                         0                         0 
+#                       pop              ori_occurred week_delay_to_vacc_effect 
+#                         0                         0                         0 
+# no_ori_delay_outbreak_end                  s_ch_tot          s_ch_averted_tot 
+#                         0                         0                         0 
+#                  c_ch_tot                 death_tot         death_averted_tot 
+#                         0                         0                         0 
+#           pct_reduc_death            pct_reduc_case 
+#                    981000                         0 
 # delays <- 0:7
 # for (delay in delays) {
   # Load summarized time-triggered vaccination results
-  d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20251019.rds")
+  d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20251022.rds")
   # d <- read_rds(paste0("outputs/svim_delay_", delay, 
   #               "_onset_trigger_sum_over_week_runid_1_200_20251019.rds"))
   # Process each vaccine coverage level
