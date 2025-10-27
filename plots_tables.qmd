@@ -2082,8 +2082,8 @@ value_col <- c("doses_used", "outbreak_count",
                "cost_per_daly_averted")
 
 # --- configuration for the four scenarios ---
-x_prob  <- 0.7                # “top 30%” means keep >= 70th percentile
-x_pct   <- 70L
+x_prob  <- 0.3                # “top 30%” means keep >= 70th percentile
+x_pct   <- as.integer(x_prob * 100)
 vars_3  <- c("AR","dur","size")
 
 # optional: a tiny helper to map to the exact labels you want
@@ -2105,8 +2105,8 @@ d <- cea_subsets %>%
     # vacc_week == VW,
     vacc_cov  == VC,
     value_column %in% value_col,
-    # keep either "All" (pp=0) OR the x=70% slice for the three variables
-    (pp_r == 0) | (pp_r == x_prob & vacc_priority %in% vars_3)
+    # keep either "All" (pp=0) for AR (pick any) OR the x=70% slice for the three variables
+    (pp_r == 0 & vacc_priority  == "AR") | (pp_r == x_prob & vacc_priority %in% vars_3)
   ) %>%
   mutate(
     scenario = mapply(make_scenario_label, vacc_priority, pp_r)
@@ -2136,18 +2136,20 @@ dw <- d %>%
 levs <- levels(dw$scenario)  # expects: Q[70%](AR), Q[70%](Dur), Q[70%](Size), All
 expr_labels <- setNames(
   list(
-    bquote(Q[70 * "%"](AR)),
-    bquote(Q[70 * "%"](Dur)),
-    bquote(Q[70 * "%"](Size)),
+    bquote(Q[30*"%"](AR)),
+    bquote(Q[30*"%"](Dur)),
+    bquote(Q[30*"%"](Size)),
     expression(All)
   ),
-  c("Q[70%](AR)", "Q[70%](Dur)", "Q[70%](Size)", "All")
+  c(paste0("Q[", x_pct, "%](AR)"), 
+    paste0("Q[", x_pct, "%](Dur)"),
+    paste0("Q[", x_pct, "%](Size)"),
+    "All")
 )
 
-
-set.seed(42)
-n_subset_plot <- 30
-ids <- sample(200, n_subset_plot) # just to reduce plotting load
+# set.seed(42)
+# n_subset_plot <- 30
+# ids <- sample(200, n_subset_plot) # just to reduce plotting load
 ids <- 1:200
 
 # create nudges to prevent too much overlap between subset id's
@@ -2155,6 +2157,58 @@ dw[, doses_used_plot := doses_used * rnorm(length(dw$doses_used),
                                          mean=1, sd=1.3e-1)]
 v_week <- c(1, 9)
 alph <- 0.4
+
+# dw_7 <- dw
+```
+
+Numbers referred in the text
+```{r}
+# > unique(dw$value_column)
+#  [1] "outbreak_count"             "s_ch_averted_tot"           "death_averted_tot"         
+#  [4] "daly_averted_tot"           "case_averted_per_1000_OCV"  "death_averted_per_1000_OCV"
+#  [7] "daly_averted_per_1000_OCV"  "cost_per_case_averted"      "cost_per_death_averted"    
+# [10] "cost_per_daly_averted" 
+# the number of outbreaks
+dw %>%
+  filter(value_column == "outbreak_count", vacc_week == 1) %>%
+  group_by(scenario) %>%
+  summarise(
+    across(c(q500, doses_used),
+           list(min = ~min(.x, na.rm=TRUE),
+                max = ~max(.x, na.rm=TRUE))),
+    .groups = "drop"
+  )
+
+
+ca_iqr_summary <- dw %>%
+  filter(value_column == "s_ch_averted_tot") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x) 
+
+ca_iqr_summary %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
+  format_median_iqr(digits = 0)
+
+ca_iqr_summary %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
+  format_median_iqr(digits = 0)
+
+capd_iqr_summary <- dw %>%
+  filter(value_column == "case_averted_per_1000_OCV") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x) 
+
+capd_iqr_summary %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
+  format_median_iqr(digits = 3)
+
+capd_iqr_summary %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
+  format_median_iqr(digits = 3)
+
+
 ```
 
 ### Left panel
@@ -2168,21 +2222,41 @@ dose_marks <- tibble::tibble(
   lab = c("2020", "2024")
 )
 
-rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
+cnt_iqr_summary <- dw %>%
+  filter(value_column == "outbreak_count") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x)
 
-plt_1 <- dw %>%
-  filter(vacc_week == 1) %>% # vacc_week should not matter. Just pick one
-  filter(value_column == "outbreak_count") %>% 
-  filter(subset_id %in% ids) %>% 
-  ggplot(aes(x = doses_used_plot, 
+make_log_offsets_span <- 
+  function(x, group, levels = NULL, base = 10, span_factor = 1.5) {
+    if (!is.null(levels)) group <- factor(group, levels = levels, ordered = TRUE)
+    k <- nlevels(factor(group))
+    if (k == 1) return(x)
+    step_dex <- log(span_factor, base = 10) / (k - 1) # per-step dex from total span
+    idx <- as.integer(factor(group)) - (k + 1) / 2
+    x * (base^(step_dex * idx))
+  }
+
+cnt_iqr_summary_off <- cnt_iqr_summary %>%
+  filter(vacc_week == 1) %>%
+  mutate(
+    scenario = factor(scenario, levels = levs),
+    x_off = make_log_offsets_span(target_vacc_doses, 
+                                  scenario, levels = levs, 
+                                  span_factor = 1.5)
+)
+
+plt_1 <- cnt_iqr_summary_off %>% 
+  filter(vacc_week == 1) %>%
+  ggplot(aes(x = x_off, 
              y = q500, color = scenario)) +
   ci_layers_from_summary(
-    lw95 = line_width_95 * rf,
-    lw50 = line_width_50 * rf,
-    pr_size = 2.4 * rf,
-    mean_size = 0,
-    mean_stroke = 0,
-    alpha = alph
+    lw95 = line_width_95,
+    lw50 = 0,
+    pr_size = 1.5,
+    mean_size = 1.5,
+    mean_stroke = 0
   ) +
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
@@ -2193,7 +2267,7 @@ plt_1 <- dw %>%
     inherit.aes = FALSE,
     aes(x = x, y = Inf, label = lab),
     vjust = 1.5,           # push slightly down from the top
-    hjust = 1.1, 
+    hjust = 1.1,
     nudge_x = 0,           # no horizontal nudge
     size = 3
   )+
@@ -2214,42 +2288,37 @@ plt_1 <- dw %>%
 
 Total suspected cases averted (s_ch_averted_tot)
 ```{r}
-rf <- 0.4 # line widths and points scaled down compared to pca plots in Fig3
 df <- data.frame(x=sort(unique(dw$doses_used_plot)))
 df$y <- df$x
 
-plt_2 <- dw %>%
-  filter(vacc_week %in% v_week) %>% 
-  filter(value_column == "s_ch_averted_tot") %>% 
-  filter(subset_id %in% ids) %>% 
-  # ggplot(aes(x = doses_used_plot, 
-  #            y = q500+1e-3, color = scenario, 
-  #            shape = as.factor(vacc_week))) +
-  ggplot(aes(x = doses_used, 
-             y = q500, color = scenario, 
-             linetype = as.factor(vacc_week))) +
-  # ci_layers_from_summary(
-  #   lw95 = line_width_95 * rf,
-  #   lw50 = line_width_50 * rf,
-  #   pr_size = 2.4 * rf,
-  #   mean_size = 0,
-  #   mean_stroke = 0,
-  #   alpha = alph
-  # ) +
-  geom_smooth(
-    aes(group = interaction(scenario, vacc_week), 
-        fill = scenario),
-    method = "loess", formula = y ~ x, se = TRUE,
-    span = 1, linewidth = 1, alpha = 0.3, na.rm = TRUE,
-    show.legend = c(linetype = TRUE)
-  )+
-  # add reference line
-  # geom_line(data=df, aes(x, y/1000), 
-  #           linetype = "dashed", inherit.aes = FALSE)+
-  # geom_line(data=df, aes(x, 3*y/1000), 
-  #           linetype = "dashed", inherit.aes = FALSE)+
-  # geom_line(data=df, aes(x, 0.3*y/1000), 
-  #           linetype = "dashed", inherit.aes = FALSE)+
+ca_iqr_summary <- dw %>%
+  filter(value_column == "s_ch_averted_tot") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x)
+
+ca_iqr_summary_off <- ca_iqr_summary %>%
+  mutate(
+    scenario = factor(scenario, levels = levs),
+    x_off = make_log_offsets_span(target_vacc_doses, 
+                                  scenario, levels = levs, 
+                                  span_factor = 1.5)
+)
+
+plt_2 <- 
+  ggplot(data=subset(ca_iqr_summary_off, vacc_week == 9), 
+         aes(x = x_off, y = q500, color = scenario, 
+             shape = as.factor(vacc_week))) +
+  ci_layers_from_summary(
+    lw95 = line_width_95,
+    lw50 = 0,
+    pr_size = 1.5,
+    mean_size = 0,
+    mean_stroke = 0
+  ) +
+  geom_point(data=ca_iqr_summary_off,
+            aes(x = x_off, y = q500,
+                color = scenario, shape = as.factor(vacc_week)), size=1.5)+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2269,12 +2338,17 @@ plt_2 <- dw %>%
     values = my_discrete_colors[1:4]
   )+
   scale_linetype_manual("",
-    values = c("1" = "dotted", "9" = "solid"), 
+    values = c("1" = "dotted", "9" = NA),
+    labels = c("1 week", "9 weeks")
+  )+
+  scale_shape_manual("",
+    values = c("1" = 2, "9" = 19),
     labels = c("1 week", "9 weeks")
   )+
   theme_light() +
   theme_x_blank()+
-  guides(color = "none", fill = "none", linetype = "none")
+  guides(color = "none", fill = "none", linetype = "none", 
+         shape="none")
 
 # plt_2
 ```
@@ -2282,30 +2356,34 @@ plt_2 <- dw %>%
 Case averted per 1,000 OCV doses (case_averte_per_dose)
 
 ```{r}
-rf <- 0.4
+capd_iqr_summary <- dw %>%
+  filter(value_column == "case_averted_per_1000_OCV") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x)
 
-plt_3 <- dw %>%
-  filter(vacc_week %in% v_week) %>% 
-  filter(value_column == "case_averted_per_1000_OCV") %>% 
-  filter(subset_id %in% ids) %>% 
-  ggplot(aes(x = doses_used, 
-             y = q500, color = scenario, 
-             linetype = as.factor(vacc_week))) +
-  # ci_layers_from_summary(
-  #   lw95 = line_width_95 * rf,
-  #   lw50 = line_width_50 * rf,
-  #   pr_size = 2.4 * rf,
-  #   mean_size = 0,
-  #   mean_stroke = 0,
-  #   alpha = alph
-  # ) +
-  geom_smooth(
-    aes(group = interaction(scenario, vacc_week), 
-        fill = scenario),
-    method = "loess", formula = y ~ x, se = TRUE,
-    span = 1, linewidth = 1, alpha = 0.3, na.rm = TRUE,
-    show.legend = c(linetype = TRUE)
-  )+
+capd_iqr_summary <- capd_iqr_summary %>%
+  mutate(
+    scenario = factor(scenario, levels = levs),
+    x_off = make_log_offsets_span(target_vacc_doses, 
+                                  scenario, levels = levs, 
+                                  span_factor = 1.5)
+)
+
+plt_3 <- 
+  ggplot(data = subset(capd_iqr_summary, vacc_week == 9), 
+         aes(x = x_off, y = q500, color = scenario, 
+             shape = as.factor(vacc_week))) +
+  ci_layers_from_summary(
+    lw95 = line_width_95,
+    lw50 = 0,
+    pr_size = 0,
+    mean_size = 0,
+    mean_stroke = 0
+  ) +
+  geom_point(data=capd_iqr_summary, 
+             aes(x = x_off, y = q500, color = scenario, 
+                 shape = as.factor(vacc_week)), size=1.5)+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2320,16 +2398,13 @@ plt_3 <- dw %>%
     labels = unname(expr_labels[levs]),
     values = my_discrete_colors[1:4]
   )+
-  scale_fill_manual("",
-    breaks = levs,
-    labels = unname(expr_labels[levs]),
-    values = my_discrete_colors[1:4]
-  )+
-  scale_linetype_manual(
-    values = c("1" = "dotted", "9" = "solid")
+  scale_shape_manual("",
+    values = c("1" = 2, "9" = 19),
+    labels = c("1 week", "9 weeks")
   )+
   theme_light() +
-  guides(color = "none", fill = "none", linetype = "none")
+  guides(color = "none", fill = "none", linetype = "none", 
+         shape="none")
 
 # plt_3
 ```
@@ -2380,44 +2455,33 @@ if (save_plot) {
 DALY averted per 1,000 OCV doses (case_averte_per_dose)
 
 ```{r}
-# plt_4 <- dw %>%
-#   filter(vacc_week %in% v_week) %>% 
-#   filter(value_column == "daly_averted_per_1000_OCV") %>% 
-#   filter(subset_id %in% ids) %>% 
-#   ggplot(aes(x = doses_used_plot, 
-#              y = q500+1e-3, color = scenario)) +
-#   ci_layers_from_summary(
-#     lw95 = line_width_95 * rf,
-#     lw50 = line_width_50 * rf,
-#     pr_size = 2.4 * rf,
-#     mean_size = 0,
-#     mean_stroke = 0,
-#     alpha = 0.3
-#   ) +
-#   geom_vline(xintercept = ocv_dose_2020, 
-#              linetype = "dashed", color = "firebrick")+
-#   geom_vline(xintercept = ocv_dose_2024, 
-#              linetype = "dashed", color = "firebrick")+
-#   scale_x_log10("Vaccine doses deployed") +
-#   scale_y_continuous("DALY averted per 1,000 OCVs", 
-#                      breaks=c(0:5,7.5,10,12.5,15),
-#                      labels=c(0:5,"",10,"",15),
-#                      minor_breaks = NULL) +
-#   scale_color_manual("",
-#     breaks = levs,
-#     labels = unname(expr_labels[levs]),
-#     values = my_discrete_colors[1:4]
-#   )+
-#   theme_light() +
-#   theme(legend.position = "none")
+dapd_iqr_summary <- dw %>%
+  filter(value_column == "daly_averted_per_1000_OCV") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x)
 
-plt_4 <- dw %>%
-  filter(vacc_week %in% v_week) %>% 
-  filter(value_column == "daly_averted_per_1000_OCV") %>% 
-  filter(subset_id %in% ids) %>% 
-  ggplot(aes(x = doses_used, 
-             y = q500, color = scenario, 
-             linetype = as.factor(vacc_week))) +
+dapd_iqr_summary <- dapd_iqr_summary %>%
+  mutate(
+    scenario = factor(scenario, levels = levs),
+    x_off = make_log_offsets_span(target_vacc_doses, 
+                                  scenario, levels = levs, 
+                                  span_factor = 1.5)
+)
+
+plt_4 <- 
+  ggplot(data = subset(dapd_iqr_summary, vacc_week == 9),
+         aes(x = x_off, y = q500, color = scenario)) +
+  ci_layers_from_summary(
+    lw95 = line_width_95,
+    lw50 = 0,
+    pr_size = 0,
+    mean_size = 0,
+    mean_stroke = 0
+  ) +
+  geom_point(data=dapd_iqr_summary, 
+             aes(x = x_off, y = q500, color = scenario, 
+                 shape = as.factor(vacc_week)), size=1.5)+
   geom_text(
     data = dose_marks,
     inherit.aes = FALSE,
@@ -2426,13 +2490,6 @@ plt_4 <- dw %>%
     hjust = 1.1, 
     nudge_x = 0,           # no horizontal nudge
     size = 3
-  )+
-  geom_smooth(
-    aes(group = interaction(scenario, vacc_week), 
-        fill = scenario),
-    method = "loess", formula = y ~ x, se = TRUE,
-    span = 1, linewidth = 1, alpha = 0.3, na.rm = TRUE,
-    show.legend = c(linetype = TRUE)
   )+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
@@ -2445,21 +2502,13 @@ plt_4 <- dw %>%
     labels = unname(expr_labels[levs]),
     values = my_discrete_colors[1:4]
   )+
-  scale_fill_manual("",
-    breaks = levs,
-    labels = unname(expr_labels[levs]),
-    values = my_discrete_colors[1:4]
-  )+
-  scale_linetype_manual("",
-    values = c("1" = "dotted", "9" = "solid"), 
+  scale_shape_manual("",
+    values = c("1" = 2, "9" = 19),
     labels = c("1 week", "9 weeks")
   )+
   theme_light() +
+  guides(color = "none")+
   theme_x_blank()+
-  guides(
-    linetype = guide_legend(
-      override.aes = list(color = "black", fill = NA, linewidth = 1.2)
-  ))+
   theme(legend.position = "top") +
   theme_tight_legend(box_space_pt = 3,
                      key_space_cm = 0.03)
@@ -2470,44 +2519,33 @@ plt_4 <- dw %>%
 Cost per case averted (cost_per_case_averted)
 
 ```{r}
-# plt_5 <- dw %>%
-#   filter(vacc_week == v_week) %>% 
-#   filter(value_column == "cost_per_case_averted") %>% 
-#   filter(subset_id %in% ids) %>% 
-#   ggplot(aes(x = doses_used_plot, 
-#              y = q500+1e-3, color = scenario)) +
-#   ci_layers_from_summary(
-#     lw95 = line_width_95 * rf,
-#     lw50 = line_width_50 * rf,
-#     pr_size = 2.4 * rf,
-#     mean_size = 0,
-#     mean_stroke = 0,
-#     alpha = 0.3
-#   ) +
-#   scale_x_log10("Vaccine doses deployed") +
-#   scale_y_continuous("Cost per case averted") +
-#   scale_color_manual("",
-#     breaks = levs,
-#     labels = unname(expr_labels[levs]),
-#     values = my_discrete_colors[1:4]
-#   )+
-#   theme_light() +
-#   theme(legend.position = "none")
-# 
-plt_5 <- dw %>%
-  filter(vacc_week %in% v_week) %>% 
-  filter(value_column == "cost_per_case_averted") %>% 
-  filter(subset_id %in% ids) %>% 
-  ggplot(aes(x = doses_used, 
-             y = q500, color = scenario, 
-             linetype = as.factor(vacc_week))) +
-  geom_smooth(
-    aes(group = interaction(scenario, vacc_week), 
-        fill = scenario),
-    method = "loess", formula = y ~ x, se = TRUE,
-    span = 1, linewidth = 1, alpha = 0.3, na.rm = TRUE,
-    show.legend = c(linetype = TRUE)
+cpca_iqr_summary <- dw %>%
+  filter(value_column == "cost_per_case_averted") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x)
+
+cpca_iqr_summary <- cpca_iqr_summary %>%
+  mutate(
+    scenario = factor(scenario, levels = levs),
+    x_off = make_log_offsets_span(target_vacc_doses, 
+                                  scenario, levels = levs, 
+                                  span_factor = 1.5)
+)
+
+plt_5 <- 
+  ggplot(data = subset(cpca_iqr_summary, vacc_week == 9),
+         aes(x = x_off, y = q500, color = scenario)) +
+  ci_layers_from_summary(
+    lw95 = line_width_95,
+    lw50 = 0,
+    pr_size = 0,
+    mean_size = 0,
+    mean_stroke = 0
   )+
+  geom_point(data=cpca_iqr_summary, 
+             aes(x = x_off, y = q500, color = scenario,
+                 shape = as.factor(vacc_week)), size=1.5)+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2519,61 +2557,46 @@ plt_5 <- dw %>%
     labels = unname(expr_labels[levs]),
     values = my_discrete_colors[1:4]
   )+
-  scale_fill_manual("",
-    breaks = levs,
-    labels = unname(expr_labels[levs]),
-    values = my_discrete_colors[1:4]
-  )+
-  scale_linetype_manual(
-    values = c("1" = "dotted", "9" = "solid")
+  scale_shape_manual("",
+    values = c("1" = 2, "9" = 19),
+    labels = c("1 week", "9 weeks")
   )+
   theme_light() +
-  theme_x_blank()+
-  guides(color = "none", fill = "none", linetype = "none")
+  theme_x_blank() +
+  guides(color = "none", shape="none")
 
 # plt_5
 ```
 
 Cost per DALY averted (cost_per_daly_averted)
 ```{r}
-# plt_6 <- dw %>%
-#   filter(vacc_week == v_week) %>% 
-#   filter(value_column == "cost_per_daly_averted") %>% 
-#   filter(subset_id %in% ids) %>% 
-#   ggplot(aes(x = doses_used_plot, 
-#              y = q500+1e-3, color = scenario)) +
-#   ci_layers_from_summary(
-#     lw95 = line_width_95 * rf,
-#     lw50 = line_width_50 * rf,
-#     pr_size = 2.4 * rf,
-#     mean_size = 0,
-#     mean_stroke = 0,
-#     alpha = 0.3
-#   ) +
-#   scale_x_log10("Vaccine doses deployed") +
-#   scale_y_log10("Cost per DALY averted") +
-#   scale_color_manual("",
-#     breaks = levs,
-#     labels = unname(expr_labels[levs]),
-#     values = my_discrete_colors[1:4]
-#   )+
-#   theme_light() +
-#   theme(legend.position = "none")
+cpda_iqr_summary <- dw %>%
+  filter(value_column == "cost_per_daly_averted") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x)
 
-plt_6 <- dw %>%
-  filter(vacc_week %in% v_week) %>% 
-  filter(value_column == "cost_per_daly_averted") %>% 
-  filter(subset_id %in% ids) %>% 
-  ggplot(aes(x = doses_used, 
-             y = q500, color = scenario, 
-             linetype = as.factor(vacc_week))) +
-  geom_smooth(
-    aes(group = interaction(scenario, vacc_week), 
-        fill = scenario),
-    method = "loess", formula = y ~ x, se = TRUE,
-    span = 1, linewidth = 1, alpha = 0.3, na.rm = TRUE,
-    show.legend = c(linetype = TRUE)
+cpda_iqr_summary <- cpda_iqr_summary %>%
+  mutate(
+    scenario = factor(scenario, levels = levs),
+    x_off = make_log_offsets_span(target_vacc_doses, 
+                                  scenario, levels = levs, 
+                                  span_factor = 1.5)
+)
+
+plt_6 <-
+  ggplot(data = subset(cpda_iqr_summary, vacc_week == 9),
+         aes(x = x_off, y = q500, color = scenario)) +
+  ci_layers_from_summary(
+    lw95 = line_width_95,
+    lw50 = 0,
+    pr_size = 0,
+    mean_size = 0,
+    mean_stroke = 0
   )+
+  geom_point(data=cpda_iqr_summary, 
+             aes(x = x_off, y = q500, color = scenario,
+                 shape = as.factor(vacc_week)), size=1.5)+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2585,17 +2608,13 @@ plt_6 <- dw %>%
     labels = unname(expr_labels[levs]),
     values = my_discrete_colors[1:4]
   )+
-  scale_fill_manual("",
-    breaks = levs,
-    labels = unname(expr_labels[levs]),
-    values = my_discrete_colors[1:4]
-  )+
-  scale_linetype_manual(
-    values = c("1" = "dotted", "9" = "solid")
+  scale_shape_manual("",
+    values = c("1" = 2, "9" = 19),
+    labels = c("1 week", "9 weeks")
   )+
   theme_light() +
-  guides(color = "none", fill = "none", linetype = "none")
-
+  guides(color = "none", shape="none")
+ 
 # plt_6
 ```
 
@@ -2657,30 +2676,6 @@ plts_pca_cpca <- (plts_ca_agg | plts_cpca_agg) +
     legend.spacing.y = unit(1, "pt"),
     legend.margin = margin(t = 0, r = 0, b = 3, l = 0)
   )
-
-# ,
-#   plot_layout(axis_titles = "collect_x",
-#               guides = "collect") &
-#   theme(
-#     legend.position = "top", # put legends at top
-#     legend.justification = "center", # center horizontally
-#     legend.box.just = "center", 
-#     legend.box = "horizontal", # arrange horizontally
-#     legend.text = element_text(size=12),
-#     legend.spacing.y = unit(1, "pt"),
-#     legend.margin = margin(t = 0, r = 0, b = 3, l = 0)
-#   ) 
-# & 
-#   guides(
-#     # keep each guide on a single row
-#     color    = guide_legend(nrow = 1),
-#     linetype = guide_legend(
-#       title = "",
-#       nrow = 1,
-#       override.aes = list(color = "grey20", fill = NA, linewidth = 1)
-#     )
-#   )
-
 
 if (save_plot) {
   fac <- 1.35

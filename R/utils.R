@@ -1276,9 +1276,9 @@ ci_layers_from_summary <- function(...,
                                    mean_size = 3,
                                    mean_stroke = 0.8,
                                    alpha = NULL,
-                                   alpha95 = 0.45,
-                                   alpha50 = 0.75,
-                                   alpha_med = 0.9,
+                                   alpha95 = 1,
+                                   alpha50 = 1,
+                                   alpha_med = 1,
                                    alpha_mean = 1) {
   preserve <- match.arg(preserve)
 
