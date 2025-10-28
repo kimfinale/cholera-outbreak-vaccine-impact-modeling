@@ -2048,7 +2048,8 @@ if (save_plot) {
 }
 ```
 
-## Figure 3.1
+## Figure S3
+### A
 
 ```{r}
 impact_data <-
@@ -2121,7 +2122,7 @@ for (i in 1:4) {
 
 ```
 
-### Combine, tag, and save
+Combine, tag, and save
 
 ```{r}
 hj <- 3.4
@@ -2172,7 +2173,8 @@ if (save_plot) {
 }
 ```
 
-## Figure 3.2
+
+### B
 
 % cases averted
 
@@ -2239,7 +2241,7 @@ for (i in 1:4) {
 
 ```
 
-### Combine, tag, and save
+Combine, tag, and save
 
 ```{r}
 hj <- 3.4
@@ -2292,7 +2294,7 @@ if (save_plot) {
 ```
 
 
-## Figure 3.3
+### C
 
 Cases averted per 1,000 OCVs
 
@@ -2359,7 +2361,7 @@ for (i in 1:4) {
 
 ```
 
-### Combine, tag, and save
+Combine, tag, and save
 
 ```{r}
 hj <- 3.4
@@ -2411,8 +2413,7 @@ if (save_plot) {
 }
 ```
 
-
-## Figure 3.4
+### D
 
 DALYs averted per 1,000 OCVs
 
@@ -2488,7 +2489,7 @@ for (i in 1:4) {
 
 ```
 
-### Combine, tag, and save
+Combine, tag, and save
 
 ```{r}
 hj <- 3.4
