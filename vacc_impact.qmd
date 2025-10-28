@@ -668,40 +668,29 @@ Calculate Impact Metrics
 # delays <- 0:7
 # for (delay in delays) {
   # Load summarized time-triggered vaccination results
-  d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20251022.rds")
+  d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20251020.rds")
   # d <- read_rds(paste0("outputs/svim_delay_", delay, 
   #               "_onset_trigger_sum_over_week_runid_1_200_20251019.rds"))
   # Process each vaccine coverage level
   for (vc in VC3) {
-    message(paste("Processing results for vaccine coverage =", vc))
+    message(paste0("Processing results for vaccine coverage = ", vc))
     
     # Full cost-effectiveness analysis
     svim_tt_cea <- add_cea_variables(d[vacc_cov == vc], 
                                      mean_age_inf = mean_age_inf)
     svim_tt_cea <- add_cea_results(svim_tt_cea, parms = as.data.frame(parm))
     
-    # Save detailed results
     saveRDS(svim_tt_cea,
-           paste0("outputs/paper/cea_weekly_", vc, "_onset_trigger_",
-                  tstamp(), ".rds"))
+           paste0("outputs/cea_", vc, "_onset_trigger_20251020.rds"))
+    
+    # Save detailed results
+    # saveRDS(svim_tt_cea,
+    #        paste0("outputs/paper/cea_weekly_", vc, "_onset_trigger_",
+    #               tstamp(), ".rds"))
     # saveRDS(svim_tt_cea,
     #        paste0("outputs/cea_delay_", delay, "_", vc, "_onset_trigger_", 
     #               tstamp(), ".rds"))
     rm(svim_tt_cea)
-    
-    # # Calculate mean across simulation runs
-    # svim_tt_mean <- mean_across_runid(d[vacc_cov == vc])
-    # svim_tt_mean_cea <- add_cea_variables(svim_tt_mean, 
-    #                                       mean_age_inf = mean_age_inf)
-    # svim_tt_mean_cea <- add_cea_results(svim_tt_mean_cea)
-    # 
-    # # Save average results
-    # saveRDS(svim_tt_mean_cea,
-    #        paste0("outputs/cea_", vc, "_onset_trigger_mean_across_runid_", 
-    #               tstamp(), ".rds"))
-    
-    # Clean up to save memory
-    # rm(svim_tt_cea, svim_tt_mean, svim_tt_mean_cea)
   }
   rm(d)  # Free memory
 # }

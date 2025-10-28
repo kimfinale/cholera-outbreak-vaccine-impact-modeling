@@ -1019,20 +1019,20 @@ impact_summary <- function(d, nrow=1,
 
   # Create empty output table
   # metrics <- c("PCR", "CA", "PDR", "DA", "CAPD", "DAPD", "CPCA", "CPDA", "ICER")
-  metrics <- c("PCR", "CA", "DA", "CAPD", "DAPD", "CPCA", "CPDA", "ICER")
+  metrics <- c("PCA", "CA", "DA", "PDA","CAPD",
+               "DALYAPD", "DAPD", "CPCA", "CPDA", "ICER")
   tab <- matrix(NA, nrow=nrow, ncol=length(metrics)) %>%
     as.data.frame() %>%
     `colnames<-`(metrics)
 
   # Define columns to summarize and their formatting parameters
   col_specs <- list(
-    list(col="pct_reduc_case", out="PCR", digits=1),
+    list(col="pct_reduc_case", out="PCA", digits=1),
     list(col="s_ch_averted_tot", out="CA", digits=0),
-    # list(col="pct_reduc_death", out="PDR", digits=1),
     list(col="death_averted_tot", out="DA", digits=0),
-    list(col="pct_reduc_death", out="PDR", digits=1),
+    list(col="pct_reduc_death", out="PDA", digits=1),
     list(col="case_averted_per_1000_OCV", out="CAPD", digits=3),
-    list(col="case_averted_per_1000_OCV", out="DALYPD", digits=3),
+    list(col="daly_averted_per_1000_OCV", out="DALYAPD", digits=3),
     list(col="death_averted_per_1000_OCV", out="DAPD", digits=3),
     list(col="cost_per_case_averted", out="CPCA", digits=1),
     list(col="cost_per_death_averted", out="CPDA", digits=1),
@@ -1047,7 +1047,6 @@ impact_summary <- function(d, nrow=1,
                                                 probs=probs, big.mark=big.mark)
     }
   }
-
   return(tab)
 }
 
