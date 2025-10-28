@@ -1260,8 +1260,7 @@ if (save_plot) {
 
 ### Summary values referred in the main text
 ```{r fig3, eval=FALSE}
-onset_impact <- cea %>%
-  filter(ori_occurred) %>%
+onset_impact <- cea_ori %>%
   filter(vacc_cov %in% c(0.6, 0.75, 0.9), vacc_week %in% c(1,9)) %>%
   group_by(vacc_cov, vacc_week) %>%
   summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
@@ -1320,12 +1319,6 @@ d <- left_join(d, outbk_data_summary[,
                       c("id_outbreak", "ar_per_10e3","duration_weeks")],
                  by = "id_outbreak")
 
-# d$size_grp <- sapply(d$s_ch_tot, function(x) get_group_id(x, size_grp_cutoff))
-# 
-# d <- d[ori_occurred == T]
-# res <- rbindlist(lapply(1:10, function(i) calculate_impact_by_subset(d, i)))
-# res %>% filter(vacc_week %in% c(1,5,9), subset_id %in% c(1,10), vacc_cov == VC)
-
 # rate of decrease in percentage case reduction
 # by size, attack rate, and duration
 ar_grp_cutoff <- quantile(outbk_data_summary$ar_per_10e3, probs = probs)
@@ -1349,15 +1342,15 @@ d <- rbind(d1, d2)
 d_ <- rbind(d3, d4)
 d <- rbind(d, d_)
 
-d %>%
-  filter(vacc_week > 1, vacc_week <= 15) %>% 
-  mutate(half_life = log(2)/abs(pct_reduc_case_frac)) %>% 
-  group_by(grp) %>% 
-  summarize_quantiles(pct_reduc_case_frac*100, half_life) -> res
-
-res$grp <- factor(res$grp, c("All", "AR", "Dur", "Size"))
-for (i in 1:4) print(format_median_iqr(res, row=i))
-for (i in 5:8) print(format_median_iqr(res, digits=3, row=i))
+# d %>%
+#   filter(vacc_week > 1, vacc_week <= 15) %>% 
+#   mutate(half_life = log(2)/abs(pct_reduc_case_frac)) %>% 
+#   group_by(grp) %>% 
+#   summarize_quantiles(pct_reduc_case_frac*100, half_life) -> res
+# 
+# res$grp <- factor(res$grp, c("All", "AR", "Dur", "Size"))
+# for (i in 1:4) print(format_median_iqr(res, row=i))
+# for (i in 5:8) print(format_median_iqr(res, digits=3, row=i))
 
 # percentage reduction in an original scale
 # 1 - exp(-k_hat)
@@ -2048,7 +2041,7 @@ plts_pca_capd <- (plts_pca | plts_right) + plot_layout(ncol=2) +
 
 if (save_plot) {
   fac <- 1.35
-  ggsave(paste0("plots/pca_capd_", tstamp(), ".pdf"),
+  ggsave(paste0("plots/fig3_pca_capd_", tstamp(), ".pdf"),
          plts_pca_capd,
          device = cairo_pdf, width = fgw2*fac,
          height = fgw2*fac*fac, units = "mm")
@@ -2179,39 +2172,117 @@ dw %>%
     .groups = "drop"
   )
 
-
-ca_iqr_summary <- dw %>%
+ca <- dw %>%
   filter(value_column == "s_ch_averted_tot") %>%
   group_by(vacc_week, scenario, target_vacc_doses) %>%
   mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
   summarize_quantiles(x) 
 
-ca_iqr_summary %>% 
+ca %>% 
   filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
   format_median_iqr(digits = 0)
 
-ca_iqr_summary %>% 
+ca %>% 
   filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
   format_median_iqr(digits = 0)
 
-capd_iqr_summary <- dw %>%
+capd <- dw %>%
   filter(value_column == "case_averted_per_1000_OCV") %>%
   group_by(vacc_week, scenario, target_vacc_doses) %>%
   mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
   summarize_quantiles(x) 
 
-capd_iqr_summary %>% 
+capd %>% 
   filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
   format_median_iqr(digits = 3)
 
-capd_iqr_summary %>% 
+capd %>% 
   filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
   format_median_iqr(digits = 3)
 
+# compare with the analyses at the individual level
+# median values are smaller at the individual level
+cea_ori %>% 
+  filter(vacc_week %in% c(1,9), vacc_cov == 0.75) %>% 
+  group_by(vacc_week) %>%
+  summarize_quantiles(case_averted_per_1000_OCV) 
 
+# variation of vaccine impact and efficiency
+cea_ori %>% 
+  filter(vacc_week %in% c(1,9), vacc_cov == 0.75) %>% 
+  group_by(vacc_week) %>%
+  summarize(min = min(pct_reduc_case),
+            max = max(pct_reduc_case))
+
+cea_ori %>% 
+  filter(vacc_week %in% c(1,9), vacc_cov == 0.75) %>% 
+  group_by(vacc_week) %>%
+  summarize(min = min(case_averted_per_1000_OCV),
+            max = max(case_averted_per_1000_OCV))
+
+dapd <- dw %>%
+  filter(value_column == "daly_averted_per_1000_OCV") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x) 
+
+dapd %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
+  format_median_iqr(digits = 3)
+
+dapd %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
+  format_median_iqr(digits = 3)
+
+cpca <- dw %>%
+  filter(value_column == "cost_per_case_averted") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x) 
+
+cpca %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
+  format_median_iqr(digits = 0)
+
+cpca %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
+  format_median_iqr(digits = 0)
+
+# cost per DALY averted
+cpda <- dw %>%
+  filter(value_column == "cost_per_daly_averted") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x)
+
+cpda %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
+  format_median_iqr(digits = 0)
+
+cpda %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
+  format_median_iqr(digits = 0)
 ```
 
 ### Left panel
+
+Plotting parameters
+```{r}
+pt_size <- 1.35
+
+make_log_offsets_span <- 
+  function(x, group, levels = NULL, base = 10, span_factor = 1.5) {
+    if (!is.null(levels)) group <- factor(group, levels = levels, ordered = TRUE)
+    k <- nlevels(factor(group))
+    if (k == 1) return(x)
+    step_dex <- log(span_factor, base = 10) / (k - 1) # per-step dex from total span
+    idx <- as.integer(factor(group)) - (k + 1) / 2
+    x * (base^(step_dex * idx))
+  }
+span_fctr <- 1.4
+shp_wk1 <- 17
+shp_wk9 <- 1
+```
 
 Number of targeted outbreaks
 ```{r}
@@ -2228,36 +2299,23 @@ cnt_iqr_summary <- dw %>%
   mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
   summarize_quantiles(x)
 
-make_log_offsets_span <- 
-  function(x, group, levels = NULL, base = 10, span_factor = 1.5) {
-    if (!is.null(levels)) group <- factor(group, levels = levels, ordered = TRUE)
-    k <- nlevels(factor(group))
-    if (k == 1) return(x)
-    step_dex <- log(span_factor, base = 10) / (k - 1) # per-step dex from total span
-    idx <- as.integer(factor(group)) - (k + 1) / 2
-    x * (base^(step_dex * idx))
-  }
-
 cnt_iqr_summary_off <- cnt_iqr_summary %>%
   filter(vacc_week == 1) %>%
   mutate(
     scenario = factor(scenario, levels = levs),
     x_off = make_log_offsets_span(target_vacc_doses, 
                                   scenario, levels = levs, 
-                                  span_factor = 1.5)
+                                  span_factor = span_fctr)
 )
 
 plt_1 <- cnt_iqr_summary_off %>% 
   filter(vacc_week == 1) %>%
   ggplot(aes(x = x_off, 
              y = q500, color = scenario)) +
-  ci_layers_from_summary(
-    lw95 = line_width_95,
-    lw50 = 0,
-    pr_size = 1.5,
-    mean_size = 1.5,
-    mean_stroke = 0
-  ) +
+  geom_linerange(aes(ymin=q250, ymax=q750), 
+                 position=position_identity(), 
+                 linewidth=line_width_95) + 
+  geom_point(aes(y=q500), size=pt_size, shape=1) +
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2294,7 +2352,7 @@ df$y <- df$x
 ca_iqr_summary <- dw %>%
   filter(value_column == "s_ch_averted_tot") %>%
   group_by(vacc_week, scenario, target_vacc_doses) %>%
-  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  mutate(x = q500) %>% # `q500` is also used as a variable inside the summarize_quantile() function
   summarize_quantiles(x)
 
 ca_iqr_summary_off <- ca_iqr_summary %>%
@@ -2302,23 +2360,17 @@ ca_iqr_summary_off <- ca_iqr_summary %>%
     scenario = factor(scenario, levels = levs),
     x_off = make_log_offsets_span(target_vacc_doses, 
                                   scenario, levels = levs, 
-                                  span_factor = 1.5)
+                                  span_factor = span_fctr)
 )
 
 plt_2 <- 
-  ggplot(data=subset(ca_iqr_summary_off, vacc_week == 9), 
-         aes(x = x_off, y = q500, color = scenario, 
-             shape = as.factor(vacc_week))) +
-  ci_layers_from_summary(
-    lw95 = line_width_95,
-    lw50 = 0,
-    pr_size = 1.5,
-    mean_size = 0,
-    mean_stroke = 0
-  ) +
-  geom_point(data=ca_iqr_summary_off,
-            aes(x = x_off, y = q500,
-                color = scenario, shape = as.factor(vacc_week)), size=1.5)+
+  ggplot(ca_iqr_summary_off, aes(x=x_off, color=scenario)) +
+  geom_linerange(data=subset(ca_iqr_summary_off, vacc_week == 9), 
+                 aes(ymin=q250, ymax=q750), 
+                 position=position_identity(), 
+                 linewidth=line_width_95) + 
+  geom_point(data=ca_iqr_summary_off, 
+             aes(y=q500, shape=as.factor(vacc_week)), size=pt_size)+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2332,28 +2384,18 @@ plt_2 <-
     labels = unname(expr_labels[levs]),
     values = my_discrete_colors[1:4]
   )+
-  scale_fill_manual("",
-    breaks = levs,
-    labels = unname(expr_labels[levs]),
-    values = my_discrete_colors[1:4]
-  )+
-  scale_linetype_manual("",
-    values = c("1" = "dotted", "9" = NA),
-    labels = c("1 week", "9 weeks")
-  )+
   scale_shape_manual("",
-    values = c("1" = 2, "9" = 19),
+    values = c("1" = shp_wk1, "9" = shp_wk9),
     labels = c("1 week", "9 weeks")
   )+
   theme_light() +
-  theme_x_blank()+
-  guides(color = "none", fill = "none", linetype = "none", 
-         shape="none")
+  theme_x_blank() +
+  guides(color = "none", shape="none")
 
 # plt_2
 ```
 
-Case averted per 1,000 OCV doses (case_averte_per_dose)
+Case averted per 1,000 OCV doses (case_averted_per_dose)
 
 ```{r}
 capd_iqr_summary <- dw %>%
@@ -2367,23 +2409,17 @@ capd_iqr_summary <- capd_iqr_summary %>%
     scenario = factor(scenario, levels = levs),
     x_off = make_log_offsets_span(target_vacc_doses, 
                                   scenario, levels = levs, 
-                                  span_factor = 1.5)
+                                  span_factor = span_fctr)
 )
 
 plt_3 <- 
-  ggplot(data = subset(capd_iqr_summary, vacc_week == 9), 
-         aes(x = x_off, y = q500, color = scenario, 
-             shape = as.factor(vacc_week))) +
-  ci_layers_from_summary(
-    lw95 = line_width_95,
-    lw50 = 0,
-    pr_size = 0,
-    mean_size = 0,
-    mean_stroke = 0
-  ) +
+  ggplot(capd_iqr_summary, aes(x=x_off, color=scenario)) +
+  geom_linerange(data=subset(capd_iqr_summary, vacc_week == 9), 
+                 aes(ymin=q250, ymax=q750), 
+                 position=position_identity(), 
+                 linewidth=line_width_95) + 
   geom_point(data=capd_iqr_summary, 
-             aes(x = x_off, y = q500, color = scenario, 
-                 shape = as.factor(vacc_week)), size=1.5)+
+             aes(y=q500, shape=as.factor(vacc_week)), size=pt_size)+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2399,12 +2435,11 @@ plt_3 <-
     values = my_discrete_colors[1:4]
   )+
   scale_shape_manual("",
-    values = c("1" = 2, "9" = 19),
+    values = c("1" = shp_wk1, "9" = shp_wk9),
     labels = c("1 week", "9 weeks")
   )+
   theme_light() +
-  guides(color = "none", fill = "none", linetype = "none", 
-         shape="none")
+  guides(color = "none", shape="none")
 
 # plt_3
 ```
@@ -2420,20 +2455,20 @@ sz <- 5
 plt_1_tag <- plt_1 +
   annotate("text", x = 0, y = Inf, label = "A",
            hjust = hj, vjust = vj, size = sz) +
-  scale_x_log10("", breaks=c(1e5,1e6,1e7,1e8), limits=c(1e5,2e8))+
+  scale_x_log10("")+
   coord_cartesian(clip = "off")
 
-plt_2_tag <-  plt_2 +
+
+plt_2_tag <- plt_2 +
   annotate("text", x = 0, y = Inf, label = "B",
            hjust = hj, vjust = vj, size = sz) +
-  scale_x_log10("", breaks = c(1e5,1e6,1e7,1e8), limits=c(1e5,2e8))+
+  scale_x_log10("")+
   coord_cartesian(clip = "off")
 
-plt_3_tag <-  plt_3 +
+plt_3_tag <- plt_3 +
   annotate("text", x = 0, y = Inf, label = "C",
            hjust = hj, vjust = vj, size = sz) + 
-  scale_x_log10("Vaccine doses deployed", 
-                breaks = c(1e5,1e6,1e7,1e8), limits=c(1e5,2e8))+
+  scale_x_log10("Vaccine doses deployed")+
   coord_cartesian(clip = "off")
 
 plts_ca_agg <- (plt_1_tag / plt_2_tag / plt_3_tag) +
@@ -2466,22 +2501,18 @@ dapd_iqr_summary <- dapd_iqr_summary %>%
     scenario = factor(scenario, levels = levs),
     x_off = make_log_offsets_span(target_vacc_doses, 
                                   scenario, levels = levs, 
-                                  span_factor = 1.5)
+                                  span_factor = span_fctr)
 )
 
 plt_4 <- 
-  ggplot(data = subset(dapd_iqr_summary, vacc_week == 9),
-         aes(x = x_off, y = q500, color = scenario)) +
-  ci_layers_from_summary(
-    lw95 = line_width_95,
-    lw50 = 0,
-    pr_size = 0,
-    mean_size = 0,
-    mean_stroke = 0
-  ) +
+  ggplot(dapd_iqr_summary, aes(x=x_off, color=scenario)) +
+  geom_linerange(data=subset(dapd_iqr_summary, vacc_week == 9), 
+                 aes(ymin=q250, ymax=q750), 
+                 position=position_identity(), 
+                 linewidth=line_width_95) + 
   geom_point(data=dapd_iqr_summary, 
-             aes(x = x_off, y = q500, color = scenario, 
-                 shape = as.factor(vacc_week)), size=1.5)+
+             aes(y=q500, shape=as.factor(vacc_week)),
+             size=pt_size)+
   geom_text(
     data = dose_marks,
     inherit.aes = FALSE,
@@ -2503,7 +2534,7 @@ plt_4 <-
     values = my_discrete_colors[1:4]
   )+
   scale_shape_manual("",
-    values = c("1" = 2, "9" = 19),
+    values = c("1" = shp_wk1, "9" = shp_wk9),
     labels = c("1 week", "9 weeks")
   )+
   theme_light() +
@@ -2530,22 +2561,17 @@ cpca_iqr_summary <- cpca_iqr_summary %>%
     scenario = factor(scenario, levels = levs),
     x_off = make_log_offsets_span(target_vacc_doses, 
                                   scenario, levels = levs, 
-                                  span_factor = 1.5)
+                                  span_factor = span_fctr)
 )
 
 plt_5 <- 
-  ggplot(data = subset(cpca_iqr_summary, vacc_week == 9),
-         aes(x = x_off, y = q500, color = scenario)) +
-  ci_layers_from_summary(
-    lw95 = line_width_95,
-    lw50 = 0,
-    pr_size = 0,
-    mean_size = 0,
-    mean_stroke = 0
-  )+
+  ggplot(cpca_iqr_summary, aes(x=x_off, color=scenario)) +
+  geom_linerange(data=subset(cpca_iqr_summary, vacc_week == 9), 
+                 aes(ymin=q250, ymax=q750), 
+                 position=position_identity(), 
+                 linewidth=line_width_95) + 
   geom_point(data=cpca_iqr_summary, 
-             aes(x = x_off, y = q500, color = scenario,
-                 shape = as.factor(vacc_week)), size=1.5)+
+             aes(y=q500, shape=as.factor(vacc_week)), size=pt_size)+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2557,8 +2583,8 @@ plt_5 <-
     labels = unname(expr_labels[levs]),
     values = my_discrete_colors[1:4]
   )+
-  scale_shape_manual("",
-    values = c("1" = 2, "9" = 19),
+   scale_shape_manual("",
+    values = c("1" = 17, "9" = 1),
     labels = c("1 week", "9 weeks")
   )+
   theme_light() +
@@ -2581,22 +2607,17 @@ cpda_iqr_summary <- cpda_iqr_summary %>%
     scenario = factor(scenario, levels = levs),
     x_off = make_log_offsets_span(target_vacc_doses, 
                                   scenario, levels = levs, 
-                                  span_factor = 1.5)
+                                  span_factor = span_fctr)
 )
 
 plt_6 <-
-  ggplot(data = subset(cpda_iqr_summary, vacc_week == 9),
-         aes(x = x_off, y = q500, color = scenario)) +
-  ci_layers_from_summary(
-    lw95 = line_width_95,
-    lw50 = 0,
-    pr_size = 0,
-    mean_size = 0,
-    mean_stroke = 0
-  )+
+  ggplot(cpda_iqr_summary, aes(x=x_off, color=scenario)) +
+  geom_linerange(data=subset(cpda_iqr_summary, vacc_week == 9), 
+                 aes(ymin=q250, ymax=q750), 
+                 position=position_identity(), 
+                 linewidth=line_width_95) + 
   geom_point(data=cpda_iqr_summary, 
-             aes(x = x_off, y = q500, color = scenario,
-                 shape = as.factor(vacc_week)), size=1.5)+
+             aes(y=q500, shape=as.factor(vacc_week)), size=pt_size)+
   geom_vline(xintercept = ocv_dose_2020, 
              linetype = "dashed", color = "firebrick")+
   geom_vline(xintercept = ocv_dose_2024, 
@@ -2609,7 +2630,7 @@ plt_6 <-
     values = my_discrete_colors[1:4]
   )+
   scale_shape_manual("",
-    values = c("1" = 2, "9" = 19),
+    values = c("1" = shp_wk1, "9" = shp_wk9),
     labels = c("1 week", "9 weeks")
   )+
   theme_light() +
@@ -2629,20 +2650,19 @@ sz <- 5
 plt_4_tag <- plt_4 +
   annotate("text", x = 0, y = Inf, label = "D",
            hjust = hj, vjust = vj, size = sz) +
-  scale_x_log10("", breaks=c(1e5,1e6,1e7,1e8), limits=c(1e5,2e8))+
+  scale_x_log10("")+
   coord_cartesian(clip = "off")
 
 plt_5_tag <-  plt_5 +
   annotate("text", x = 0, y = Inf, label = "E",
            hjust = hj, vjust = vj, size = sz) +
-  scale_x_log10("", breaks = c(1e5,1e6,1e7,1e8), limits=c(1e5,2e8))+
+  scale_x_log10("")+
   coord_cartesian(clip = "off")
 
 plt_6_tag <-  plt_6 +
   annotate("text", x = 0, y = Inf, label = "F",
            hjust = hj, vjust = vj, size = sz) + 
-  scale_x_log10("Vaccine doses deployed", 
-                breaks = c(1e5,1e6,1e7,1e8), limits=c(1e5,2e8))+
+  scale_x_log10("Vaccine doses deployed")+
   coord_cartesian(clip = "off")
 
 plts_cpca_agg <- (plt_4_tag / plt_5_tag / plt_6_tag) + 
@@ -2686,6 +2706,91 @@ if (save_plot) {
 }
 ```
 
+
+# Discussion
+
+```{r}
+impact <- cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,5,9,13)) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
+                      case_averted_per_1000_OCV,
+                      cost_per_case_averted)
+
+
+impact %>% filter(variable == "pct_reduc_case")
+impact %>% filter(variable == "case_averted_per_1000_OCV")
+# 9 weeks or longer as being representative 
+fit_decay[["9"]] %>%
+  filter(vacc_cov == VC) %>% 
+  mutate(rate_reduc = 100*(1 - exp(- k_hat))) %>% 
+  summarize_group(vars=c("rate_reduc"), group_name="> 9 weeks") %>% 
+  format_median_iqr(digits=1)
+
+fit_decay[["9"]] %>% 
+  filter(vacc_cov == VC) %>% 
+  summarize_group(vars=c("half_life"), group_name="> 9 weeks") %>% 
+  format_median_iqr(digits=1)
+
+# dw from Figure 4
+ca <- dw %>%
+  filter(value_column == "s_ch_averted_tot") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x) 
+
+ca %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
+  format_median_iqr(digits = 0)
+
+ca %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
+  format_median_iqr(digits = 0)
+
+capd <- dw %>%
+  filter(value_column == "case_averted_per_1000_OCV") %>%
+  group_by(vacc_week, scenario, target_vacc_doses) %>%
+  mutate(x = q500) %>% # new variable to reduce confusion for the following calculations
+  summarize_quantiles(x) 
+
+capd %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 9) %>% 
+  format_median_iqr(digits = 3)
+
+capd %>% 
+  filter(target_vacc_doses == 200e6, vacc_week == 1) %>% 
+  format_median_iqr(digits = 3)
+
+cea_ori %>% 
+  filter(vacc_cov == 0.75, vacc_week == 9) %>%
+  summarize_quantiles(pct_reduc_case, case_averted_per_1000_OCV)
+
+cea_ori %>% 
+  filter(vacc_cov == 0.75, vacc_week == 5) %>%
+  summarize_quantiles(pct_reduc_case, case_averted_per_1000_OCV)
+
+ar_top_q <- quantile(outbk_data_summary$ar_per_10e3, probs = c(0.75))
+ids <- outbk_data_summary %>% 
+  filter(ar_per_10e3>=ar_top_q) %>% pull(id_outbreak) 
+cea_ori %>% 
+  filter(id_outbreak %in% ids, vacc_cov == 0.75, vacc_week == 13) %>%
+  summarize_quantiles(pct_reduc_case, case_averted_per_1000_OCV)
+
+dur_top_q <- quantile(outbk_data_summary$duration_weeks, probs = c(0.75))
+ids <- outbk_data_summary %>% 
+  filter(duration_weeks>=dur_top_q) %>% pull(id_outbreak) 
+  
+cea_ori %>% 
+  filter(id_outbreak %in% ids, vacc_cov == 0.75, vacc_week == 13) %>%
+  summarize_quantiles(pct_reduc_case, case_averted_per_1000_OCV)
+
+size_top_q <- quantile(outbk_data_summary$total_s_ch, probs = c(0.75))
+ids <- outbk_data_summary %>% 
+  filter(total_s_ch>=size_top_q) %>% pull(id_outbreak) 
+cea_ori %>% 
+  filter(id_outbreak %in% ids, vacc_cov == 0.75, vacc_week == 13) %>%
+  summarize_quantiles(pct_reduc_case, case_averted_per_1000_OCV)
+```
 
 ## Figure 3.1
 
