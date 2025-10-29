@@ -619,7 +619,6 @@ add_cea_results <- function(d, parms=NULL) {
       cost_effective =
         ifelse(cost_per_daly_averted > cost_eff_threshold, FALSE, TRUE)
     )
-  return(d)
 }
 
 

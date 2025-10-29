@@ -639,61 +639,35 @@ Calculate Impact Metrics
 ## Onset-triggered
 
 ```{r cea-time-trigger}
-# > sapply(d, function(x) sum(x == 0, na.rm=T))
-#                     runid               id_outbreak                 vacc_week 
-#                         0                         0                         0 
-#                  vacc_cov                   country                      year 
-#                         0                         0                         0 
-#                       pop              ori_occurred week_delay_to_vacc_effect 
-#                         0                    771670                         0 
-# no_ori_delay_outbreak_end                  s_ch_tot          s_ch_averted_tot 
-#                         0                         0                   1297551 
-#                  c_ch_tot                 death_tot         death_averted_tot 
-#                   3216000                    981000                   2417604 
-#           pct_reduc_death            pct_reduc_case 
-#                   1436604                   1297551 
-# > sapply(d, function(x) sum(is.na(x)))
-#                     runid               id_outbreak                 vacc_week 
-#                         0                         0                         0 
-#                  vacc_cov                   country                      year 
-#                         0                         0                         0 
-#                       pop              ori_occurred week_delay_to_vacc_effect 
-#                         0                         0                         0 
-# no_ori_delay_outbreak_end                  s_ch_tot          s_ch_averted_tot 
-#                         0                         0                         0 
-#                  c_ch_tot                 death_tot         death_averted_tot 
-#                         0                         0                         0 
-#           pct_reduc_death            pct_reduc_case 
-#                    981000                         0 
-# delays <- 0:7
-# for (delay in delays) {
+delays <- 0:7
+for (delay in delays) {
   # Load summarized time-triggered vaccination results
-  d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20251020.rds")
-  # d <- read_rds(paste0("outputs/svim_delay_", delay, 
-  #               "_onset_trigger_sum_over_week_runid_1_200_20251019.rds"))
+  message(paste0("Processing results for delay = ", delay))
+  # d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20251020.rds")
+  d <- read_rds(paste0("outputs/svim_delay_", delay,
+                "_onset_trigger_sum_over_week_runid_1_200_20251022.rds"))
   # Process each vaccine coverage level
-  for (vc in VC3) {
+  for (vc in VC) {
     message(paste0("Processing results for vaccine coverage = ", vc))
     
     # Full cost-effectiveness analysis
     svim_tt_cea <- add_cea_variables(d[vacc_cov == vc], 
                                      mean_age_inf = mean_age_inf)
     svim_tt_cea <- add_cea_results(svim_tt_cea, parms = as.data.frame(parm))
+  
+    # saveRDS(svim_tt_cea,
+    #        paste0("outputs/cea_", vc, "_onset_trigger_20251020.rds"))
     
-    saveRDS(svim_tt_cea,
-           paste0("outputs/cea_", vc, "_onset_trigger_20251020.rds"))
-    
-    # Save detailed results
     # saveRDS(svim_tt_cea,
     #        paste0("outputs/paper/cea_weekly_", vc, "_onset_trigger_",
     #               tstamp(), ".rds"))
-    # saveRDS(svim_tt_cea,
-    #        paste0("outputs/cea_delay_", delay, "_", vc, "_onset_trigger_", 
-    #               tstamp(), ".rds"))
+    saveRDS(svim_tt_cea,
+           paste0("outputs/paper/cea_delay_", delay, "_", vc, "_onset_trigger_",
+                  tstamp(), ".rds"))
     rm(svim_tt_cea)
   }
-  rm(d)  # Free memory
-# }
+  rm(d)
+}
 ```
 
 ## Case-triggered 

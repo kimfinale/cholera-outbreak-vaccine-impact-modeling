@@ -4378,6 +4378,32 @@ if (save_table) {
 }
 ```
 
+## Impact across delays in no ORI after the theorectical end of the outbreak
+
+```{r}
+data_files <- c(
+  "outputs/paper/cea_delay_7_0.75_onset_trigger_20251029.rds",
+  "outputs/paper/cea_delay_6_0.75_onset_trigger_20251029.rds",
+  "outputs/paper/cea_delay_5_0.75_onset_trigger_20251029.rds",
+  "outputs/paper/cea_delay_4_0.75_onset_trigger_20251029.rds",
+  "outputs/paper/cea_delay_3_0.75_onset_trigger_20251029.rds",
+  "outputs/paper/cea_delay_2_0.75_onset_trigger_20251029.rds",
+  "outputs/paper/cea_delay_1_0.75_onset_trigger_20251029.rds",
+  "outputs/paper/cea_delay_0_0.75_onset_trigger_20251029.rds"
+)
+cea_delay <- map_dfr(data_files, read_rds)
+wks <- c(1, 5, 9, 13)
+
+tab <- data.frame()
+
+for (wk in wks) {
+  d <- cea_ori[(vacc_cov == VC & vacc_week == wk)]
+  tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
+  tab_temp$n_outbreaks <- nrow(d[d$runid == 1])
+  tab <- rbind(tab, tab_temp)
+}
+
+```
 
 ## Figure 3.5
 
