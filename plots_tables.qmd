@@ -204,12 +204,11 @@ outbk_data_summary <- fread("outputs/paper/outbreak_data_summary_20251022.csv")
 ```{r load-results}
 # Outbreak onset-triggered vaccination results
 cea_files <- c(
-  "outputs/paper/cea_0.6_onset_trigger_20251022.rds",
-  "outputs/paper/cea_0.75_onset_trigger_20251022.rds",
-  "outputs/paper/cea_0.9_onset_trigger_20251022.rds"
+  "outputs/paper/cea_0.6_onset_trigger_20251028.rds",
+  "outputs/paper/cea_0.75_onset_trigger_20251028.rds",
+  "outputs/paper/cea_0.9_onset_trigger_20251028.rds"
 )
 cea <- map_dfr(cea_files, read_rds)
-
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
 cea_weekly_75 <- read_rds("outputs/paper/cea_weekly_0.75_onset_trigger_20251022.rds")
@@ -1266,10 +1265,10 @@ onset_impact <- cea_ori %>%
   summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
                       case_averted_per_1000_OCV, cost_per_case_averted)
 
-# cases averted for vaccine coverage of 75%
+# cases averted for vaccine coverage of 75% with ORI initiated at week 9
 format_median_iqr(onset_impact, row=3)
 format_median_iqr(onset_impact, row=4)
-# percentage cases averted for vaccine coverage of 75%
+# percentage cases averted for vaccine coverage of 75% with ORI initiated at week 9
 format_median_iqr(onset_impact, row=9)
 format_median_iqr(onset_impact, row=10)
 # cases averted per 1,000 OCVs
@@ -1300,7 +1299,7 @@ n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
 100 * n_outbreaks_missed1 / nrow(outbk_data_summary)
 100 * n_outbreaks_missed2 / nrow(outbk_data_summary)
 
-# 60%, 75%, 90% at week 1
+# 60%, 75%, 90% wtih ORI initiated at week 1
 onset_impact %>% 
   filter(vacc_week == 1) %>% 
   format_median_iqr(row=1:3, digits=0)
@@ -1314,33 +1313,76 @@ probs <- seq(0, 1, by = 0.1)
 unq_data <- filter(cea, runid == 1 & vacc_cov == 0.75 & vacc_week == 1)
 size_grp_cutoff <- quantile(unq_data$s_ch_tot, probs = probs)
 
-d <- cea
+impact_top_10_size <- 
+  cea_ori %>% 
+  filter(s_ch_tot >= size_grp_cutoff[10], vacc_week %in% c(1,9)) %>% 
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
+                      case_averted_per_1000_OCV, cost_per_case_averted)
+
+onset_impact %>% 
+  filter(variable == "s_ch_averted_tot", vacc_cov == 0.75, vacc_week == 9) 
+impact_top_10_size %>% 
+  filter(variable == "s_ch_averted_tot", vacc_cov == 0.75, vacc_week == 9) 
+impact_top_10_size %>% 
+  filter(variable == "s_ch_averted_tot", vacc_cov == 0.75, vacc_week == 1) 
+
+d <- cea_ori %>% filter(vacc_cov == 0.75)
 d <- left_join(d, outbk_data_summary[,
                       c("id_outbreak", "ar_per_10e3","duration_weeks")],
                  by = "id_outbreak")
 
-# rate of decrease in percentage case reduction
-# by size, attack rate, and duration
 ar_grp_cutoff <- quantile(outbk_data_summary$ar_per_10e3, probs = probs)
 dur_grp_cutoff <- quantile(outbk_data_summary$duration_weeks, probs = probs)
 
-d %<>%
-  group_by(runid, id_outbreak, vacc_cov) %>%
-  mutate(pct_reduc_case_frac = 1-frac_change(pct_reduc_case, lag=1),
-         pct_reduc_case_diff = c(1, -diff(pct_reduc_case, lag=1)))
+impact_top_10_ar <- 
+  d %>% 
+  filter(ar_per_10e3 >= ar_grp_cutoff[10], vacc_week %in% c(1,9)) %>% 
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(case_averted_per_1000_OCV, 
+                      daly_averted_per_1000_OCV)
 
-d %>% filter(vacc_cov == 0.75) -> d1
-d1$grp <- "All"
-d %>% filter(ar_per_10e3 > ar_grp_cutoff[10]) -> d2 # top 10%
-d2$grp <- "AR"
-d %>% filter(duration_weeks > dur_grp_cutoff[10]) -> d3 # top 10%
-d3$grp <- "Dur"
-d %>% filter(s_ch_tot > size_grp_cutoff[10]) -> d4 # top 10%
-d4$grp <- "Size"
+impact_top_10_ar %>% 
+  filter(vacc_cov == 0.75, vacc_week == 9) 
+impact_top_10_ar %>% 
+  filter(vacc_cov == 0.75, vacc_week == 1)
 
-d <- rbind(d1, d2)
-d_ <- rbind(d3, d4)
-d <- rbind(d, d_)
+
+d %>% 
+  filter(duration_weeks >= dur_grp_cutoff[10]) %>%  
+  filter(vacc_cov ==0.75, vacc_week %in% c(1,9)) %>% 
+  group_by(vacc_week) %>%
+  summarize_quantiles(pct_reduc_case)
+
+d %>% 
+  filter(s_ch_tot >= size_grp_cutoff[10]) %>%  
+  filter(vacc_cov ==0.75, vacc_week %in% c(1,9)) %>% 
+  group_by(vacc_week) %>%
+  summarize_quantiles(pct_reduc_case)
+
+d %>% 
+  filter(ar_per_10e3 >= ar_grp_cutoff[10]) %>%  
+  filter(vacc_cov ==0.75, vacc_week %in% c(1,9)) %>% 
+  group_by(vacc_week) %>%
+  summarize_quantiles(pct_reduc_case)
+
+# d %<>%
+#   group_by(runid, id_outbreak, vacc_cov) %>%
+#   mutate(pct_reduc_case_frac = 1-frac_change(pct_reduc_case, lag=1),
+#          pct_reduc_case_diff = c(1, -diff(pct_reduc_case, lag=1)))
+# 
+# d %>% filter(vacc_cov == 0.75) -> d1
+# d1$grp <- "All"
+# d %>% filter(ar_per_10e3 > ar_grp_cutoff[10]) -> d2 # top 10%
+# d2$grp <- "AR"
+# d %>% filter(duration_weeks > dur_grp_cutoff[10]) -> d3 # top 10%
+# d3$grp <- "Dur"
+# d %>% filter(s_ch_tot > size_grp_cutoff[10]) -> d4 # top 10%
+# d4$grp <- "Size"
+# 
+# d <- rbind(d1, d2)
+# d_ <- rbind(d3, d4)
+# d <- rbind(d, d_)
 
 # d %>%
 #   filter(vacc_week > 1, vacc_week <= 15) %>% 
@@ -2049,14 +2091,15 @@ if (save_plot) {
 ```
 
 ## Figure S3
-### A
+
+Median impact data with 75% coverage
 
 ```{r}
 impact_data <-
   read_rds("outputs/paper/summary_impact_0.75_delay_prioritization_20251020.rds")
 ```
 
-Number of cases averted
+### A Number of cases averted
 
 ```{r}
 plot_data <- impact_data %>% filter(metric == "med_s_ch_averted_tot")
@@ -2174,9 +2217,7 @@ if (save_plot) {
 ```
 
 
-### B
-
-% cases averted
+### B. Percent cases averted
 
 ```{r}
 plot_data <- 
@@ -2293,10 +2334,7 @@ if (save_plot) {
 }
 ```
 
-
-### C
-
-Cases averted per 1,000 OCVs
+### C. Cases averted per 1,000 OCVs
 
 ```{r}
 plot_data <- 
@@ -2413,9 +2451,7 @@ if (save_plot) {
 }
 ```
 
-### D
-
-DALYs averted per 1,000 OCVs
+### D. DALYs averted per 1,000 OCVs
 
 ```{r}
 plot_data <- 
@@ -2469,13 +2505,14 @@ for (i in 1:4) {
     scale_y_continuous(
       expand = c(0, 0), 
       breaks = seq(0, 0.8, 0.2),
-      labels = c(expression(">="*P[0*"%"]),
-                 expression(">="*P[20*"%"]),
-                 expression(">="*P[40*"%"]),
-                 expression(">="*P[60*"%"]),
-                 expression(">="*P[80*"%"]))) +
+      labels = c(expression(Q[0*"%"]),
+                 expression(Q[20*"%"]),
+                 expression(Q[40*"%"]),
+                 expression(Q[60*"%"]),
+                 expression(Q[80*"%"]))) +
       
-    scale_x_continuous(expand = c(0, 0), breaks = seq(1, 15, 2)) +
+    scale_x_continuous(expand = c(0, 0), 
+                       breaks = seq(1, 15, 2)) +
     labs(
       x = "Delay in ORI implementation (weeks)",
       y = y_labs[i]
@@ -2486,7 +2523,6 @@ for (i in 1:4) {
       legend.position = "top",
     ) 
 }
-
 ```
 
 Combine, tag, and save
@@ -3981,7 +4017,6 @@ if (save_plot) {
 
 ```{r table3}
 # Create summary for time-triggered vaccination at different times
-
 cea_ori[(vacc_cov == VC & vacc_week %in% c(1, 13))] %>% 
   group_by(vacc_week) %>% 
   summarize_quantiles(case_averted_per_1000_OCV) -> capd
@@ -4048,7 +4083,6 @@ for (wk in wks) {
   tab <- rbind(tab, tab_temp)
 }
 
-
 tab$week <- rep(wks, 4)
 tab$group <- rep(c("All","Top 25% attack rate",
                     "Top 25% duration","Top 25% size"), each = 4)
@@ -4058,7 +4092,8 @@ tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round
 
 if (save_table) {
   fwrite(tab, 
-         paste0("outputs/table3_onset_triggered_impact_IQR_", tstamp(), ".csv"), 
+         paste0("outputs/paper/table3_onset_triggered_impact_IQR_", 
+                tstamp(), ".csv"), 
             row.names = FALSE)
 }
 ```
@@ -4072,7 +4107,6 @@ Broader vaccine coverage and ORI implementation delays
 wks <- c(1, 5, 9, 13)
 tab <- data.frame()
 
-cea_ori <- cea[ori_occurred == TRUE]
 for (vc in VC3) {
   for (wk in wks) {
     d <- cea_ori[(vacc_cov == vc & vacc_week == wk)]
@@ -4087,7 +4121,7 @@ tab$week <- rep(wks, length(VC3))
 tab$vc <- rep(VC3, each=length(wks))
 
 if (save_table) {
-  fwrite(tab, paste0("outputs/tableS1_onset_triggered_impact_IQR_", tstamp(), ".csv"), 
+  fwrite(tab, paste0("outputs/paper/tableS1_onset_triggered_impact_IQR_", tstamp(), ".csv"), 
             row.names = FALSE)
 }
 ```
