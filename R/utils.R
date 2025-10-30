@@ -597,8 +597,9 @@ add_cea_results <- function(d, parms=NULL) {
       coi_averted = s_ch_averted_tot * coi_per_patient,
       cod_averted = death_averted_tot * gdp * life_exp,
       productivity_lost_averted =
-        s_ch_averted_tot * gdp * ((patient_workday_lost/365)*(pct_workforce/100) +
-                                    (caregiver_workday_lost/365)),
+        s_ch_averted_tot * gdp *
+        ((patient_workday_lost/365)+(caregiver_workday_lost/365)) *
+        (pct_workforce/100),
 
       # Vaccine costs
       vacc_dose = ori_occurred * pop * vacc_cov * dose_regimen,
@@ -610,7 +611,7 @@ add_cea_results <- function(d, parms=NULL) {
       cost_per_death_averted = safediv(net_cost, death_averted_tot),
       cost_per_daly_averted = safediv(net_cost, daly_averted),
       # Impact per 1000 vaccine doses
-      case_averted_per_1000_OCV =safediv(1000 * s_ch_averted_tot, vacc_dose),
+      case_averted_per_1000_OCV = safediv(1000 * s_ch_averted_tot, vacc_dose),
       death_averted_per_1000_OCV = safediv(1000 * death_averted_tot, vacc_dose),
       daly_averted_per_1000_OCV = safediv(1000 * daly_averted, vacc_dose),
       # Classification of cost-effectiveness
@@ -1019,9 +1020,9 @@ impact_summary <- function(d, nrow=1,
   # Create empty output table
   metrics <- c("PCA", "CA", "DALYA",
                "CAPD", "DALYAPD", "CPCA", "ICER", "DA", "DAPD","CPDA")
-  tab <- matrix(NA, nrow=nrow, ncol=length(metrics)) %>%
-    as.data.frame() %>%
-    `colnames<-`(metrics)
+  tab <-
+    matrix(NA, nrow=nrow, ncol=length(metrics)) %>%
+    as.data.frame() %>% `colnames<-`(metrics)
 
   # Define columns to summarize and their formatting parameters
   col_specs <- list(
@@ -1894,10 +1895,10 @@ vacc_impact_outbreak_weekly <- function(data = NULL,
 
   # Indicator if the ORI has ocurred
   # ORI might occurr if ORI has occurred
-  if (week_delay < nrow(data) + no_ori_delay_outbreak_end) {
-    df$ori_occurred <- TRUE
-  } else{
+  if (week_delay > (nrow(data) + no_ori_delay_outbreak_end)) {
     df$ori_occurred <- FALSE
+  } else{
+    df$ori_occurred <- TRUE
   }
 
   # Remove unnecessary columns

@@ -575,7 +575,7 @@ message(paste("Total execution time:", round(toc - tic, digits=2), "minutes"))
 
 ### Onset-triggered 
 
-This section combines results from batch processing and organizes them for analysis.
+Combine results from batch processing and organizes them for analysis.
 
 ```{r combine-results}
 # ---- 1. Time-triggered vaccination results ----
@@ -673,32 +673,22 @@ for (delay in delays) {
 ## Case-triggered 
 
 ```{r cea-case-trigger}
-# Load summarized case-triggered vaccination results
 d_ct <- 
-  read_rds("outputs/svim_case_trigger_sum_over_week_runid_1_200_20250810.rds")
+  read_rds("outputs/svim_case_trigger_sum_over_week_runid_1_200_20251029.rds")
 
-# Process each vaccine coverage level
-# for (vc in VC3) {
 for (vc in unique(d_ct$vacc_cov)) {  
   message(paste("Processing results for vaccine coverage =", vc))
   
-  # Full cost-effectiveness analysis
   svim_ct_cea <- add_cea_variables(d_ct[vacc_cov == vc], 
                                    mean_age_inf = mean_age_inf)
-  svim_ct_cea <- add_cea_results(svim_ct_cea)
-  # Save detailed results
+  svim_ct_cea <- add_cea_results(svim_ct_cea, parms = as.data.frame(parm))
+
   saveRDS(svim_ct_cea,
-         paste0("outputs/cea_", vc, "_case_trigger_", 
+         paste0("outputs/paper/cea_", vc, "_case_trigger_", 
                 tstamp(), ".rds"))
   rm(svim_ct_cea) 
 }
 
-# cea_ct <- read_rds("outputs/cea_0.75_case_trigger_20250809.rds")
-# cea_ct2 <- read_rds("outputs/cea_0.75_case_trigger_20250810.rds")
-# cea_ct <- rbindlist(list(cea_ct, cea_ct2))
-# saveRDS(cea_ct,
-#          paste0("outputs/cea_", vc, "_case_trigger_", 
-#                 tstamp(), ".rds"))
 ```
 
 
