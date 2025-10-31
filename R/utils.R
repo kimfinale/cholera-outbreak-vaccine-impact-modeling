@@ -449,12 +449,14 @@ compute_yll <- function(deaths, life_exps=NULL, parms=NULL) {
 #' @param d Data frame with weekly impact data
 #' @param case_trigger Whether vaccination is triggered by case count
 #' @return Data frame with outbreak-level summary
-sum_over_week <- function(d, case_trigger=FALSE) {
+sum_over_week <- function(d, group_cols = NULL) {
   # Define grouping variables based on case_trigger
-  by_cols <- if (case_trigger) {
-    c("runid", "id_outbreak", "vacc_week", "case_trigger", "vacc_cov")
-  } else {
-    c("runid", "id_outbreak", "vacc_week", "vacc_cov")
+  if (is.null(group_cols)) {
+    group_cols <- c("runid", "id_outbreak", "vacc_week", "vacc_cov",
+                    "no_ori_delay_outbreak_end")
+    message("group_cols was NULL; defaulting to
+            c('runid','id_outbreak','vacc_week','vacc_cov',
+            'no_ori_delay_outbreak_end').")
   }
 
   # Aggregate data
@@ -464,7 +466,6 @@ sum_over_week <- function(d, case_trigger=FALSE) {
     pop = first(pop),
     ori_occurred = first(ori_occurred),
     week_delay_to_vacc_effect = first(week_delay_to_vacc_effect),
-    no_ori_delay_outbreak_end = first(no_ori_delay_outbreak_end),
     # Sum across weeks for weekly variables
     s_ch_tot = sum(s_ch),
     s_ch_averted_tot = sum(s_ch_averted),
@@ -472,9 +473,10 @@ sum_over_week <- function(d, case_trigger=FALSE) {
     death_tot = sum(deaths, na.rm=TRUE),
     death_averted_tot = sum(deaths_averted, na.rm=TRUE),
     # Calculate percentage reductions
-    pct_reduc_death = 100 * sum(deaths_averted, na.rm=TRUE)/sum(deaths, na.rm=TRUE),
-    pct_reduc_case = 100 * sum(s_ch_averted)/sum(s_ch)),
-    by = by_cols]
+    pct_reduc_death = 100 * sum(deaths_averted, na.rm=TRUE) / sum(deaths, na.rm=TRUE),
+    pct_reduc_case = 100 * sum(s_ch_averted) / sum(s_ch)
+  ),
+  by = group_cols]
 }
 
 #' Calculate Mean Across Model Runs
@@ -574,6 +576,34 @@ add_cea_variables <- function(d, mean_age_inf=NULL) {
   return(d)
 }
 
+
+#' Safe Division Function
+#'
+#' Performs element-wise division of two numeric vectors, safely handling
+#' division by zero, missing, or non-finite denominators.
+#'
+#' @param num Numeric vector of numerators.
+#' @param den Numeric vector of denominators.
+#' @param zero Numeric value returned when the denominator is zero, missing,
+#'   or non-finite. Default is `NA_real_`.
+#'
+#' @return A numeric vector of the same length as `num` and `den`, containing
+#'   the quotient `num / den` where valid, or `zero` otherwise.
+#'
+#' @examples
+#' safediv(10, 2)
+#' safediv(c(5, 10), c(0, 2), zero = 0)
+#' safediv(c(1, 2, 3), c(1, NA, 0))
+#'
+#' @import data.table
+#' @export
+safediv <- function(num, den, zero = NA_real_) {
+  # Perform safe element-wise division using data.table::fifelse
+  # Return `zero` where denominator is non-finite or ≤ 0
+  data.table::fifelse(is.finite(den) & den > 0, num / den, zero)
+}
+
+
 #' Add Cost-Effectiveness Analysis Results
 #'
 #' Calculates health and economic outcomes for cost-effectiveness analysis
@@ -581,9 +611,6 @@ add_cea_variables <- function(d, mean_age_inf=NULL) {
 #' @param d Data frame with vaccination impact results and CEA variables
 #' @return Data frame with CEA results
 add_cea_results <- function(d, parms=NULL) {
-  safediv <- function(num, den) {
-    data.table::fifelse(is.finite(den) & den > 0, num / den, NA_real_)
-  }
   d %>%
     mutate(
       # Health outcomes
@@ -630,15 +657,15 @@ add_cea_results <- function(d, parms=NULL) {
 #' @param d Data frame with outbreak-level results
 #' @param case_trigger Whether vaccination is triggered by case count
 #' @return Data frame with aggregated metrics by run
-sum_over_outbreaks_by_runid <- function(d, ori_occurred=TRUE, case_trigger=FALSE) {
-  # Define grouping variables based on case_trigger
-  by_cols <- if (case_trigger) {
-    c("runid", "case_trigger", "vacc_cov")
-  } else {
-    c("runid", "vacc_week", "vacc_cov")
+sum_over_outbreaks_by_runid <- function(d, group_cols = NULL) {
+  if (is.null(group_cols)) {
+    group_cols <- c("runid", "id_outbreak", "vacc_week", "vacc_cov",
+                    "no_ori_delay_outbreak_end")
+    message("group_cols was NULL; defaulting to
+            c('runid','id_outbreak','vacc_week','vacc_cov',
+            'no_ori_delay_outbreak_end').")
   }
 
-  if (ori_occurred) d <- d[ori_occurred == TRUE, ]
   # Aggregate across outbreaks
   d[, {
     # --- Step 1: Pre-calculate all sums ONCE per group ---
@@ -671,8 +698,8 @@ sum_over_outbreaks_by_runid <- function(d, ori_occurred=TRUE, case_trigger=FALSE
       c_ch_tot = sum(c_ch_tot),
       death_tot = total_death,
       death_averted_tot = total_death_averted,
-      pct_reduc_case = 100 * total_s_ch_averted / total_s_ch,
-      pct_reduc_death = 100 * total_death_averted / total_death,
+      pct_reduc_case = safediv(100 * total_s_ch_averted,  total_s_ch),
+      pct_reduc_death = safediv(100 * total_death_averted, total_death),
       s_ch_tot = total_s_ch,
       s_ch_averted_tot = total_s_ch_averted,
       daly_averted_tot = total_daly_averted,
@@ -680,57 +707,21 @@ sum_over_outbreaks_by_runid <- function(d, ori_occurred=TRUE, case_trigger=FALSE
       # Calculate impact per 1000 doses
       # Use a check to avoid division by zero if total_doses is 0
       case_averted_per_1000_OCV =
-        if (total_doses > 0) 1000 * total_s_ch_averted / total_doses else 0,
+        safediv(1000 * total_s_ch_averted, total_doses),
       death_averted_per_1000_OCV =
-        if (total_doses > 0) 1000 * total_death_averted / total_doses else 0,
+        safediv(1000 * total_death_averted, total_doses),
       daly_averted_per_1000_OCV =
-        if (total_doses > 0) 1000 * total_daly_averted / total_doses else 0,
+        safediv(1000 * total_daly_averted, total_doses),
 
       # Calculate cost-effectiveness ratios
-      cost_per_daly_averted = if (daly_averted_costed > 0)
-        total_net_cost / daly_averted_costed else NA_real_,
-      cost_per_case_averted = if (case_averted_costed > 0)
-        total_net_cost / case_averted_costed else NA_real_,
-      cost_per_death_averted = if (death_averted_costed > 0)
-        total_net_cost / death_averted_costed else NA_real_
+      cost_per_daly_averted = safediv(total_net_cost, daly_averted_costed),
+      cost_per_case_averted = safediv(total_net_cost, case_averted_costed),
+      cost_per_death_averted = safediv(total_net_cost, death_averted_costed)
     )
   },
-  by = by_cols]
-
+  by = group_cols]
 
 }
-
-#' Add CEA Results for All Outbreaks
-#'
-#' Calculates cost-effectiveness metrics across all outbreaks
-#'
-#' @param svim Data frame with vaccination impact results
-#' @return Data frame with added CEA variables
-add_cea_results_all_outbreaks <- function(svim) {
-  # Add CEA variables (ratio measures will be computed later when summing across outbreaks)
-  svim %>%
-    mutate(
-      # Health outcomes
-      yld = compute_yld(s_ch_tot, parms=parms),
-      yld_averted = compute_yld(s_ch_averted_tot, parms=parms),
-      yll = compute_yll(death_tot, life_exp, parms),
-      yll_averted = compute_yll(death_averted_tot, life_exp, parms),
-      daly_averted = yld_averted + yll_averted,
-
-      # Economic outcomes
-      coi_averted = s_ch_averted_tot * coi_per_patient,
-      cod_averted = death_averted_tot * gdp * life_exp,
-      productivity_lost_averted =
-        s_ch_averted_tot * gdp * ((patient_workday_lost/365)*(pct_workforce/100) +
-                                    (caregiver_workday_lost/365)),
-
-      # Vaccine costs
-      vacc_dose = pop * vacc_cov * dose_regimen,
-      vacc_cost = (vacc_cost_per_dose + vacc_delivery_cost) * vacc_dose,
-      net_cost = vacc_cost - coi_averted - cod_averted - productivity_lost_averted
-    )
-}
-
 
 #' Randomly sample outbreaks under an OCV dose budget and/or a count target
 #'
@@ -1316,7 +1307,7 @@ ci_layers_from_summary <- function(...,
                             position=pos_range, linewidth=lw50,
                             alpha=alpha50),
     ggplot2::geom_point(ggplot2::aes(y=q500),
-                            position=pos_point, size=pr_size, alpha=alpha_med),
+                        position=pos_point, size=pr_size, alpha=alpha_med),
     ggplot2::geom_point(ggplot2::aes(y=mean),
                         position=pos_point, shape=4,
                         size=mean_size, stroke=mean_stroke, alpha=alpha_mean)
@@ -1957,17 +1948,17 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
         for (i in 1:length(outbreak_ids)) {
           # Calculate impact for this outbreak
           d <- vacc_impact_outbreak_weekly(
-              data = outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],],
-              age_dist = age_dist,
-              # vacc_week = vacc_week[k],
-              # case_trigger = case_trigger,
-              vacc_cov = vacc_cov[j],
-              dve = dve,
-              ive_data = ive_data,
-              ive_rownum = p$vacc_effect_indirect_id,
-              week_delay = week_delay,
-              no_ori_delay_outbreak_end = no_ori_delay_outbreak_end
-            )
+            data = outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],],
+            age_dist = age_dist,
+            # vacc_week = vacc_week[k],
+            # case_trigger = case_trigger,
+            vacc_cov = vacc_cov[j],
+            dve = dve,
+            ive_data = ive_data,
+            ive_rownum = p$vacc_effect_indirect_id,
+            week_delay = week_delay,
+            no_ori_delay_outbreak_end = no_ori_delay_outbreak_end
+          )
 
           d$vacc_week = vacc_week[k]
           d$case_trigger = case_trigger
@@ -2011,10 +2002,10 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
             ive_rownum = p$vacc_effect_indirect_id,
             week_delay = week_delay)
 
-           d$vacc_week = vacc_week
-           d$case_trigger = case_trigger[k]
-           d$strategy <- "fixed_case"
-           d$trigger_week <- 1
+          d$vacc_week = vacc_week
+          d$case_trigger = case_trigger[k]
+          d$strategy <- "fixed_case"
+          d$trigger_week <- 1
 
           lst[[i]] <- d
         }
@@ -2045,7 +2036,7 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
             time_to_vacc <- (actual_vacc_week - 1)*7 + 3.5 # vaccinations start at mid-day
             week_delay <- round((time_to_vacc + p$dur_campaign/2 + p$delay_vacc_effect)/7)
 
-              # Calculate impact for this outbreak
+            # Calculate impact for this outbreak
             d <- vacc_impact_outbreak_weekly(
               data = data,
               age_dist = age_dist,
@@ -2272,7 +2263,7 @@ parse_location <- function(location) {
 
 # Check if loc2 is contained within loc1
 is_location_contained <- function(location1, location2) {
-    # Parse both locations
+  # Parse both locations
   loc1 <- parse_location(location1)
   loc2 <- parse_location(location2)
 
@@ -2619,8 +2610,8 @@ remove_nested_outbreaks <- function(data,
 #'
 #' @import lpSolve
 match_ocv_to_outbreaks <- function(ocv_deployments, outbreak_populations,
-                                           error_tolerance = 0.2,
-                                           maximize_coverage = FALSE) {
+                                   error_tolerance = 0.2,
+                                   maximize_coverage = FALSE) {
   # Check if lpSolve package is installed
   if (!requireNamespace("lpSolve", quietly = TRUE)) {
     stop("The lpSolve package is required for this function.

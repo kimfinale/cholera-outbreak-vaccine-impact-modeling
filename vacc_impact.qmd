@@ -415,7 +415,7 @@ vacc_delivery_cost <- vacc_delivery_cost * inflation_factor_vac
 
 # Vaccine Impact Simulation
 
-## Outbreak Onset-Triggered Vaccination Strategy 
+## Outbreak Onset-Triggered Strategy 
 
 This section models vaccination initiated at specific weeks after outbreak onset.
 
@@ -426,12 +426,11 @@ tic <- Sys.time()  # Start timer
 # dat <- outbreak_data_all %>% filter(id_outbreak %in% outbreaks_excl$id_outbreak) 
 
 # Setup for parallel processing
-# vacc_covs <- c(0.6, 0.75, 0.9)    # Vaccine coverage levels to simulate
-vacc_covs <- c(0.75)
-vacc_weeks <- seq(1, 15, by = 1)  # Vaccination weeks to simulate
+vacc_covs <- c(0.6, 0.75, 0.9)    # Vaccine coverage levels to simulate
+vacc_weeks <- seq(1, 15, by = 2)  # Vaccination weeks to simulate
 nruns <- 200                      # Number of simulation runs per configuration
 batch_size <- 10  # Number of runs per parallel batch
-delays <- 0:7        # No ORI after two or more weeks after outbreak end
+delays <- 2     # No ORI after two or more weeks after outbreak end
 # Loop through batches of runs for parallel execution
 for (delay in delays) {
   message(paste("delay:", delay))
@@ -470,7 +469,7 @@ toc <- Sys.time()
 message(paste("Total execution time:", toc - tic))
 ```
 
-Sensitivity analyses of no ORI x weeks after the outbreak end
+## Onset-triggered strategy across delays
 
 ```{r onset-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
@@ -478,15 +477,15 @@ tic <- Sys.time()  # Start timer
 # sensitivity analyses 
 # outbreaks_excl <- read_rds("outputs/outbreaks_excluded_20250612.rds")
 # dat <- outbreak_data_all %>% filter(id_outbreak %in% outbreaks_excl$id_outbreak) 
-no_ori_delays <- c(0:7)
+delays <- c(0:7)
 
 # Setup for parallel processing
 vacc_covs <- c(0.75)    # Vaccine coverage levels to simulate
-vacc_weeks <- seq(1, 15, by = 4)  # Vaccination weeks to simulate
+vacc_weeks <- seq(1, 15, by = 2)  # Vaccination weeks to simulate
 nruns <- 200                      # Number of simulation runs per configuration
 batch_size <- 10                  # Number of runs per parallel batch
 
-for (delay in no_ori_delays) {
+for (delay in delays) {
   # Loop through batches of runs for parallel execution
   for (batch_id in seq(1, nruns, by = batch_size)) {
     message(paste("Processing batch ID:", batch_id))
@@ -523,13 +522,13 @@ toc <- Sys.time()
 message(paste("Total execution time:", toc - tic))
 ```
 
-## Case-Triggered Vaccination Strategy
+## Case-Triggered Strategy
 
 ```{r case-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
 
 # Define case thresholds that trigger vaccination
-case_triggers <- c(1, 5, seq(10, 90, 20), seq(90, 300, 50))
+case_triggers <- c(1, 5, seq(10, 90, 20), seq(140, 300, 50))
 vacc_covs <- c(0.75)
 vacc_weeks <- seq(1, 15, by=2)
 # vacc_weeks <- c(3, 7, 11, 15)
@@ -573,128 +572,177 @@ message(paste("Total execution time:", round(toc - tic, digits=2), "minutes"))
 
 ## Combine Simulation Results
 
-### Onset-triggered 
-
 Combine results from batch processing and organizes them for analysis.
 
-```{r combine-results}
-# ---- 1. Time-triggered vaccination results ----
+### Onset-triggered 
+```{r}
 id_begin <- 1
 id_end <- 200
 batch_size <- 10
 batch_ids <- seq(id_begin, id_end, by = batch_size)
-# delays <- 0:7
-# for (delay in delays){
-  svim_df <- data.frame()
-  for (i in 1:length(batch_ids)) {
-    message(paste("Processing batch", i, "of", length(batch_ids)))
-    
-    d <- fread(paste0("outputs/svim_week_list_vacc_week_batch_",
-                         batch_ids[i], "_20251019.csv"))
-    # d <- fread(paste0("outputs/svim_delay_", delay, "_week_list_vacc_week_batch_",
-    #                      batch_ids[i], "_20251019.csv"))
-    svim_df <- rbindlist(list(svim_df, sum_over_week(d)))
-    rm(d)  # Free memory
-  }
 
-# Save combined results
-saveRDS(svim_df,
-        paste0("outputs/svim_onset_trigger_sum_over_week_runid_1_200_",
+# Dates to look for
+dates <- c("20251031", "20251030")
+
+files <- unlist(lapply(batch_ids, function(id) {
+  f <- paste0("outputs/svim_delay_2_week_list_vacc_week_batch_", id, "_", dates, ".csv")
+  f[file.exists(f)]
+}))
+
+print(files)
+
+df <- rbindlist(lapply(files, fread))
+
+df_sow <- sum_over_week(df,
+            group_cols = c("runid", "id_outbreak", "vacc_week", 
+                         "vacc_cov", "no_ori_delay_outbreak_end"))
+
+saveRDS(df_sow,
+        paste0("outputs/onset_trigger_sum_over_week_",
+               tstamp(), ".rds"))
+```
+
+### Onset-triggered across delays
+
+```{r}
+id_begin <- 1
+id_end <- 200
+batch_size <- 10
+batch_ids <- seq(id_begin, id_end, by = batch_size)
+
+# Dates to look for
+dates <- c("20251031", "20251030")
+delays <- 0:7
+delays_dates <- expand.grid(delays, dates)
+
+files <- unlist(lapply(batch_ids, function(id) {
+  # f <- paste0("outputs/svim_weekly_delay_", delays, "_week_list_vacc_week_batch_", id, "_", dates, ".csv")
+    f <- paste0("outputs/svim_weekly_delay_", delays_dates$Var1, "_week_list_vacc_week_batch_", id, "_", delays_dates$Var2, ".csv")
+  f[file.exists(f)]
+}))
+
+print(files)
+
+df_delay <- rbindlist(lapply(files, fread))
+df_delay_sow <- 
+  sum_over_week(df_delay, group_cols = c("runid", "id_outbreak", "vacc_week", 
+                                   "vacc_cov", "no_ori_delay_outbreak_end"))
+
+saveRDS(df_delay_sow,
+        paste0("outputs/onset_trigger_delays_sum_over_week_",
                tstamp(), ".rds"))
 ```
 
 ### Case-triggered
+
 ```{r}
-  # saveRDS(svim_df, 
-  #         paste0("outputs/svim_delay_", delay, 
-  #                "_onset_trigger_sum_over_week_runid_1_200_",
-  #                tstamp(), ".rds"))
-# }
+dates <- c("20251031", "20251030")
 
-# ---- 2. Case-triggered vaccination results ----
-id_begin <- 1
-id_end <- 200
-batch_size <- 10
-batch_ids <- seq(id_begin, id_end, by = batch_size)
+files <- unlist(lapply(batch_ids, function(id) {
+  f <- paste0("outputs/svim_week_case_trigger_batch_", id, "_", dates, ".rds")
+  f[file.exists(f)]
+}))
 
-svim_df <- data.frame()
-for (i in 1:length(batch_ids)) {
-  message(paste("Processing batch", i, "of", length(batch_ids)))
-  d <- read_rds(paste0("outputs/svim_week_case_trigger_batch_",
-                   batch_ids[i], "_20250810.rds"))
-  svim_df <- rbindlist(list(svim_df, sum_over_week(d, case_trigger = TRUE)))
-  rm(d) 
-}
+print(files)
 
-# Save combined results
-saveRDS(svim_df, 
-        paste0("outputs/svim_case_trigger_sum_over_week_runid_1_200_",
+df_ct <- rbindlist(lapply(files, read_rds))
+df_ct_sow <- 
+  sum_over_week(df_ct,
+    group_cols = c("runid", "id_outbreak", "vacc_week", "vacc_cov",
+                   "no_ori_delay_outbreak_end", "case_trigger"))
+
+saveRDS(df_ct_sow,
+        paste0("outputs/case_trigger_sum_over_week",
                tstamp(), ".rds"))
 ```
 
 # Cost-Effectiveness Analysis
 
-Calculate Impact Metrics 
+Calculate impact (cases, deaths, and DALYs averted), efficiency (impact per 1000 OCV), and cost effectiveness (cost [2023 US$] per unit of impact). 
 
 ## Onset-triggered
 
-```{r cea-time-trigger}
-delays <- 0:7
-for (delay in delays) {
-  # Load summarized time-triggered vaccination results
-  message(paste0("Processing results for delay = ", delay))
-  # d <- read_rds("outputs/svim_onset_trigger_sum_over_week_runid_1_200_20251020.rds")
-  d <- read_rds(paste0("outputs/svim_delay_", delay,
-                "_onset_trigger_sum_over_week_runid_1_200_20251022.rds"))
-  # Process each vaccine coverage level
-  for (vc in VC) {
-    message(paste0("Processing results for vaccine coverage = ", vc))
-    
-    # Full cost-effectiveness analysis
-    svim_tt_cea <- add_cea_variables(d[vacc_cov == vc], 
-                                     mean_age_inf = mean_age_inf)
-    svim_tt_cea <- add_cea_results(svim_tt_cea, parms = as.data.frame(parm))
-  
-    # saveRDS(svim_tt_cea,
-    #        paste0("outputs/cea_", vc, "_onset_trigger_20251020.rds"))
-    
-    # saveRDS(svim_tt_cea,
-    #        paste0("outputs/paper/cea_weekly_", vc, "_onset_trigger_",
-    #               tstamp(), ".rds"))
-    saveRDS(svim_tt_cea,
-           paste0("outputs/paper/cea_delay_", delay, "_", vc, "_onset_trigger_",
-                  tstamp(), ".rds"))
-    rm(svim_tt_cea)
-  }
-  rm(d)
-}
+```{r}
+files <- list.files(
+  path = "outputs",
+  pattern = "onset_trigger_sum_over_week.*(20251030|20251031)",
+  full.names = TRUE
+)
+files <- files[!grepl("delay", basename(files))]
+
+print(files)
+
+d <- rbindlist(lapply(files, read_rds))
+
+d_cea_var <- add_cea_variables(d, mean_age_inf = mean_age_inf)
+d_cea_res <- add_cea_results(d_cea_var, parms = as.data.frame(parm))
+# #  
+d_cea_res %>%
+  filter(ori_occurred == TRUE, vacc_week %in% c(1,9)) %>%
+  group_by(vacc_cov, vacc_week) %>% 
+  summarize(pct_reduc_case_m = median(pct_reduc_case))
+# 
+saveRDS(d_cea_res, 
+        paste0("outputs/paper/cea_onset_trigger_", tstamp(), ".rds"))
 ```
 
-## Case-triggered 
+## Onset-triggered with delays
 
-```{r cea-case-trigger}
-d_ct <- 
-  read_rds("outputs/svim_case_trigger_sum_over_week_runid_1_200_20251029.rds")
+```{r}
+files <- list.files(
+  path = "outputs",
+  pattern = "onset_trigger.*sum_over_week.*(20251030|20251031)",
+  full.names = TRUE
+)
+files <- files[grepl("delay", basename(files))]
 
-for (vc in unique(d_ct$vacc_cov)) {  
-  message(paste("Processing results for vaccine coverage =", vc))
-  
-  svim_ct_cea <- add_cea_variables(d_ct[vacc_cov == vc], 
-                                   mean_age_inf = mean_age_inf)
-  svim_ct_cea <- add_cea_results(svim_ct_cea, parms = as.data.frame(parm))
+print(files)
 
-  saveRDS(svim_ct_cea,
-         paste0("outputs/paper/cea_", vc, "_case_trigger_", 
-                tstamp(), ".rds"))
-  rm(svim_ct_cea) 
-}
+d <- rbindlist(lapply(files, read_rds))
+
+d_cea_var <- add_cea_variables(d, mean_age_inf = mean_age_inf)
+d_cea_res <- add_cea_results(d_cea_var, parms = as.data.frame(parm))
+
+d_cea_res %>%
+  filter(ori_occurred == TRUE, vacc_cov == 0.75, vacc_week == 9) %>%
+  group_by(no_ori_delay_outbreak_end) %>%
+  summarize(pct_reduc_case_m = median(pct_reduc_case))
+
+saveRDS(d_cea_res, 
+        paste0("outputs/paper/cea_delay_onset_trigger_", tstamp(), ".rds"))
+
+```
+
+### Case-triggered
+
+```{r}
+files <- list.files(
+  path = "outputs",
+  pattern = "case_trigger.*sum_over_week.*(20251030|20251031)",
+  full.names = TRUE
+)
+
+print(files)
+
+d <- rbindlist(lapply(files, read_rds))
+
+d_cea_var <- add_cea_variables(d, mean_age_inf = mean_age_inf)
+d_cea_res <- add_cea_results(d_cea_var, parms = as.data.frame(parm))
+
+d_cea_res %>%
+  filter(ori_occurred == TRUE, vacc_cov == 0.75, vacc_week == 9) %>%
+  group_by(case_trigger) %>%
+  summarize(pct_reduc_case_m = median(pct_reduc_case))
+
+saveRDS(d_cea_res, 
+        paste0("outputs/paper/cea_case_trigger_", tstamp(), ".rds"))
 
 ```
 
 
 # Summary results for plotting 
 
-## Quantile values for plotting
+## Median values for plotting
 
 ```{r}
 VC3    <- c(0.6, 0.75, 0.9)
@@ -723,15 +771,13 @@ build_plot_summary <- function(data, value_col,
 
 # In case cea files were not loaded
 cea_files <- c(
-  "outputs/paper/cea_0.6_onset_trigger_20251022.rds",
-  "outputs/paper/cea_0.75_onset_trigger_20251022.rds",
-  "outputs/paper/cea_0.9_onset_trigger_20251022.rds"
+  "outputs/paper/cea_onset_trigger_20251031.rds"
 )
-cea <- map_dfr(cea_files, read_rds)
-cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
 # Example: summarize % cases averted by week & coverage
-cea_summary_pca <- cea_ori %>%
+cea_summary_pca <- 
+  map_dfr(cea_files, read_rds) %>% 
+  filter(ori_occurred == TRUE) %>%
   filter(vacc_cov %in% VC3, vacc_week %in% VW_seq) %>%
   build_plot_summary(pct_reduc_case, by = c("vacc_cov", "vacc_week"))
 
@@ -776,8 +822,10 @@ ids_list_cfr <- map(probs, ~ top_p_ids(outbk_dat, cfr, p = .x))
 ```
 
 ```{r}
-cea_75 <- read_rds("outputs/paper/cea_0.75_onset_trigger_20251022.rds")
-cea_75_ori <- cea_75 %>% filter(ori_occurred == TRUE)
+cea_75_ori <- 
+  map_dfr(cea_files, read_rds) %>% 
+  filter(vacc_cov == 0.75, ori_occurred == TRUE)
+  
 
 median_by_ids <- function(cea, ids_list, probs, metrics,
                              id_col = "id_outbreak") {
@@ -809,15 +857,12 @@ median_by_ids <- function(cea, ids_list, probs, metrics,
       mutate(prob = p, .before = 1)
   })
 }
-cea_75_ori$daly_averted_per_1000_OCV <- 
-  1000 * cea_75_ori$daly_averted / cea_75_ori$vacc_dose
-
 
 cea_metrics <- c("s_ch_averted_tot", "pct_reduc_case",
                  "case_averted_per_1000_OCV", "daly_averted_per_1000_OCV")  # add 
 
-med_ar <- median_by_ids(cea_75_ori, ids_list_ar, probs, metrics = cea_metrics)
-
+med_ar <- median_by_ids(cea_75_ori, ids_list_ar, probs, 
+                        metrics = cea_metrics)
 med_dur  <- median_by_ids(cea_75_ori, ids_list_dur, probs, 
                              metrics = cea_metrics)
 med_size <- median_by_ids(cea_75_ori, ids_list_size, probs, 
@@ -839,7 +884,7 @@ med_all_long <- med_all %>%
     values_to = "median_value")
 
 saveRDS(med_all_long, 
-        paste0("outputs/paper/summary_impact_0.75_delay_prioritization_", 
+        paste0("outputs/paper/summary_impact_0.75_prioritization_", 
                tstamp(), ".rds"))
 ```
 
@@ -855,8 +900,8 @@ Random sampling of outbreaks from all or subsets of outbreaks
 ```{r}
 # Default outbreak onset-triggered vaccination results (delay = 2, VC=0.75)
 cea_files <- 
-  c("outputs/paper/cea_0.75_onset_trigger_20251022.rds")
-cea <- map_dfr(cea_files, read_rds)
+  c("outputs/paper/cea_onset_trigger_20251031.rds")
+cea <- map_dfr(cea_files, read_rds) %>% filter(vacc_cov == 0.75)
 
 outbk_dat <- outbreaks_filtered |>
   summarize(
@@ -965,6 +1010,7 @@ for (priority in priorities) {
 
 plan(sequential)
 ```
+
 
 
 ## Aggregate 
