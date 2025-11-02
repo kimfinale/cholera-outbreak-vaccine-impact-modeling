@@ -710,10 +710,9 @@ d_cea_res %>%
 
 saveRDS(d_cea_res, 
         paste0("outputs/paper/cea_delay_onset_trigger_", tstamp(), ".rds"))
-
 ```
 
-### Case-triggered
+## Case-triggered
 
 ```{r}
 files <- list.files(
@@ -1011,8 +1010,6 @@ for (priority in priorities) {
 plan(sequential)
 ```
 
-
-
 ## Aggregate 
 
 Various impact metrics are aggregated across outbreaks within each sample using the `sum_over_outbreaks_by_runid` function
@@ -1162,8 +1159,7 @@ Fit an exponential decay function for percentage case reduction across delay in 
 
 ### Outbreak onset-triggered
 ```{r}
-cea_data <- read_rds("outputs/paper/cea_weekly_0.75_onset_trigger_20251022.rds")
-
+cea_data <- cea_weekly_75
 dat <- 
   left_join(cea_data[, c("vacc_week", "pct_reduc_case", "id_outbreak", 
                          "week_delay_to_vacc_effect", "runid", "vacc_cov")],

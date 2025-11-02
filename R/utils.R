@@ -88,7 +88,7 @@ fit_decay_model <- function(df,
   if (is.null(slope) || !is.finite(slope)) return(.na_out(nrow(df2)))
 
   k_hat <- -as.numeric(slope)
-  half_life <- ifelse(k_hat > 0, log(2) / k_hat, NA_real_)
+  half_life <- safediv(log(2), k_hat)
 
   # Goodness of fit on log scale
   sm <- summary(fit)
