@@ -1607,7 +1607,6 @@ r2    <- summary(m)$r.squared
 x_grid <- seq(min(df$vacc_week), max(df$vacc_week), length.out = 200)
 pred   <- predict(m, newdata = data.frame(vacc_week = x_grid))
 
-
 paste0("Eveary week, additional ", 
        format_num(abs(100*beta), digits=1), 
        "% outbreaks ended before ORI")
@@ -1708,6 +1707,17 @@ impact_data %>%
          percentile_by == "ar", 
          metric == "med_case_averted_per_1000_OCV",             
          prob %in% c(0,0.9))
+
+impact_data %>% 
+  filter(vacc_cov == 0.75, vacc_week %in%  c(1,9), 
+         percentile_by == "ar", 
+         metric == "med_daly_averted_per_1000_OCV",             
+         prob %in% c(0,0.9))
+
+impact_data %>% 
+  filter(vacc_cov == 0.75, vacc_week %in% c(1,9), 
+         metric == "med_pct_reduc_case",             
+         prob %in% c(0.9))
 ```
 
 ```{r}
@@ -4051,10 +4061,31 @@ tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round
 
 if (save_table) {
   fwrite(tab, 
-         paste0("outputs/paper/table3_onset_triggered_impact_IQR_", 
+         paste0("outputs/paper/table3_onset_triggered_", 
                 tstamp(), ".csv"), 
             row.names = FALSE)
 }
+
+```
+
+Summary values use in the text
+```{r}
+gdp_data <- read_xls("data/paper/GDP_WorldBank.xls")
+gdp_data %>% 
+  filter(`Country Name` == "Sub-Saharan Africa (IDA & IBRD countries)") %>%
+  select(c(`2010`:`2020`)) |> 
+  as.numeric() -> gdp_ssa
+
+
+# top quartile of outbreak by attack rate
+# Ratio of ICER (cost per DALY averted) to GDP per captia
+cea_ori %>% filter(id_outbreak %in% top_ar_ids, 
+                   vacc_cov == 0.75, 
+                   vacc_week %in% c(1,9)) %>% 
+  group_by(vacc_week) %>% 
+  summarize(icer_med = median(cost_per_daly_averted, na.rm=T), 
+            icer_med_gdp = icer_med / median(gdp_ssa))
+
 ```
 
 ## Table S1. Impact under the outbreak onset-triggered scenario
@@ -4080,7 +4111,7 @@ tab$week <- rep(wks, length(VC3))
 tab$vc <- rep(VC3, each=length(wks))
 
 if (save_table) {
-  fwrite(tab, paste0("outputs/paper/tableS1_onset_triggered_impact_IQR_", tstamp(), ".csv"), 
+  fwrite(tab, paste0("outputs/paper/tableS1_onset_triggered_", tstamp(), ".csv"), 
             row.names = FALSE)
 }
 ```
