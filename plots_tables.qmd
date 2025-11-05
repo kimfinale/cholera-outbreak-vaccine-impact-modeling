@@ -135,32 +135,11 @@ outbreak_data <- outbreak_data %>%
 # outbreaks excluded
 outbreaks_excluded <- read_rds("outputs/paper/outbreaks_excluded_20250612.rds")
 
-# OCV campaign data
-ocv_campaigns <- fread("data/paper/GTFCC_Dashboard_23April2025.csv")
-# Filter outbreak-response (i.e., ICG-approved) events
-ocv_campaigns %>%
-  filter(APPROVED_BY == "ICG") %>% # outbreak response
-  select(COUNTRY, DATE_ROUND_ONE, DOSE_DELIVERED_ROUND_ONE) %>%
-  mutate(DATE_ROUND_ONE = as.Date(DATE_ROUND_ONE)) -> reactive_R1_events
-
-reactive_R1_events <- reactive_R1_events[complete.cases(reactive_R1_events),]
-reactive_R1_events <- clean_names(reactive_R1_events)
-reactive_R1_events$year <- lubridate::year(reactive_R1_events$date_round_one)
-reactive_R1_events %>% 
-  group_by(year) %>% 
-  summarize(num_ocv = sum(dose_delivered_round_one)) -> R1_events_by_year
-
-R1_events_by_year$cum_num_ocv <- cumsum(R1_events_by_year$num_ocv)
-
 # Historical OCV deployment data
-ocv_use_dashboard <- clean_names(fread("outputs/paper/OCV_Use_GTFCC_Dashboard.csv"))
-ocv_use_dashboard |> 
-  filter(shipped == "Shipped", type == "Reactive") |> 
-  group_by(year) |> 
-  summarize(num_ocv = sum(dose)) |>
-  setDT() -> ocv_year
-
-ocv_year$cum_num_ocv <- cumsum(ocv_year$num_ocv)
+# data were collected based on the website: https://apps.epicentre-msf.org/public/app/gtfcc
+# The number of doses shipped by 2020 and 2024 can be obtained by adjusting the shipment period
+global_ocv_use <-
+  clean_names(fread("data/paper/OCV_Use_GTFCC_Dashboard_20251031.csv"))
 
 # Load model parameters
 dis_params <- as.data.frame(fread("data/paper/parameters.csv"))
@@ -198,6 +177,17 @@ outbk_data_summary <- fread("outputs/paper/outbreak_data_summary_20251022.csv")
 # Summarize attack rates and population sizes
 # summary(outbk_data_summary$ar_per_10e3)
 # summary(outbk_data_summary$outbreak_pop)
+
+# outbreaks in the top quartile by attack rate (ar), duration (dur), and size
+qn <- floor(0.25 * nrow(outbk_data_summary))
+
+top_q_ar_ids <- outbk_data_summary %>% 
+  arrange(desc(ar_per_10e3)) %>% slice(1:qn) %>% pull(id_outbreak)
+top_q_dur_ids <- outbk_data_summary %>%
+  arrange(desc(duration_weeks)) %>% slice(1:qn) %>% pull(id_outbreak)
+top_q_size_ids <- outbk_data_summary %>% 
+  arrange(desc(total_s_ch)) %>% slice(1:qn) %>% pull(id_outbreak)
+
 ```
 
 # Load vaccine impact simulation results
@@ -208,20 +198,31 @@ cea_files <- c("outputs/paper/cea_onset_trigger_20251031.rds")
 cea <- map_dfr(cea_files, read_rds)
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
+# percentage case averted summary for Figure 3
+cea_ori_sum <- read_rds("outputs/paper/cea_pca_summary_20251031.rds")
+# impact summary for Figure 3
+cea_prioritization <-
+  read_rds("outputs/paper/summary_impact_0.75_prioritization_20251031.rds")
+
 cea_weekly <- read_rds("outputs/paper/cea_delay_onset_trigger_20251031.rds")
 cea_weekly_delay_2 <- 
   cea_weekly %>% filter(no_ori_delay_outbreak_end == 2)
 cea_weekly_delay_2_ori <- cea_weekly %>% 
   filter(no_ori_delay_outbreak_end == 2, ori_occurred == TRUE)
 # weekly decline
-fit_decay <- 
-  read_rds("outputs/paper/fit_exp_decay_20251031.rds")
+fit_decay <- read_rds("outputs/paper/fit_exp_decay_20251031.rds")
 fit_decay_ct <- 
   read_rds("outputs/paper/fit_exp_decay_case_trigger_20251031.rds")
+fit_lm <- read_rds("outputs/paper/fit_lm_20251031.rds")
 # Case-triggered vaccination results
 cea_ct <- read_rds("outputs/paper/cea_case_trigger_20251031.rds")
 cea_ct_ori <- cea_ct %>% filter(ori_occurred == TRUE)
-
+# outbreak subsets for given number of OCVs
+subset_files <- c(
+  "outputs/paper/cea_summary_subsets_vw_1_20251031.rds",
+  "outputs/paper/cea_summary_subsets_vw_9_20251031.rds"
+)
+cea_subsets <- map_dfr(subset_files, read_rds)
 # excluded outbreaks for sensitivity analysis
 # cea_excl <- read_rds("outputs/cea_0.6_onset_trigger_excl_20250716.rds")
 # cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.75_onset_trigger_excl_20250716.rds"))
@@ -236,29 +237,29 @@ Values used in the abstract
 onset_impact <- cea_ori %>%
   filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
   group_by(vacc_cov, vacc_week) %>%
-  summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
-                      case_averted_per_1000_OCV, cost_per_case_averted, 
+  summarize_quantiles(s_ch_averted_tot, 
+                      pct_reduc_case, 
+                      case_averted_per_1000_OCV, 
+                      daly_averted_per_1000_OCV,
+                      cost_per_case_averted, 
                       cost_per_daly_averted)
 
-onset_impact
-# At week 1
-# cases averted for vaccine coverage of 75%
-format_median_iqr(onset_impact, digits=1, row=1)
-# percent case averted
-format_median_iqr(onset_impact, digits=1, row=3)
-# case averted per 1000 OCVs
-format_median_iqr(onset_impact, digits=2, row=5)
-# cost per case averted
-format_median_iqr(onset_impact, digits=0, row=7)
-# At week 9
-format_median_iqr(onset_impact, digits=1, row=2)
-format_median_iqr(onset_impact, digits=1, row=4)
-format_median_iqr(onset_impact, digits=2, row=6)
-
-format_median_iqr(onset_impact, digits=0, row=8)
-# cost per DALY averted
-format_median_iqr(onset_impact, digits=0, row=9)
-format_median_iqr(onset_impact, digits=0, row=10)
+# cases averted (CA) for vaccine coverage of 75% with ORI in week 1
+onset_impact %>% 
+  filter(variable == "s_ch_averted_tot", vacc_week == 1) %>%
+  format_median_iqr()
+# percent case averted (PCA) at week 1
+onset_impact %>% 
+  filter(variable == "pct_reduc_case", vacc_week == 1) %>%
+  format_median_iqr()
+# CA At week 9
+onset_impact %>% 
+  filter(variable == "s_ch_averted_tot", vacc_week == 9) %>%
+  format_median_iqr()
+# PCA At week 9
+onset_impact %>% 
+  filter(variable == "pct_reduc_case", vacc_week == 9) %>%
+  format_median_iqr()
 
 # weekly reduction rate
 fit_decay[["9"]] %>% 
@@ -271,26 +272,107 @@ fit_decay[["9"]] %>%
   summarize_quantiles(half_life) %>% 
   format_median_iqr(digits=1)
 
-# weekly reduction rate
-fit_decay_ct[["1"]] %>% 
-  mutate(rate_reduc = 1 - exp(-k_hat*10)) %>% 
-  summarize_quantiles(rate_reduc*100) %>% 
-  format_median_iqr(digits=1)
+# case averted per 1000 OCVs (CAPD) at week 1
+onset_impact %>% 
+  filter(variable == "case_averted_per_1000_OCV", vacc_week == 1) %>%
+  format_median_iqr(digits=2)
+onset_impact %>% 
+  filter(variable == "cost_per_case_averted", vacc_week == 1) %>%
+  format_median_iqr(digits=0)
 
-fit_decay_ct[["1"]] %>%
-  summarize_quantiles(half_life) %>% 
-  format_median_iqr(digits=1)
+onset_impact %>% 
+  filter(variable == "case_averted_per_1000_OCV", vacc_week == 9) %>%
+  format_median_iqr(digits=2)
+onset_impact %>% 
+  filter(variable == "cost_per_case_averted", vacc_week == 9) %>%
+  format_median_iqr(digits=0)
 
-# weekly reduction rate
-fit_decay_ct[["5"]] %>% 
-  mutate(rate_reduc = 1 - exp(-k_hat*10)) %>% 
-  summarize_quantiles(rate_reduc*100) %>% 
-  format_median_iqr(digits=1)
+# fold increase in case averted per ORI by prioritization
+ca <- onset_impact %>% 
+  filter(variable == "s_ch_averted_tot") %>% 
+  pull(q500)
+ca_top_q_size <- cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_q_size_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(s_ch_averted_tot, pct_reduc_case) %>% 
+  filter(variable == "s_ch_averted_tot") %>% 
+  pull(q500)
 
-fit_decay_ct[["5"]] %>%
-  summarize_quantiles(half_life) %>% 
-  format_median_iqr(digits=1)
-# rm(onset_impact, stockpile_impact, stockpile_impact_q4)
+paste0("fold increase: ", ca_top_q_size / ca)
+
+# fold increase in case averted per 1000 OCVs
+capd_top_q_ar <- cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_q_ar_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(case_averted_per_1000_OCV) %>% 
+  pull(q500)
+
+capd <- onset_impact %>% 
+  filter(variable == "case_averted_per_1000_OCV") %>% 
+  pull(q500) 
+
+paste0("fold increase in case averted per 1,000 OCVs: ", 
+       capd_top_q_ar / capd)
+
+
+# fold increase in averted per 1000 OCVs
+dapd_top_q_ar <- cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_q_ar_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(daly_averted_per_1000_OCV) %>%  
+  pull(q500)
+
+dapd <- onset_impact %>% 
+  filter(variable == "daly_averted_per_1000_OCV") %>% 
+  pull(q500) 
+
+paste0("fold increase in DALY averted per 1,000 OCVs: ",
+       dapd_top_q_ar / dapd)
+
+# cost per DALY averted
+cpda_top_q_ar <- cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_q_ar_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(cost_per_daly_averted) %>% 
+  pull(q500)
+
+cpda <- onset_impact %>% 
+  filter(variable == "cost_per_daly_averted") %>% 
+  pull(q500) 
+
+paste0("fold decrease in cost per DALY averted: ", cpda/cpda_top_q_ar)
+
+# subset
+cea_subsets %>% 
+  mutate(prob_i = as.integer(round(100*priority_prob))) %>% 
+  filter(value_column == "case_averted_per_1000_OCV", vacc_week == 9, 
+         prob_i == 0) %>% 
+  summarize_quantiles(q500) %>% 
+  format_median_iqr(digits=2)
+
+cea_subsets %>% 
+  mutate(prob_i = as.integer(round(100*priority_prob))) %>% 
+  filter(value_column == "case_averted_per_1000_OCV", vacc_week == 1, 
+         vacc_priority == "AR", prob_i == 30) %>% 
+  summarize_quantiles(q500) %>% 
+  format_median_iqr(digits=2)
+```
+
+# Introduction
+
+Values used in the abstract
+```{r}
+# number of OCVs doses shipped from OCV stockpile (million doses)
+ocv_use_dashboard
+# proportion approved by ICG (reactive) by 2024
+ocv_use_dashboard$cumulative_icg[2] / ocv_use_dashboard$cumulative_total[2]
+# outbreaks span from 2010 to 2020
+unique(outbk_data_summary$year)
+outbk_data_summary %>% filter(year == 2020)
 ```
 
 # Plots
@@ -1278,135 +1360,142 @@ if (save_plot) {
 onset_impact <- cea_ori %>%
   filter(vacc_cov %in% c(0.6, 0.75, 0.9), vacc_week %in% c(1,9)) %>%
   group_by(vacc_cov, vacc_week) %>%
-  summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
-                      case_averted_per_1000_OCV, cost_per_case_averted)
+  summarize_quantiles(s_ch_averted_tot, 
+                      pct_reduc_case, 
+                      case_averted_per_1000_OCV, 
+                      daly_averted_per_1000_OCV,
+                      cost_per_case_averted, 
+                      cost_per_daly_averted)
 
-
-# cases averted for 75% with ORI initiated in weeks 1 and 9
-format_median_iqr(onset_impact, row=3)
-format_median_iqr(onset_impact, row=4)
-# percentage cases averted for 75% with ORI initiated in week 9
-format_median_iqr(onset_impact, row=9)
-format_median_iqr(onset_impact, row=10)
-
-onset_impact %>% filter(variable == "s_ch_averted_tot", vacc_week == 1)     
-onset_impact %>% filter(variable == "s_ch_averted_tot", vacc_week == 9)  
-onset_impact %>% filter(variable == "pct_reduc_case", vacc_week == 9)        
-# cases averted per 1,000 OCVs
-format_median_iqr(onset_impact, digits=3, row=15)
-format_median_iqr(onset_impact, digits=3, row=16)
-# cost per case averted
-format_median_iqr(onset_impact, row=21)
-format_median_iqr(onset_impact, row=22)
-
-# outbreaks missed by delayed vaccination
-wks_delay <- c(1, 5, 9, 14) # 
-dur_missed_id <- vector('list', length(wks_delay))
-vax_missed_id <- vector('list', length(wks_delay))
-
-for (i in 1:length(wks_delay)) {
-  dur_missed_id[[i]] <- outbk_data_summary %>% 
-    filter(duration_weeks <= wks_delay[i]) %>%
-    pull(id_outbreak)
-  
-  vax_missed_id[[i]] <- cea_weekly_delay_2 %>% 
-    filter(vacc_week == wks_delay[i] & runid == 1 & vacc_cov == 0.75) %>% 
-    filter(!ori_occurred) %>% 
-    pull(id_outbreak) 
-}
-n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
-n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
-
-100 * n_outbreaks_missed1 / nrow(outbk_data_summary)
-100 * n_outbreaks_missed2 / nrow(outbk_data_summary)
-
-# 60%, 75%, 90% wtih ORI initiated at week 1
+# cases averted (CA) for vaccine coverage of 75% with ORI in week 1
 onset_impact %>% 
-  filter(vacc_week == 1) %>% 
-  format_median_iqr(row=1:3, digits=0)
-# 60%, 75%, 90% at week 9
+  filter(variable == "s_ch_averted_tot", 
+         vacc_week == 1, vacc_cov == 0.75) %>%
+  format_median_iqr()
+# percent case averted (PCA) at week 1
 onset_impact %>% 
-  filter(vacc_week == 9) %>% 
-  format_median_iqr(row=1:3, digits=0)
+  filter(variable == "pct_reduc_case", 
+         vacc_week == 1, vacc_cov == 0.75) %>%
+  format_median_iqr()
 
-# percentage case reduction by size group
-probs <- seq(0, 1, by = 0.1)
-unq_data <- filter(cea, runid == 1 & vacc_cov == 0.75 & vacc_week == 1)
-size_grp_cutoff <- quantile(unq_data$s_ch_tot, probs = probs)
-
-impact_top_10_size <- 
-  cea_ori %>% 
-  filter(s_ch_tot >= size_grp_cutoff[10], vacc_week %in% c(1,9)) %>% 
-  group_by(vacc_cov, vacc_week) %>%
-  summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
-                      case_averted_per_1000_OCV, cost_per_case_averted)
-
+# CA by vaccine coverage in week 1
 onset_impact %>% 
-  filter(variable == "s_ch_averted_tot", vacc_cov == 0.75, vacc_week == 9) 
-impact_top_10_size %>% 
-  filter(variable == "s_ch_averted_tot", vacc_cov == 0.75, vacc_week == 9) 
-impact_top_10_size %>% 
-  filter(variable == "s_ch_averted_tot", vacc_cov == 0.75, vacc_week == 1) 
+  filter(variable == "s_ch_averted_tot", vacc_week == 1) %>%
+  group_by(vacc_cov) %>% 
+  format_median_iqr()
+# CA by vaccine coverage in week 9
+onset_impact %>% 
+  filter(variable == "s_ch_averted_tot", vacc_week == 9) %>%
+  group_by(vacc_cov) %>% 
+  format_median_iqr()
 
-d <- cea_ori %>% filter(vacc_cov == 0.75)
-d <- left_join(d, outbk_data_summary[,
-                      c("id_outbreak", "ar_per_10e3","duration_weeks")],
-                 by = "id_outbreak")
+# PCA by vaccine coverage in week 9
+onset_impact %>% 
+  filter(variable == "pct_reduc_case", vacc_week == 9) %>%
+  group_by(vacc_cov) %>% 
+  format_median_iqr()
 
-ar_grp_cutoff <- quantile(outbk_data_summary$ar_per_10e3, probs = probs)
-dur_grp_cutoff <- quantile(outbk_data_summary$duration_weeks, probs = probs)
+quantile(fit_decay[["9"]]$r_squared, probs=c(0.25,0.5,0.75))
 
-impact_top_10_ar <- 
-  d %>% 
-  filter(ar_per_10e3 >= ar_grp_cutoff[10], vacc_week %in% c(1,9)) %>% 
-  group_by(vacc_cov, vacc_week) %>%
-  summarize_quantiles(case_averted_per_1000_OCV, 
-                      daly_averted_per_1000_OCV)
+# instantaneous decay rate
+fit_decay[["9"]] %>% 
+  summarize_quantiles(k_hat) %>% 
+  format_median_iqr(digits=2)
 
-impact_top_10_ar %>% 
-  filter(vacc_cov == 0.75, vacc_week == 9) 
-impact_top_10_ar %>% 
-  filter(vacc_cov == 0.75, vacc_week == 1)
-
-
-d %>% 
-  filter(duration_weeks >= dur_grp_cutoff[10]) %>%  
-  filter(vacc_cov == 0.75, vacc_week %in% c(1,9)) %>% 
-  group_by(vacc_week) %>%
-  summarize_quantiles(pct_reduc_case)
-
-d %>% 
-  filter(s_ch_tot >= size_grp_cutoff[10]) %>%  
-  filter(vacc_cov ==0.75, vacc_week %in% c(1,9)) %>% 
-  group_by(vacc_week) %>%
-  summarize_quantiles(pct_reduc_case)
-
-d %>% 
-  filter(ar_per_10e3 >= ar_grp_cutoff[10]) %>%  
-  filter(vacc_cov ==0.75, vacc_week %in% c(1,9)) %>% 
-  group_by(vacc_week) %>%
-  summarize_quantiles(pct_reduc_case)
-
-fit_decay[["9"]] %>%  #
-  filter(vacc_cov == VC) %>% 
-  summarize_group(vars=c("r_squared"), group_name="> 9 weeks") %>% 
-  format_median_iqr(digits=3)
-
-fit_decay[["9"]] %>%  
-  filter(vacc_cov == VC) %>% 
-  summarize_group(vars=c("k_hat"), group_name="> 9 weeks") %>% 
-  format_median_iqr(digits=3)
-
-fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
-  filter(vacc_cov == VC) %>% 
-  mutate(rate_reduc = 100*(1 - exp(- k_hat))) %>% 
-  summarize_group(vars=c("rate_reduc"), group_name="> 5 weeks") %>% 
+# weekly reduction rate
+fit_decay[["9"]] %>% 
+  mutate(rate_reduc = 1 - exp(-k_hat)) %>% 
+  summarize_quantiles(rate_reduc*100) %>% 
   format_median_iqr(digits=1)
 
-fit_decay[["5"]] %>%  # outbreaks 5 weeks or longer
-  filter(vacc_cov == VC) %>% 
-  summarize_group(vars=c("k_hat"), group_name="> 5 weeks") %>% 
-  format_median_iqr(digits=3)
+# half_life                  
+fit_decay[["9"]] %>%
+  summarize_quantiles(half_life) %>% 
+  format_median_iqr(digits=1)
+
+# linear decrease in proportion of ORI-eligible outbreaks
+round(abs(coef(fit_lm)[[2]] * 100), digits=1)
+# observed at week 9
+1 - fit_lm$model %>% filter(vacc_week == 9) %>% pull(prop_included_dur)
+# predicted at week 9
+1 - predict(fit_lm, newdata=data.frame(vacc_week=9))
+
+cea_prioritization %>%
+  mutate(prob_i = as.integer(round(100 * prob))) %>% 
+  filter(metric == "med_s_ch_averted_tot", 
+         percentile_by =="size", prob_i %in% c(0, 90), 
+         vacc_week %in% c(1,9)) %>% 
+  select(vacc_week, prob_i, median_value)
+
+
+cea_prioritization %>%
+  mutate(prob_i = as.integer(round(100 * prob))) %>% 
+  filter(metric == "med_case_averted_per_1000_OCV", 
+         percentile_by =="ar", prob_i %in% c(0, 90), 
+         vacc_week %in% c(1,9)) %>% 
+  select(vacc_week, prob_i, median_value)
+
+cea_prioritization %>%
+  mutate(prob_i = as.integer(round(100 * prob))) %>% 
+  filter(metric == "med_daly_averted_per_1000_OCV", 
+         percentile_by =="ar", prob_i %in% c(0, 90), 
+         vacc_week %in% c(1,9)) %>% 
+  select(vacc_week, prob_i, median_value)
+
+cea_prioritization %>%
+  mutate(prob_i = as.integer(round(100 * prob))) %>% 
+  filter(metric == "med_pct_reduc_case", 
+         prob_i %in% c(90), 
+         vacc_week %in% c(1,9)) %>% 
+  select(vacc_week, percentile_by, median_value)
+
+
+  summarize_quantiles(s_ch_averted_tot, 
+                      pct_reduc_case, 
+                      case_averted_per_1000_OCV, 
+                      daly_averted_per_1000_OCV,
+                      cost_per_case_averted, 
+                      cost_per_daly_averted)
+
+# Cost per case averted (CPCA) for ORI with vaccine coverage of 75%
+onset_impact %>% 
+  filter(variable == "cost_per_case_averted", 
+         vacc_week %in% c(1,9), vacc_cov == 0.75) %>%
+  format_median_iqr(digits=0)
+
+onset_impact %>% 
+  filter(variable == "cost_per_daly_averted", 
+         vacc_week %in% c(1,9), vacc_cov == 0.75) %>%
+  format_median_iqr(digits=0)
+
+# gdp data from World Bank during 2010-2020
+gdp_data <- read_xls("data/paper/GDP_WorldBank.xls")
+gdp_data %>% 
+  filter(`Country Name` == "Sub-Saharan Africa (IDA & IBRD countries)") %>%
+  select(c(`2010`:`2020`)) |> 
+  as.numeric() %>% 
+  summary()
+
+
+# PCA in the top quartile by duration
+cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_q_dur_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(pct_reduc_case) %>%  
+  select(vacc_week,q250,q500,q750)
+
+ 
+# Cost per DALY averted
+cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_q_ar_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(cost_per_daly_averted) %>%  
+  select(vacc_week,q250,q500,q750)
+
+# ratio to the median gdp
+round(c(2967,20433)/1665, digits=1) 
 ```
 
 ### Left panel
@@ -1587,36 +1676,36 @@ p2 <- ggplot() +
 # plot 3
 # Calculate proportion of outbreaks included
 # outbreaks missed by delayed vaccination
-wks_delay <- seq(1, 15, 1)
-dur_missed_id <- vector('list', length(wks_delay))
-vax_missed_id <- vector('list', length(wks_delay))
-
-for (i in 1:length(wks_delay)) {
-  outbk_data_summary %>% 
-    filter(duration_weeks <= wks_delay[i]) %>%
-    pull(id_outbreak) -> dur_missed_id[[i]]
-  
-  cea_weekly_delay_2 %>% 
-    filter(vacc_week == wks_delay[i] & runid == 1) %>% 
-    filter(!ori_occurred) %>% 
-    pull(id_outbreak) -> vax_missed_id[[i]]
-}
-n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
-n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
-
-n_outbreaks <- nrow(outbk_data_summary)
-prop_df <- data.frame(
-  vacc_week = seq(1, 15, 1), 
-  prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
-  prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
-
-df <- prop_df %>%
-  select(vacc_week, prop_included_dur) %>%
-  filter(vacc_week >= 4)
-
-# --- fit linear model: percent-points per week ---
-m <- lm(prop_included_dur ~ vacc_week, data = df)
-co <- coef(m)
+# wks_delay <- seq(1, 15, 1)
+# dur_missed_id <- vector('list', length(wks_delay))
+# vax_missed_id <- vector('list', length(wks_delay))
+# 
+# for (i in 1:length(wks_delay)) {
+#   outbk_data_summary %>% 
+#     filter(duration_weeks <= wks_delay[i]) %>%
+#     pull(id_outbreak) -> dur_missed_id[[i]]
+#   
+#   cea_weekly_delay_2 %>% 
+#     filter(vacc_week == wks_delay[i] & runid == 1) %>% 
+#     filter(!ori_occurred) %>% 
+#     pull(id_outbreak) -> vax_missed_id[[i]]
+# }
+# n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
+# n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
+# 
+# n_outbreaks <- nrow(outbk_data_summary)
+# prop_df <- data.frame(
+#   vacc_week = seq(1, 15, 1), 
+#   prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
+#   prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
+# 
+# df <- prop_df %>%
+#   select(vacc_week, prop_included_dur) %>%
+#   filter(vacc_week >= 4)
+# 
+# # --- fit linear model: percent-points per week ---
+# m <- lm(prop_included_dur ~ vacc_week, data = df)
+co <- coef(fit_lm)
 alpha <- unname(co[1])   # intercept
 beta  <- unname(co[2])   # slope (expected to be negative)
 r2    <- summary(m)$r.squared
@@ -2571,12 +2660,6 @@ Plotting data
 # summary by subset_id in addition to the grouping variables # 
 # grouping variables \in c("vacc_cov","vacc_week","target_vacc_doses",
 # "vacc_priority","priority_prob", "subset_id","pp_r")
-subset_files <- c(
-  "outputs/paper/cea_summary_subsets_vw_1_20251031.rds",
-  "outputs/paper/cea_summary_subsets_vw_9_20251031.rds"
-)
-cea_subsets <- map_dfr(subset_files, read_rds)
-
 # columns you pivot on / keep
 keys <- c("vacc_cov","vacc_week","target_vacc_doses",
           "vacc_priority","priority_prob","subset_id","pp_r")
@@ -2804,8 +2887,9 @@ shp_wk9 <- 1
 
 Number of targeted outbreaks
 ```{r}
-ocv_dose_2020 <- ocv_year[year == 2020, cum_num_ocv]
-ocv_dose_2024 <- ocv_year[year == 2024, cum_num_ocv]
+ocv_dose_2020 <- ocv_use_dashboard$cumulative_icg[1] * 1e6
+ocv_dose_2024 <- ocv_use_dashboard$cumulative_icg[2] * 1e6
+
 dose_marks <- tibble::tibble(
   x = c(ocv_dose_2020, ocv_dose_2024),
   lab = c("2020", "2024")

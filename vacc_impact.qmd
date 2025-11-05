@@ -1382,3 +1382,42 @@ for (vw in vacc_weeks) {
 saveRDS(res, paste0("outputs/paper/fit_exp_decay_case_trigger_",
                     tstamp(), ".rds"))
 ```
+
+
+# Linear decrease in the proportion of ORI-eligible outbreaks 
+
+```{r}
+wks_delay <- seq(1, 15, 1)
+dur_missed_id <- vector('list', length(wks_delay))
+vax_missed_id <- vector('list', length(wks_delay))
+
+for (i in 1:length(wks_delay)) {
+  outbk_data_summary %>% 
+    filter(duration_weeks <= wks_delay[i]) %>%
+    pull(id_outbreak) -> dur_missed_id[[i]]
+  
+  cea_weekly_delay_2 %>% 
+    filter(vacc_week == wks_delay[i] & runid == 1) %>% 
+    filter(!ori_occurred) %>% 
+    pull(id_outbreak) -> vax_missed_id[[i]]
+}
+n_outbreaks_missed1 <- map_vec(dur_missed_id, function(i) length(i))
+n_outbreaks_missed2 <- map_vec(vax_missed_id, function(i) length(i))
+
+n_outbreaks <- nrow(outbk_data_summary)
+prop_ori_outbreaks <- data.frame(
+  vacc_week = seq(1, 15, 1), 
+  prop_included_dur = (1 - n_outbreaks_missed1 / n_outbreaks),
+  prop_included_vax = (1 - n_outbreaks_missed2 / n_outbreaks))
+
+df <- prop_ori_outbreaks %>%
+  select(vacc_week, prop_included_dur) %>%
+  filter(vacc_week >= 4) 
+  # longer than 5 weeks
+
+# --- fit linear model: percent-points per week ---
+fit_lm <- lm(prop_included_dur ~ vacc_week, data = df)
+
+saveRDS(fit_lm, paste0("outputs/paper/fit_lm_", tstamp(), ".rds"))
+```
+
