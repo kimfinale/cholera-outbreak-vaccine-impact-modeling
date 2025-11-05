@@ -730,7 +730,7 @@ sum_over_outbreaks_by_runid <- function(d, group_cols = NULL) {
 #'
 #' @param outbreak_data Data frame; must include column `pop` (numeric, outbreak population)
 #' @param target_outbreak_count Integer >=1 or NULL; number of outbreaks to select (optional)
-#' @param target_ocv_doses Numeric >0 or NULL; total ocv doses available (optional)
+#' @param target_ocv_doses Numeric >0 or NULL; total OCV doses available (optional)
 #' @param target_coverage Numeric in (0,1]; assumed coverage applied to every selected outbreak
 #' @param seed Integer or NULL; random seed for reproducibility
 #' @param max_attempts Integer; safety cap on iterations
@@ -1896,6 +1896,186 @@ vacc_impact_outbreak_weekly <- function(data = NULL,
   return(subset(df, select = -c(ive, prop_u5)))
 }
 
+#'
+#' #' Run Vaccine Impact Model for Multiple Outbreaks (Weekly)
+#' #'
+#' #' Computes vaccine impact across multiple outbreaks with age-specific effects
+#' #'
+#' #' @param outbreak_data Time series data for multiple outbreaks
+#' #' @param ive_data Indirect vaccine effectiveness data
+#' #' @param parameters Parameter values for the model
+#' #' @param age_dist Age distribution data
+#' #' @param vacc_week Week of vaccination
+#' #' @param case_trigger Case threshold to trigger vaccination
+#' #' @param vacc_cov Vaccination coverage
+#' #' @param runid Run ID for parameter set
+#' #' @return Data frame with aggregated vaccine impact results
+#' run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
+#'                                             ive_data = NULL,
+#'                                             parameters = NULL,
+#'                                             age_dist = NULL,
+#'                                             vacc_week = NULL,
+#'                                             no_ori_delay_outbreak_end = 0,
+#'                                             case_trigger = NULL,
+#'                                             vacc_cov = NULL,
+#'                                             runid = NULL) {
+#'
+#'   # Get unique outbreak IDs
+#'   outbreak_ids <- unique(outbreak_data$id_outbreak)
+#'
+#'   # Create lists to store simulation results
+#'   lst <- vector("list", length(outbreak_ids))
+#'   lst2 <- vector("list", length(vacc_cov))
+#'   lst3 <- vector("list", length(vacc_week))
+#'   lst4 <- vector("list", length(case_trigger))  # New list for hybrid strategy
+#'
+#'   # Extract parameters for this run
+#'   p <- parameters[runid, c("dur_campaign", "delay_vacc_effect",
+#'                            "vacc_effect_direct_u5", "vacc_effect_direct_5p",
+#'                            "vacc_effect_indirect_id")]
+#'
+#'   # Get direct vaccine effectiveness values
+#'   dve <- c(p$vacc_effect_direct_u5, p$vacc_effect_direct_5p)
+#'
+#'   # Time-triggered vaccination scenario (only vacc_week provided)
+#'   if (!is.null(vacc_week) & is.null(case_trigger)) {
+#'     for (k in 1:length(vacc_week)) {
+#'       # Calculate time to vaccine effect
+#'       time_to_vacc <- (vacc_week[k] - 1)*7 + 3.5 # vaccinations start at mid-week and mid-day
+#'       week_delay <- round((time_to_vacc + p$dur_campaign/2 + p$delay_vacc_effect)/7)
+#'
+#'       for (j in 1:length(vacc_cov)) {
+#'         for (i in 1:length(outbreak_ids)) {
+#'           # Calculate impact for this outbreak
+#'           d <- vacc_impact_outbreak_weekly(
+#'             data = outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],],
+#'             age_dist = age_dist,
+#'             # vacc_week = vacc_week[k],
+#'             # case_trigger = case_trigger,
+#'             vacc_cov = vacc_cov[j],
+#'             dve = dve,
+#'             ive_data = ive_data,
+#'             ive_rownum = p$vacc_effect_indirect_id,
+#'             week_delay = week_delay,
+#'             no_ori_delay_outbreak_end = no_ori_delay_outbreak_end
+#'           )
+#'
+#'           d$vacc_week = vacc_week[k]
+#'           d$case_trigger = case_trigger
+#'           d$strategy <- "onset_triggered"
+#'           d$trigger_week <- 1
+#'
+#'           lst[[i]] <- d
+#'         }
+#'         lst2[[j]] <- rbindlist(lst)
+#'       }
+#'       lst3[[k]] <- rbindlist(lst2)
+#'     }
+#'     res <- rbindlist(lst3)
+#'   }
+#'
+#'   # Case-triggered vaccination scenario (only case_trigger provided)
+#'   else if (!is.null(case_trigger) & is.null(vacc_week)) {
+#'     for (k in 1:length(case_trigger)) {
+#'       for (j in 1:length(vacc_cov)) {
+#'         for (i in 1:length(outbreak_ids)) {
+#'           # Get data for this outbreak
+#'           data <- outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],]
+#'
+#'           # Calculate when vaccination would be triggered
+#'           cum_case <- cumsum(data$s_ch)
+#'           vacc_week <- min(which(cum_case >= case_trigger[k])) # could be Inf
+#'
+#'           # Calculate time to vaccine effect
+#'           time_to_vacc <- (vacc_week - 1)*7 + 3.5 # vaccinations start at mid-day
+#'           week_delay <- round((time_to_vacc + p$dur_campaign/2 + p$delay_vacc_effect)/7)
+#'
+#'           # Calculate impact for this outbreak
+#'           d <- vacc_impact_outbreak_weekly(
+#'             data = data,
+#'             age_dist = age_dist,
+#'             # vacc_week = vacc_week,
+#'             # case_trigger = case_trigger[k],
+#'             vacc_cov = vacc_cov[j],
+#'             dve = dve,
+#'             ive_data = ive_data,
+#'             ive_rownum = p$vacc_effect_indirect_id,
+#'             week_delay = week_delay)
+#'
+#'           d$vacc_week = vacc_week
+#'           d$case_trigger = case_trigger[k]
+#'           d$strategy <- "fixed_case"
+#'           d$trigger_week <- 1
+#'
+#'           lst[[i]] <- d
+#'         }
+#'         lst2[[j]] <- rbindlist(lst2)
+#'       }
+#'       lst3[[k]] <- rbindlist(lst2)
+#'     }
+#'     res <- rbindlist(lst3)
+#'   }
+#'   # NEW: Hybrid strategy - case-triggered with delayed vaccination
+#'   # (both case_trigger and vacc_week provided)
+#'   else if (!is.null(case_trigger) & !is.null(vacc_week)) {
+#'     for (m in 1:length(case_trigger)) {
+#'       for (k in 1:length(vacc_week)) {
+#'         for (j in 1:length(vacc_cov)) {
+#'           for (i in 1:length(outbreak_ids)) {
+#'             # Get data for this outbreak
+#'             data <- outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],]
+#'
+#'             # Calculate when vaccination would be triggered
+#'             cum_case <- cumsum(data$s_ch)
+#'             trigger_week <- min(which(cum_case >= case_trigger[m])) # could be Inf
+#'
+#'             # Calculate actual vaccination week (trigger week + additional delay)
+#'             actual_vacc_week <- trigger_week + vacc_week[k] - 1
+#'
+#'             # Skip if vaccination would occur too late (after outbreak ends)
+#'             time_to_vacc <- (actual_vacc_week - 1)*7 + 3.5 # vaccinations start at mid-day
+#'             week_delay <- round((time_to_vacc + p$dur_campaign/2 + p$delay_vacc_effect)/7)
+#'
+#'             # Calculate impact for this outbreak
+#'             d <- vacc_impact_outbreak_weekly(
+#'               data = data,
+#'               age_dist = age_dist,
+#'               # vacc_week = vacc_week[k],
+#'               # case_trigger = case_trigger[m],
+#'               vacc_cov = vacc_cov[j],
+#'               dve = dve,
+#'               ive_data = ive_data,
+#'               ive_rownum = p$vacc_effect_indirect_id,
+#'               week_delay = week_delay)
+#'
+#'             # Add strategy identifier to the results
+#'             d$vacc_week = vacc_week[k]
+#'             d$case_trigger = case_trigger[m]
+#'             d$strategy <- "case_triggered"
+#'             d$trigger_week <- trigger_week
+#'
+#'             lst[[i]] <- d
+#'           }
+#'           lst2[[j]] <- rbindlist(lst)
+#'         }
+#'         lst3[[k]] <- rbindlist(lst2)
+#'       }
+#'       lst4[[m]] <- rbindlist(lst3)
+#'     }
+#'     res <- rbindlist(lst4)
+#'   }
+#'   else {
+#'     # No vaccination scenario
+#'     res <- data.frame()
+#'   }
+#'
+#'   # Add run ID to results if we have results
+#'   if (nrow(res) > 0) {
+#'     res$runid <- runid
+#'   }
+#'
+#'   return(as.data.frame(res))
+#' }
 
 #' Run Vaccine Impact Model for Multiple Outbreaks (Weekly)
 #'
@@ -1915,7 +2095,7 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
                                             parameters = NULL,
                                             age_dist = NULL,
                                             vacc_week = NULL,
-                                            no_ori_delay_outbreak_end = 0,
+                                            no_ori_delay_outbreak_end = 2,
                                             case_trigger = NULL,
                                             vacc_cov = NULL,
                                             runid = NULL) {
@@ -1950,8 +2130,6 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
           d <- vacc_impact_outbreak_weekly(
             data = outbreak_data[outbreak_data$id_outbreak == outbreak_ids[i],],
             age_dist = age_dist,
-            # vacc_week = vacc_week[k],
-            # case_trigger = case_trigger,
             vacc_cov = vacc_cov[j],
             dve = dve,
             ive_data = ive_data,
@@ -1994,13 +2172,13 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
           d <- vacc_impact_outbreak_weekly(
             data = data,
             age_dist = age_dist,
-            # vacc_week = vacc_week,
-            # case_trigger = case_trigger[k],
             vacc_cov = vacc_cov[j],
             dve = dve,
             ive_data = ive_data,
             ive_rownum = p$vacc_effect_indirect_id,
-            week_delay = week_delay)
+            week_delay = week_delay,
+            no_ori_delay_outbreak_end = no_ori_delay_outbreak_end
+          )
 
           d$vacc_week = vacc_week
           d$case_trigger = case_trigger[k]
@@ -2030,6 +2208,7 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
             trigger_week <- min(which(cum_case >= case_trigger[m])) # could be Inf
 
             # Calculate actual vaccination week (trigger week + additional delay)
+            # trigger_week = 1, vacc_week[k] = then, vaccination in week 1
             actual_vacc_week <- trigger_week + vacc_week[k] - 1
 
             # Skip if vaccination would occur too late (after outbreak ends)
@@ -2040,13 +2219,13 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
             d <- vacc_impact_outbreak_weekly(
               data = data,
               age_dist = age_dist,
-              # vacc_week = vacc_week[k],
-              # case_trigger = case_trigger[m],
               vacc_cov = vacc_cov[j],
               dve = dve,
               ive_data = ive_data,
               ive_rownum = p$vacc_effect_indirect_id,
-              week_delay = week_delay)
+              week_delay = week_delay,
+              no_ori_delay_outbreak_end = no_ori_delay_outbreak_end
+            )
 
             # Add strategy identifier to the results
             d$vacc_week = vacc_week[k]
@@ -2076,8 +2255,6 @@ run_vacc_impact_outbreak_weekly <- function(outbreak_data = NULL,
 
   return(as.data.frame(res))
 }
-
-
 
 #' Find "Ghost" Outbreaks
 #'

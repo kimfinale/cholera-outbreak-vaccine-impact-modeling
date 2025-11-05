@@ -1,13 +1,14 @@
 ---
 title: "Cholera Vaccine Impact Modeling: Visualization and Tables"
 author: "Jong-Hoon Kim"
-date: "`r format(Sys.Date(), '%B %d, %Y')`"
+date: "2025-10-31"
 format:
   html:
     toc: true
     toc-depth: 3
     number-sections: true
     code-fold: show
+    theme: cosmo
 editor_options: 
   chunk_output_type: console
 ---
@@ -111,7 +112,7 @@ x_size <- 1.5
 x_stroke <- 1
 ```
 
-# Load Data
+# Load data
 
 ```{r load-data}
 #| warning: false
@@ -199,7 +200,7 @@ outbk_data_summary <- fread("outputs/paper/outbreak_data_summary_20251022.csv")
 # summary(outbk_data_summary$outbreak_pop)
 ```
 
-# Load Vaccine Impact Simulation Results
+# Load vaccine impact simulation results
 
 ```{r load-results}
 # Outbreak onset-triggered vaccination results
@@ -207,17 +208,19 @@ cea_files <- c("outputs/paper/cea_onset_trigger_20251031.rds")
 cea <- map_dfr(cea_files, read_rds)
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
-
 cea_weekly <- read_rds("outputs/paper/cea_delay_onset_trigger_20251031.rds")
-cea_weekly_delay_2 <- cea_weekly %>% filter(no_ori_delay_outbreak_end == 2)
+cea_weekly_delay_2 <- 
+  cea_weekly %>% filter(no_ori_delay_outbreak_end == 2)
 cea_weekly_delay_2_ori <- cea_weekly %>% 
   filter(no_ori_delay_outbreak_end == 2, ori_occurred == TRUE)
 # weekly decline
-fit_decay <- read_rds("outputs/paper/fit_decay_model_20251031.rds")
-
+fit_decay <- 
+  read_rds("outputs/paper/fit_exp_decay_20251031.rds")
+fit_decay_ct <- 
+  read_rds("outputs/paper/fit_exp_decay_case_trigger_20251031.rds")
 # Case-triggered vaccination results
-# cea_ct <- read_rds("outputs/paper/cea_case_trigger_20251031.rds")
-# cea_ct_ori <- cea_ct %>% filter(ori_occurred == TRUE)
+cea_ct <- read_rds("outputs/paper/cea_case_trigger_20251031.rds")
+cea_ct_ori <- cea_ct %>% filter(ori_occurred == TRUE)
 
 # excluded outbreaks for sensitivity analysis
 # cea_excl <- read_rds("outputs/cea_0.6_onset_trigger_excl_20250716.rds")
@@ -257,20 +260,36 @@ format_median_iqr(onset_impact, digits=0, row=8)
 format_median_iqr(onset_impact, digits=0, row=9)
 format_median_iqr(onset_impact, digits=0, row=10)
 
-
 # weekly reduction rate
 fit_decay[["9"]] %>% 
-  filter(vacc_cov == VC) %>% 
   mutate(rate_reduc = 1 - exp(-k_hat)) %>% 
   summarize_quantiles(rate_reduc*100) %>% 
   format_median_iqr(digits=1)
 
 # half_life                  
 fit_decay[["9"]] %>%
-  filter(vacc_cov == VC) %>%  
   summarize_quantiles(half_life) %>% 
   format_median_iqr(digits=1)
 
+# weekly reduction rate
+fit_decay_ct[["1"]] %>% 
+  mutate(rate_reduc = 1 - exp(-k_hat*10)) %>% 
+  summarize_quantiles(rate_reduc*100) %>% 
+  format_median_iqr(digits=1)
+
+fit_decay_ct[["1"]] %>%
+  summarize_quantiles(half_life) %>% 
+  format_median_iqr(digits=1)
+
+# weekly reduction rate
+fit_decay_ct[["5"]] %>% 
+  mutate(rate_reduc = 1 - exp(-k_hat*10)) %>% 
+  summarize_quantiles(rate_reduc*100) %>% 
+  format_median_iqr(digits=1)
+
+fit_decay_ct[["5"]] %>%
+  summarize_quantiles(half_life) %>% 
+  format_median_iqr(digits=1)
 # rm(onset_impact, stockpile_impact, stockpile_impact_q4)
 ```
 
@@ -1254,7 +1273,7 @@ if (save_plot) {
 
 ## Figure 3: Impact across delays and prioritization
 
-### Summary values referred in the main text
+### Summary values in the main text
 ```{r fig3, eval=FALSE}
 onset_impact <- cea_ori %>%
   filter(vacc_cov %in% c(0.6, 0.75, 0.9), vacc_week %in% c(1,9)) %>%
@@ -1465,8 +1484,7 @@ id_outbreak_sample_wk <- sample(ids_wk, size = n_sample)
 
 fitted_models <- fit_decay$`9` %>% 
   filter(runid %in% runid_sample,
-         id_outbreak %in% id_outbreak_sample_wk,
-         vacc_cov == 0.75)
+         id_outbreak %in% id_outbreak_sample_wk)
 
 ## ---- normalized "spaghetti" using fitted params ----
 # On the normalized scale, A0 cancels; z_hat(t) = exp(-k * (t - t0))
@@ -1483,7 +1501,7 @@ id_outbreak_sample <- id_outbreak_sample_wk
 
 ## ---- raw data, normalized by week-1 value per series ----
 # Expecting 'cea_ori' with columns: vacc_cov, ori_occurred, vacc_week, runid, id_outbreak, pct_reduc_case
-raw_data_points_norm <- cea_weekly_75_ori %>%
+raw_data_points_norm <- cea_weekly_delay_2_ori %>%
   filter(vacc_cov == 0.75,
          vacc_week %in% 1:15, 
          runid %in% runid_sample,
@@ -2546,19 +2564,16 @@ if (save_plot) {
 }
 ```
 
-## Figure 4: Cumulative OCV Impact during OCV stockpile deployment
+## Figure 4: Cumulative impact during OCV stockpile deployment
 
 Plotting data
 ```{r}
 # summary by subset_id in addition to the grouping variables # 
 # grouping variables \in c("vacc_cov","vacc_week","target_vacc_doses",
 # "vacc_priority","priority_prob", "subset_id","pp_r")
-
 subset_files <- c(
-  "outputs/paper/cea_summary_subsets_vw_1_id_1_100_20251024.rds",
-  "outputs/paper/cea_summary_subsets_vw_9_id_1_100_20251024.rds",
-  "outputs/paper/cea_summary_subsets_vw_1_id_101_200_20251024.rds",
-  "outputs/paper/cea_summary_subsets_vw_9_id_101_200_20251024.rds"
+  "outputs/paper/cea_summary_subsets_vw_1_20251031.rds",
+  "outputs/paper/cea_summary_subsets_vw_9_20251031.rds"
 )
 cea_subsets <- map_dfr(subset_files, read_rds)
 
@@ -2566,10 +2581,14 @@ cea_subsets <- map_dfr(subset_files, read_rds)
 keys <- c("vacc_cov","vacc_week","target_vacc_doses",
           "vacc_priority","priority_prob","subset_id","pp_r")
 value_col <- c("doses_used", "outbreak_count", 
-               "s_ch_averted_tot", "death_averted_tot", "daly_averted_tot", 
-               "case_averted_per_1000_OCV", "death_averted_per_1000_OCV",
+               "s_ch_averted_tot",
+               "death_averted_tot",
+               "daly_averted_tot", 
+               "case_averted_per_1000_OCV",
+               "death_averted_per_1000_OCV",
                "daly_averted_per_1000_OCV", 
-               "cost_per_case_averted", "cost_per_death_averted", 
+               "cost_per_case_averted", 
+               "cost_per_death_averted", 
                "cost_per_daly_averted")
 
 # --- configuration for the four scenarios ---
@@ -2613,18 +2632,20 @@ d <- cea_subsets %>%
                  "All")
     )
   )
-
+unique(d[,c("pp_r", "vacc_priority")])
 # split and join to bring doses_used alongside outcomes
 dr <- d %>%
   filter(value_column == value_col[1]) %>%
   select(any_of(keys), scenario, q500)
+
 names(dr) <- c(keys, "scenario", "doses_used")
 
 dw <- d %>%
-  filter(value_column == value_col[2:length(value_col)]) %>%
+  filter(value_column %in% value_col[2:length(value_col)]) %>%
   left_join(dr, by = c(keys, "scenario"))
+levs <- levels(dw$scenario)  # expects: Q[30%](AR), Q[30%](Dur), Q[30%](Size), All
+unique(dw[,c("vacc_priority","pp_r","scenario")])
 
-levs <- levels(dw$scenario)  # expects: Q[70%](AR), Q[70%](Dur), Q[70%](Size), All
 expr_labels <- setNames(
   list(
     bquote(Q[30*"%"](AR)),
@@ -2642,7 +2663,6 @@ expr_labels <- setNames(
 # n_subset_plot <- 30
 # ids <- sample(200, n_subset_plot) # just to reduce plotting load
 ids <- 1:200
-
 # create nudges to prevent too much overlap between subset id's
 dw[, doses_used_plot := doses_used * rnorm(length(dw$doses_used), 
                                          mean=1, sd=1.3e-1)]
@@ -2946,7 +2966,7 @@ Combine, tag, and save
 
 ```{r}
 hj <- 3.4
-vj <- -0.3
+vj <- -0.7
 sz <- 5
 # x <- 0 because of log scale
 # A, B, and C annotations
@@ -2981,7 +3001,6 @@ if (save_plot) {
          height = fgw2*fac*fac, units = "mm")
 }
 ```
-
 
 ### Right panel
 
@@ -3033,7 +3052,7 @@ plt_4 <-
   )+
   scale_shape_manual("",
     values = c("1" = shp_wk1, "9" = shp_wk9),
-    labels = c("1 week", "9 weeks")
+    labels = c("week 1", "week 9")
   )+
   theme_light() +
   guides(color = "none")+
@@ -3141,7 +3160,7 @@ Combine, tag, and save
 
 ```{r}
 hj <- 3.4
-vj <- -0.3
+vj <- -0.7
 sz <- 5
 # x <- 0 because of log scale
 # A, B, and C annotations
@@ -3184,16 +3203,26 @@ Left and right panels
 ```{r}
 plts_pca_cpca <- (plts_ca_agg | plts_cpca_agg) + 
   plot_layout(ncol=2) + 
-  plot_layout(axis_titles = "collect_x") +
+  plot_layout(axis_titles = "collect_x") &
   theme(
     legend.position = "top", # put legends at top
     legend.justification = "center", # center horizontally
     legend.box.just = "center",
     legend.box = "horizontal", # arrange horizontally
-    legend.text = element_text(size=14),
+    legend.text          = element_text(size = 13),
+    legend.title         = element_text(size = 13),
+    axis.title.x         = element_text(size = 13),
+    axis.title.y         = element_text(size = 13),
+    axis.text.x          = element_text(size = 12),
+    axis.text.y          = element_text(size = 12),
     legend.spacing.y = unit(1, "pt"),
     legend.margin = margin(t = 0, r = 0, b = 3, l = 0)
   )
+   
+update_geom_defaults("point", list(size = 4))
+leg_pt <- guide_legend(override.aes = list(size = 4))
+# Optional: larger legend symbols in the final combined figure
+plts_pca_cpca <- plts_pca_cpca + guides(color = leg_pt, shape = leg_pt)
 
 if (save_plot) {
   fac <- 1.35
@@ -3204,7 +3233,6 @@ if (save_plot) {
 }
 ```
 
-
 # Discussion
 
 ```{r}
@@ -3213,23 +3241,62 @@ impact <- cea_ori %>%
   group_by(vacc_cov, vacc_week) %>%
   summarize_quantiles(s_ch_averted_tot, pct_reduc_case, 
                       case_averted_per_1000_OCV,
-                      cost_per_case_averted)
+                      daly_averted_per_1000_OCV,
+                      cost_per_case_averted, 
+                      cost_per_daly_averted)
 
 
-impact %>% filter(variable == "pct_reduc_case")
+impact %>% filter(variable == "pct_reduc_case") 
 impact %>% filter(variable == "case_averted_per_1000_OCV")
+impact %>% filter(variable == "daly_averted_per_1000_OCV")
+impact %>% filter(variable == "cost_per_case_averted")
+impact %>% filter(variable == "cost_per_daly_averted")
 # 9 weeks or longer as being representative 
 fit_decay[["9"]] %>%
-  filter(vacc_cov == VC) %>% 
   mutate(rate_reduc = 100*(1 - exp(- k_hat))) %>% 
   summarize_group(vars=c("rate_reduc"), group_name="> 9 weeks") %>% 
   format_median_iqr(digits=1)
 
 fit_decay[["9"]] %>% 
-  filter(vacc_cov == VC) %>% 
   summarize_group(vars=c("half_life"), group_name="> 9 weeks") %>% 
   format_median_iqr(digits=1)
 
+
+impact %>% filter(variable == "pct_reduc_case") 
+# top quartile
+df <- outbk_data_summary[, c("id_outbreak", "ar_per_10e3", 
+                                   "duration_weeks", "spatial_scale", 
+                                   "rural_urban", "pop", "total_s_ch")]
+
+qn <- floor(0.25 * nrow(df))
+
+top_ar_ids <- df %>% 
+  arrange(desc(ar_per_10e3)) %>% slice(1:qn) %>% pull(id_outbreak)
+top_dur_ids <- df %>%
+  arrange(desc(duration_weeks)) %>% slice(1:qn) %>% pull(id_outbreak)
+# top_size_ids <- df %>% 
+#   arrange(desc(total_s_ch)) %>% slice(1:qn) %>% pull(id_outbreak)
+
+# top quartile in attack rate
+cea_ori %>% 
+  filter(id_outbreak %in% top_dur_ids, 
+         vacc_cov %in% c(0.75), 
+         vacc_week %in% c(1,5,9,13)) %>%
+  group_by(vacc_week) %>%
+  summarize_quantiles(pct_reduc_case)
+
+cea_ori %>% 
+  filter(vacc_cov %in% c(0.75), 
+         vacc_week %in% c(1,5,9,13)) %>%
+  group_by(vacc_week) %>%
+  summarize_quantiles(case_averted_per_1000_OCV)
+
+cea_ori %>% 
+  filter(id_outbreak %in% top_ar_ids, 
+         vacc_cov %in% c(0.75), 
+         vacc_week %in% c(1,5,9,13)) %>%
+  group_by(vacc_week) %>%
+  summarize_quantiles(case_averted_per_1000_OCV)
 # dw from Figure 4
 ca <- dw %>%
   filter(value_column == "s_ch_averted_tot") %>%
@@ -4121,16 +4188,13 @@ if (save_table) {
 ```{r}
 # Create summary for case-triggered vaccination at different thresholds
 vwks <- c(1, 5, 9, 13)
-ctgs <- c(1, 10, 50, 100)
+ctgs <- c(1, 10, 50, 140)
 tab <- data.frame()
-
-cea_ct_ori <- cea_ct[ori_occurred == TRUE]
 
 for (wk in vwks) {
   # identify a set of outbreaks across case triggers 
-  ids0 <- cea_ct %>% 
+  ids0 <- cea_ct_ori %>% 
     filter(vacc_week == wk & runid == 1, case_trigger == max(ctgs)) %>% 
-    filter(ori_occurred) %>% 
     pull(id_outbreak)
   
   for (ctg in ctgs) {
@@ -4148,7 +4212,7 @@ tab$vacc_week <- rep(vwks, each=length(ctgs))
 tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round(tab$n_outbreaks/1192*100, digits=1), "%)")
 
 if (save_table) {
-  fwrite(tab, paste0("outputs/table4_case_triggered_impact_IQR_", tstamp(), ".csv"),
+  fwrite(tab, paste0("outputs/paper/tableS2_case_triggered_", tstamp(), ".csv"),
             row.names = FALSE)
 }
 ```
