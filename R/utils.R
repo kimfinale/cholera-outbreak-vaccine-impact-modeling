@@ -353,7 +353,8 @@ format_median_iqr <- function(x, digits = 1, row = NULL) {
   )
 }
 
-format_median_interval <- function(x, digits = 1, nrow = 1, interval = "95% PI") {
+format_median_interval <- function(x, digits = 1, nrow = 1,
+                                   interval = "95% PI") {
   output <- character(nrow)
 
   for (i in 1:nrow) {
