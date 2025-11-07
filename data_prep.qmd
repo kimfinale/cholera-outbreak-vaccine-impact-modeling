@@ -125,8 +125,16 @@ if (save_csv) {
 
 ## Alternative boundary population size
 ```{r}
+# Step 0: Load initial data
+outbreaks0 <- clean_names(fread("data/paper/outbreak_files_Oct2024/outbreak_summary.csv"))
+outbreaks0 |>
+  group_by(location, outbreak_number) |>
+  mutate(id_outbreak = paste0(location, "-", start_date, "-", end_date)) |> 
+  ungroup() -> outbreaks0
+
+setDT(outbreaks0) 
+
 # Step 1: Filter by size (too small or too large)
-ocv_use <- fread("outputs/ocv_use_GTFCC_data_20241120.csv")
 max_pop_size <- 15e6
 min_pop_size <- 5e3
 
@@ -196,8 +204,6 @@ if (save_csv) {
           row.names = FALSE)
 }
 ```
-
-
 
 ## Life expectancy data
 ```{r}

@@ -179,15 +179,24 @@ outbk_data_summary <- fread("outputs/paper/outbreak_data_summary_20251022.csv")
 # summary(outbk_data_summary$outbreak_pop)
 
 # outbreaks in the top quartile by attack rate (ar), duration (dur), and size
-qn <- floor(0.25 * nrow(outbk_data_summary))
+n25 <- floor(0.25 * nrow(outbk_data_summary))
 
 top_q_ar_ids <- outbk_data_summary %>% 
-  arrange(desc(ar_per_10e3)) %>% slice(1:qn) %>% pull(id_outbreak)
+  arrange(desc(ar_per_10e3)) %>% slice(1:n25) %>% pull(id_outbreak)
 top_q_dur_ids <- outbk_data_summary %>%
-  arrange(desc(duration_weeks)) %>% slice(1:qn) %>% pull(id_outbreak)
+  arrange(desc(duration_weeks)) %>% slice(1:n25) %>% pull(id_outbreak)
 top_q_size_ids <- outbk_data_summary %>% 
-  arrange(desc(total_s_ch)) %>% slice(1:qn) %>% pull(id_outbreak)
+  arrange(desc(total_s_ch)) %>% slice(1:n25) %>% pull(id_outbreak)
 
+
+n10 <- floor(0.1 * nrow(outbk_data_summary))
+
+top_10_ar_ids <- outbk_data_summary %>% 
+  arrange(desc(ar_per_10e3)) %>% slice(1:n10) %>% pull(id_outbreak)
+top_10_dur_ids <- outbk_data_summary %>%
+  arrange(desc(duration_weeks)) %>% slice(1:n10) %>% pull(id_outbreak)
+top_10_size_ids <- outbk_data_summary %>% 
+  arrange(desc(total_s_ch)) %>% slice(1:n10) %>% pull(id_outbreak)
 ```
 
 # Load vaccine impact simulation results
@@ -210,6 +219,10 @@ cea_weekly_delay_2 <-
 
 cea_weekly_delay_2_ori <- cea_weekly %>% 
   filter(no_ori_delay_outbreak_end == 2, ori_occurred == TRUE)
+
+cea_alt_data <- 
+  read_rds("outputs/paper/cea_alt_data_onset_trigger_20251031.rds")
+
 # weekly decline
 fit_decay <- read_rds("outputs/paper/fit_exp_decay_20251031.rds")
 fit_decay_ct <- 
@@ -311,6 +324,14 @@ capd_top_q_ar <- cea_ori %>%
   summarize_quantiles(case_averted_per_1000_OCV) %>% 
   pull(q500)
 
+# fold increase in case averted per 1000 OCVs
+capd_top_10_ar <- cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_10_ar_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(case_averted_per_1000_OCV) %>% 
+  pull(q500)
+
 capd <- onset_impact %>% 
   filter(variable == "case_averted_per_1000_OCV") %>% 
   pull(q500) 
@@ -318,11 +339,22 @@ capd <- onset_impact %>%
 paste0("fold increase in case averted per 1,000 OCVs: ", 
        capd_top_q_ar / capd)
 
+paste0("fold increase in case averted per 1,000 OCVs: ", 
+       capd_top_10_ar / capd)
 
 # fold increase in averted per 1000 OCVs
+# top quartile
 dapd_top_q_ar <- cea_ori %>%
   filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
   filter(id_outbreak %in% top_q_ar_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(daly_averted_per_1000_OCV) %>%  
+  pull(q500)
+
+# top 10%
+dapd_top_10_ar <- cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_10_ar_ids) %>%
   group_by(vacc_cov, vacc_week) %>%
   summarize_quantiles(daly_averted_per_1000_OCV) %>%  
   pull(q500)
@@ -334,10 +366,22 @@ dapd <- onset_impact %>%
 paste0("fold increase in DALY averted per 1,000 OCVs: ",
        dapd_top_q_ar / dapd)
 
+
+paste0("fold increase in DALY averted per 1,000 OCVs: ",
+       dapd_top_10_ar / dapd)
+
 # cost per DALY averted
+# top quartile
 cpda_top_q_ar <- cea_ori %>%
   filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
   filter(id_outbreak %in% top_q_ar_ids) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(cost_per_daly_averted) %>% 
+  pull(q500)
+# top 10%
+cpda_top_10_ar <- cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  filter(id_outbreak %in% top_10_ar_ids) %>%
   group_by(vacc_cov, vacc_week) %>%
   summarize_quantiles(cost_per_daly_averted) %>% 
   pull(q500)
@@ -347,7 +391,7 @@ cpda <- onset_impact %>%
   pull(q500) 
 
 paste0("fold decrease in cost per DALY averted: ", cpda/cpda_top_q_ar)
-
+paste0("fold decrease in cost per DALY averted: ", cpda/cpda_top_10_ar)
 # subset
 cea_subsets %>% 
   mutate(prob_i = as.integer(round(100*priority_prob))) %>% 
@@ -1359,7 +1403,7 @@ if (save_plot) {
 
 ## Figure 3: Impact across delays and prioritization
 
-### Summary values in the main text
+# Summary values in results section
 ```{r fig3, eval=FALSE}
 onset_impact <- cea_ori %>%
   filter(vacc_cov %in% c(0.6, 0.75, 0.9), vacc_week %in% c(1,9)) %>%
@@ -1456,20 +1500,27 @@ cea_prioritization %>%
          vacc_week %in% c(1,9)) %>% 
   select(vacc_week, prob_i, median_value)
 
-
-cea_prioritization %>%
+capd <- cea_prioritization %>%
   mutate(prob_i = as.integer(round(100 * prob))) %>% 
   filter(metric == "med_case_averted_per_1000_OCV", 
          percentile_by =="ar", prob_i %in% c(0, 90), 
          vacc_week %in% c(1,9)) %>% 
   select(vacc_week, prob_i, median_value)
 
-cea_prioritization %>%
+# fold increase
+capd$median_value[3] / capd$median_value[1]
+capd$median_value[4] / capd$median_value[2]
+
+dalyapd <- cea_prioritization %>%
   mutate(prob_i = as.integer(round(100 * prob))) %>% 
   filter(metric == "med_daly_averted_per_1000_OCV", 
          percentile_by =="ar", prob_i %in% c(0, 90), 
          vacc_week %in% c(1,9)) %>% 
   select(vacc_week, prob_i, median_value)
+
+# fold increase
+dalyapd$median_value[3] / dalyapd$median_value[1]
+dalyapd$median_value[4] / dalyapd$median_value[2]
 
 cea_prioritization %>%
   mutate(prob_i = as.integer(round(100 * prob))) %>% 
@@ -1491,12 +1542,10 @@ onset_impact %>%
 
 # gdp data from World Bank during 2010-2020
 gdp_data <- read_xls("data/paper/GDP_WorldBank.xls")
-gdp_data %>% 
+gdp_2010_2020 <- gdp_data %>% 
   filter(`Country Name` == "Sub-Saharan Africa (IDA & IBRD countries)") %>%
   select(c(`2010`:`2020`)) |> 
-  as.numeric() %>% 
-  summary()
-
+  as.numeric() 
 
 # PCA in the top quartile by duration
 cea_ori %>%
@@ -1506,19 +1555,27 @@ cea_ori %>%
   summarize_quantiles(pct_reduc_case) %>%  
   select(vacc_week,q250,q500,q750)
 
- 
 # Cost per DALY averted
 cea_ori %>%
   filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
-  filter(id_outbreak %in% top_q_ar_ids) %>%
+  filter(id_outbreak %in% top_10_ar_ids) %>%
   group_by(vacc_cov, vacc_week) %>%
   summarize_quantiles(cost_per_daly_averted) %>%  
-  select(vacc_week,q250,q500,q750)
-
+  select(vacc_week,q250,q500,q750) -> cpdalya_top10
 # ratio to the median gdp
-round(c(2967,20433)/1665, digits=1) 
+round(cpdalya_top10$q500/median(gdp_2010_2020), digits=1) 
 
-# 
+# Cost per DALY averted
+cea_ori %>%
+  filter(vacc_cov %in% c(0.75), vacc_week %in% c(1,9)) %>%
+  group_by(vacc_cov, vacc_week) %>%
+  summarize_quantiles(cost_per_daly_averted) %>%  
+  select(vacc_week,q250,q500,q750) -> cpdalya
+
+# % reduction in cost per DALY averted 
+100*(1 - cpdalya_top10$q500/cpdalya$q500)
+
+# exponential decay
 fit_decay_ct[["1"]] %>%
   summarize_quantiles(r_squared) %>% 
   format_median_iqr(digits=2)
@@ -3342,6 +3399,7 @@ if (save_plot) {
 
 ## Table 3. Impact under the outbreak onset-triggered scenario
 
+All and top 10% by attack rate, duration, and size
 ```{r table3}
 # Create summary for time-triggered vaccination at different times
 cea_ori[(vacc_cov == VC & vacc_week %in% c(1, 13))] %>% 
@@ -3365,43 +3423,43 @@ tab <- data.frame()
 for (wk in wks) {
   d <- cea_ori[(vacc_cov == VC & vacc_week == wk)]
   tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
-  tab_temp$n_outbreaks <- nrow(d[d$runid == 1])
+  tab_temp$n_outbreaks <- length(unique(d$id_outbreak))
   tab <- rbind(tab, tab_temp)
 }
 
-# top quartile in attack rate
-dat <- cea_ori %>% filter(id_outbreak %in% top_q_ar_ids)
+# top 10% in attack rate
+dat <- cea_ori %>% filter(id_outbreak %in% top_10_ar_ids)
 for (wk in wks) {
   d <- dat[(vacc_cov == VC & vacc_week == wk)]
   tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
-  tab_temp$n_outbreaks <- nrow(d[d$runid == 1])
+  tab_temp$n_outbreaks <- length(unique(d$id_outbreak))
   tab <- rbind(tab, tab_temp) 
 }
 
-# top quartile in duration
-dat <- cea_ori %>% filter(id_outbreak %in% top_q_dur_ids)
+# top 10% in duration
+dat <- cea_ori %>% filter(id_outbreak %in% top_10_dur_ids)
 for (wk in wks) {
   d <- dat[(vacc_cov == VC & vacc_week == wk)]
   tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
-  tab_temp$n_outbreaks <- nrow(d[d$runid == 1])
+  tab_temp$n_outbreaks <- length(unique(d$id_outbreak))
   tab <- rbind(tab, tab_temp)
 }
 
-# top quartile in size
-dat <- cea_ori %>% filter(id_outbreak %in% top_q_size_ids)
+# top 10% in size
+dat <- cea_ori %>% filter(id_outbreak %in% top_10_size_ids)
 for (wk in wks) {
   d <- dat[(vacc_cov == VC & vacc_week == wk)]
   tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
-  tab_temp$n_outbreaks <- nrow(d[d$runid == 1])
+  tab_temp$n_outbreaks <- length(unique(d$id_outbreak))
   tab <- rbind(tab, tab_temp)
 }
 
 tab$week <- rep(wks, 4)
-tab$group <- rep(c("All","Top 25% attack rate",
-                    "Top 25% duration","Top 25% size"), each = 4)
+tab$group <- rep(c("All","Top 10% attack rate",
+                    "Top 10% duration","Top 10% size"), each = 4)
 
 # format number of outbreaks with percentages
-tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round(tab$n_outbreaks/1192*100, digits=1), "%)") 
+tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round(tab$n_outbreaks/length(unique(cea$id_outbreak))*100, digits=1), "%)") 
 
 if (save_table) {
   fwrite(tab, 
@@ -3424,17 +3482,17 @@ for (vc in VC3) {
   for (wk in wks) {
     d <- cea_ori[(vacc_cov == vc & vacc_week == wk)]
     tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
-    tab_temp$n_outbreaks <- nrow(d[d$runid == 1])
+    tab_temp$n_outbreaks <- length(unique(d$id_outbreak))
     tab <- rbind(tab, tab_temp)
   }  
 }
-tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round(tab$n_outbreaks/1192*100, digits=1), "%)")
+tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round(tab$n_outbreaks/length(unique(cea$id_outbreak))*100, digits=1), "%)")
 
 tab$week <- rep(wks, length(VC3))
 tab$vc <- rep(VC3, each=length(wks))
 
 if (save_table) {
-  fwrite(tab, paste0("outputs/paper/tableS1_onset_triggered_", tstamp(), ".csv"), 
+  fwrite(tab, paste0("outputs/paper/tableS1_onset_triggered_vc_vw_", tstamp(), ".csv"), 
             row.names = FALSE)
 }
 ```
@@ -3452,7 +3510,7 @@ for (wk in vwks) {
     d <- cea_ct_ori[(vacc_cov == VC & vacc_week == wk & 
                        case_trigger == ctg)]
     tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
-    tab_temp$n_outbreaks <- nrow(d[d$runid == 1])
+    tab_temp$n_outbreaks <- length(unique(d$id_outbreak))
     tab <- rbind(tab, tab_temp)
   }
 }
@@ -3468,7 +3526,7 @@ if (save_table) {
 }
 ```
 
-## Table S2. Onset-triggered across varying lags of no ORI after outbreak resolution
+## Table S2. Onset-triggered ORIs across varying delays to stop ORI after outbreak end
 
 ```{r}
 # Create summary for case-triggered vaccination at different thresholds
@@ -3482,7 +3540,7 @@ for (wk in vwks) {
                      vacc_week == wk & 
                        no_ori_delay_outbreak_end == lag)]
     tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
-    tab_temp$n_outbreaks <- nrow(d[d$runid == 1])
+    tab_temp$n_outbreaks <- length(unique(d$id_outbreak))
     tab <- rbind(tab, tab_temp)
   }
 }
@@ -3490,7 +3548,7 @@ for (wk in vwks) {
 tab$no_ori_lag <- rep(lags, length(vwks))
 tab$vacc_week <- rep(vwks, each=length(lags))
 
-tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round(tab$n_outbreaks/nrow(outbk_data_summary)*100, digits=1), "%)")
+tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round(tab$n_outbreaks/length(unique(cea_weekly$id_outbreak))*100, digits=1), "%)")
 
 if (save_table) {
   fwrite(tab, paste0("outputs/paper/tableS2_no_ori_lag_", tstamp(), ".csv"),
@@ -3498,53 +3556,28 @@ if (save_table) {
 }
 ```
 
-
-## Table S3: Sensitivity Analysis of the Impact of Outbreak Onset-Triggered Vaccination
+## Table S3: Onset-triggered ORIs across alternative outbreak dataset (expanding size limit)
 
 ```{r tableS1}
-cea_0.75 <- read_rds("outputs/cea_0.75_onset_trigger_20250716.rds")
-vc <- c(0.75) 
+# 75% vaccine coverage only
+unique(cea_alt_data$vacc_cov)
+
 wks <- c(1, 5, 9, 13)
-
 tab <- data.frame()
-cea_0.75_ori <- cea_0.75[ori_occurred == TRUE]
+cea_alt_ori <- cea_alt_data[(ori_occurred == TRUE)]
+
 for (wk in wks) {
-  d <- cea_0.75_ori[(vacc_cov == vc & vacc_week == wk)]
-  tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
+  d <- cea_alt_ori[vacc_week == wk]
+  tab_temp <- impact_summary(d, probs=c(0.25, 0.5, 0.75))
+  tab_temp$n_outbreaks <- length(unique(d$id_outbreak))
+  tab <- rbind(tab, tab_temp)
 }
 
-# impact under the scenario where ORIs DO occur even when outbreaks have ended 
-for (wk in wks) {
-  d <- cea_0.75[(vacc_cov == vc & vacc_week == wk)]
-  tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
-}
-
-outbreaks_alt <- read_rds("outputs/outbreaks_alt_included_20250912.rds")
-
-deaexcl <- read_rds("outputs/outbreaks_excluded_20250716.rds")
-
-cea_incl_excl <- rbindlist(list(cea, cea_excl))
-cea_alt <- cea_incl_excl %>% filter(id_outbreak %in% outbreaks_alt$id_outbreak)
-  
-# Create summary for time-triggered vaccination at different times
- 
-wks <- c(1, 5, 9, 13)
-
-# # impact under the scenario where ORIs DO NOT occur even when outbreaks have ended 
-tab <- data.frame()
-
-# impact under the scenario where ORIs DO occur even when outbreaks have ended 
-for (vc in VC3) {
-  for (wk in wks) {
-    d <- cea_alt[(vacc_cov == vc & vacc_week == wk)]
-    tab <- rbind(tab, impact_summary(d, probs=c(0.25, 0.5, 0.75)))
-  }
-}
-
-tab$week <- rep(wks, 3)
-
+tab$week <- wks
+# format number of outbreaks with percentages
+tab$n_outbreaks <- paste0(format_num(tab$n_outbreaks, big.mark=","), " (", round(tab$n_outbreaks/length(unique(cea_alt_data$id_outbreak))*100, digits=1), "%)") 
 if (save_table) {
-  fwrite(tab, paste0("outputs/tableS4_outbreak_data_sens_anal_", tstamp(), ".csv"), 
+  fwrite(tab, paste0("outputs/paper/tableS3_alt_data_", tstamp(), ".csv"), 
             row.names = FALSE)
 }
 ```

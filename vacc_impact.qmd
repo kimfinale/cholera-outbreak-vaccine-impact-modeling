@@ -341,7 +341,7 @@ vacc_delivery_cost <- vacc_delivery_cost * inflation_factor_vac
 
 # Vaccine impact simulation
 
-## Outbreak onset-triggered strategy
+### Outbreak onset-triggered strategy
 
 This section models vaccination initiated at specific weeks after outbreak onset.
 
@@ -392,7 +392,7 @@ toc <- Sys.time()
 message(paste("Total execution time:", toc - tic))
 ```
 
-## Onset-triggered strategy across delays to stop ORI after outbreak end
+### Onset-triggered strategy across delays to stop ORI after outbreak end
 
 ```{r onset-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
@@ -441,8 +441,7 @@ toc <- Sys.time()
 message(paste("Total execution time:", toc - tic))
 ```
 
-
-## Onset-triggered strategy for the excluded data set.
+### Onset-triggered strategy for the alternative dataset.
 
 ```{r onset-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
@@ -497,7 +496,7 @@ toc <- Sys.time()
 message(paste("Total execution time:", toc - tic))
 ```
 
-## Case-Triggered Strategy
+### Case-Triggered Strategy
 
 ```{r case-trigger-sim, eval=FALSE}
 tic <- Sys.time()  # Start timer
@@ -577,7 +576,7 @@ saveRDS(df_sow,
                tstamp(), ".rds"))
 ```
 
-### Onset-triggered across delays
+### Onset-triggered across delays to stop ORI after outbreak end
 
 ```{r}
 id_begin <- 1
@@ -610,7 +609,38 @@ saveRDS(df_delay_sow,
                tstamp(), ".rds"))
 ```
 
-### Case-triggered
+### Onset-triggered for strategy for the excluded data set.
+
+```{r}
+id_begin <- 1
+id_end <- 200
+batch_size <- 10
+batch_ids <- seq(id_begin, id_end, by = batch_size)
+
+# Dates to look for
+dates <- c("20251106")
+
+files <- unlist(lapply(batch_ids, function(id) {
+  # f <- paste0("outputs/svim_weekly_delay_", delays, 
+  #"_week_list_vacc_week_batch_", id, "_", dates, ".csv")
+    f <- paste0("outputs/svim_alt_data_delay_2_week_list_vacc_week_batch_", 
+                batch_id, "_", dates, ".csv")
+  f[file.exists(f)]
+}))
+
+print(files)
+
+df_alt <- rbindlist(lapply(files, fread))
+df_alt_sow <- 
+  sum_over_week(df_alt, group_cols = c("runid", "id_outbreak", "vacc_week", 
+                                   "vacc_cov", "no_ori_delay_outbreak_end"))
+
+saveRDS(df_alt_sow,
+        paste0("outputs/onset_trigger_alt_data_sum_over_week_",
+               tstamp(), ".rds"))
+```
+
+### Case-triggered strategy
 
 ```{r}
 dates <- c("20251031", "20251030")
@@ -635,11 +665,9 @@ saveRDS(df_ct_sow,
 
 # Cost-Effectiveness Analysis
 
-Calculate impact (cases, deaths, and DALYs averted), 
-efficiency (impact per 1000 OCV), and 
-cost effectiveness (cost [2023 US$] per unit of impact). 
+Calculate impact (cases, deaths, and DALYs averted), efficiency (impact per 1000 OCV), and cost effectiveness (cost [2023 US$] per unit of impact). 
 
-## Onset-triggered
+## Onset-triggered strategy
 
 ```{r}
 files <- list.files(
@@ -665,7 +693,7 @@ saveRDS(d_cea_res,
         paste0("outputs/paper/cea_onset_trigger_", tstamp(), ".rds"))
 ```
 
-## Onset-triggered with delays
+## Onset-triggered with delays to stop ORI after outbreak end
 
 ```{r}
 files <- list.files(
@@ -689,6 +717,37 @@ d_cea_res %>%
 
 saveRDS(d_cea_res, 
         paste0("outputs/paper/cea_delay_onset_trigger_", tstamp(), ".rds"))
+```
+
+
+## Onset-triggered for the alternative dataset
+
+```{r}
+# alternative outbreak dataset
+outbreaks_alt <- read_rds("outputs/paper/outbreaks_alt_included_20250912.rds")
+# simulation results based on the original dataset
+d1 <- read_rds("outputs/onset_trigger_sum_over_week_20251031.rds")
+# simulation results for outbreaks that were added additionally to the alternative dataset
+d2 <- read_rds("outputs/onset_trigger_alt_data_sum_over_week_20251031.rds")
+# exclude outbreaks from the original dataset that are not in the alternative dataset
+d1_alt <- d1 %>% filter(id_outbreak %in% outbreaks_alt$id_outbreak, 
+                        vacc_cov == 0.75)
+d2_alt <- d2 %>% filter(id_outbreak %in% outbreaks_alt$id_outbreak)
+# > all.equal(d2_alt, d2)
+# [1] TRUE
+# alternative dataset by combining d1_alt and d2_alt
+d_alt <- rbindlist(list(d1_alt, d2_alt))
+
+d_alt_cea_var <- add_cea_variables(d_alt, mean_age_inf = mean_age_inf)
+d_alt_cea_res <- add_cea_results(d_alt_cea_var, parms = as.data.frame(parm))
+
+d_alt_cea_res %>%
+  filter(ori_occurred == TRUE, vacc_cov == 0.75) %>%
+  group_by(vacc_week) %>%
+  summarize(pct_reduc_case_m = median(pct_reduc_case))
+
+saveRDS(d_alt_cea_res, 
+        paste0("outputs/paper/cea_alt_data_onset_trigger_", tstamp(), ".rds"))
 ```
 
 ## Case-triggered
