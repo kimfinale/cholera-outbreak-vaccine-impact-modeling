@@ -1,7 +1,4 @@
-## Kim JH, Duong M, Lee E,…
-
-Impact of oral cholera vaccine outbreak response immunization in
-sub-Saharan Africa, 2010–2020: a modeling analysis
+## Kim J-H, Duong M, Lee EC *et al*. Impact of oral cholera vaccine outbreak response immunization in sub-Saharan Africa, 2010–2020: a modeling analysis
 
 ### R code and data for reproducing analysis
 
