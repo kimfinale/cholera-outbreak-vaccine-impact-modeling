@@ -1,14 +1,7 @@
-## Kim JH, Duong M, Lee E,… Impact of cholera outbreak response immunization: Insights from modeling extensive outbreaks from sub-Saharan Africa, 2010-2020.
+## Kim JH, Duong M, Lee E,…
 
-This study models the outcomes of outbreak response immunization (ORI)
-campaigns across 1,192 cholera outbreaks in sub-Saharan Africa from 2010
-to 2020. We incorporated vaccine effectiveness (both direct and
-indirect), age-specific efficacy, delays in outbreak detection and
-response, vaccine deployment, and before vaccine recipients gain
-protective immunity. We also analyzed subsets to reflect global OCV use
-since the creation of a stockpile in 2013 through 2020. Key outcomes
-assessed include cases prevented, deaths averted, disability-adjusted
-life years (DALYs) gained, and cost-effectiveness.
+Impact of oral cholera vaccine outbreak response immunization in
+sub-Saharan Africa, 2010–2020: a modeling analysis
 
 ### R code and data for reproducing analysis
 
@@ -21,13 +14,13 @@ effectiveness.
 **parameters.qmd**: Generates 200 parameter samples via Sobol’s
 low-discrepancy sequence.
 
-**data_preparation.qmd**: Outbreak data filtering and literature review
-of model parameters such as days lost due to cholera illness, severity .
+**data_prep.qmd**: Outbreak data filtering and literature review of
+model parameters such as days lost due to cholera illness, severity .
 
 **vacc_impct.qmd**: Contains code to:
 
 -   Load utility functions and vaccine impact calculations (i.e., source
-    `utils.R`).
+    `R/utils.R`).
 
 -   Calculate vaccine impact via time-triggered and case-triggered
     strategies. Simulation can be done in parallel using ‘doParallel’
