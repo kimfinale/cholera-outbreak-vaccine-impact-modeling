@@ -237,11 +237,6 @@ subset_files <- c(
   "outputs/paper/cea_summary_subsets_vw_9_20251031.rds"
 )
 cea_subsets <- map_dfr(subset_files, read_rds)
-# excluded outbreaks for sensitivity analysis
-# cea_excl <- read_rds("outputs/cea_0.6_onset_trigger_excl_20250716.rds")
-# cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.75_onset_trigger_excl_20250716.rds"))
-# cea_excl <- rbind(cea_excl, read_rds("outputs/cea_0.9_onset_trigger_excl_20250716.rds"))
-# cea_ct_excl <- read_rds("outputs/cea_0.75_case_trigger_excl_20250716.rds")
 ```
 
 # Abstract
@@ -413,9 +408,9 @@ cea_subsets %>%
 Values used in the abstract
 ```{r}
 # number of OCVs doses shipped from OCV stockpile (million doses)
-ocv_use_dashboard
+global_ocv_use
 # proportion approved by ICG (reactive) by 2024
-ocv_use_dashboard$cumulative_icg[2] / ocv_use_dashboard$cumulative_total[2]
+global_ocv_use$cumulative_icg[2] / global_ocv_use$cumulative_total[2]
 # outbreaks span from 2010 to 2020
 unique(outbk_data_summary$year)
 outbk_data_summary %>% filter(year == 2020)
@@ -3394,6 +3389,248 @@ if (save_plot) {
 }
 ```
 
+
+## Figure S6. Dynamic model fits 
+
+Illustrate model fits that are good or bad and
+Model fits were assumed to be poor if:
+
+  1. Parameter values are too close to the bound 
+  2. The number of data points are fewer than 8, two times the number of parameters to      be estimated (i.e., 4)
+  3. Modeled trajectories didn't capture the dynamics of outbreaks
+  
+```{r}
+# dynamic model fits
+fit <- fread("outputs/paper/fit_4p_fA010_20241203T18.csv")
+fit_ndata <- fread("outputs/paper/fit_params_ndata_20241206T08.csv")
+fit_vis <- read_xlsx("outputs/paper/vacc_fit_params_20241203T2122.xlsx")
+
+max_R0 <- 30 # maximum value for R0, above which the value is suspicious
+n_crit <- 8 # minimum number of data points to ensure stability in parameter estimates
+get_ids_extreme_est <- function(x, er=0.05) {
+  # susceptible pop is too close to 1 or 0
+  # R0 is too close to a upper bound 30
+  ids <- ifelse(x$s0 < 1*er | x$s0 > 1*(1-er) | x$R0 > max_R0*(1-er), TRUE, FALSE) 
+  x$id_outbreak[ids]
+}
+
+get_ids_low_ndata <- function(x, threshold=8) {
+  # number of data points are too small, may have resulted in ustable parameter values.
+  ids <- ifelse(x$ndata < threshold, TRUE, FALSE)
+  x$id_outbreak[ids]
+}
+
+get_ids_poor_fit <- function(x) {
+  # visually assessed -- dynamic model outputs reasonally capture data?
+  ids <- ifelse(is.na(fit_vis$Good_Fit_Visual), FALSE, TRUE)
+  x$id_outbreak[ids]
+}
+
+# ids_robust <- unique(c(ids1 %in%, ids2))
+ids1 <- get_ids_extreme_est(fit, er=0.2)
+ids2 <- get_ids_low_ndata(fit_ndata, threshold=8)
+ids3 <- get_ids_poor_fit(fit_vis)
+
+ids_poor_fit <- unique(c(ids1, ids2, ids3))
+ids_robust <- setdiff(fit$id_outbreak, ids_poor_fit)
+```
+
+plot
+
+```{r}
+inc <- read_csv("outputs/paper/incidence_comparison_20241231T15.csv")
+inc <- inc %>% 
+  group_by(id_outbreak) %>%
+  mutate(week = row_number())
+             
+# bad fit
+# good fit
+p1 <- inc %>% 
+  filter(id_outbreak == ids_robust[1]) %>% 
+  ggplot(aes(x = week)) +
+  geom_point(aes(y = inc_data, color = "Data"),
+             size = 2) +
+  geom_line(aes(y = inc_model, color = "Model"),
+            linewidth = 1) +
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Data" = "black",
+      "Model" = "firebrick"
+    )
+  ) +
+  labs(
+    x = "Epidemic week",
+    y = "Weekly suspected cholera"
+  ) +
+  scale_x_continuous(breaks=seq(0,10,2))+
+  theme_tight()+
+  theme_light(base_size = 12) +
+  theme(
+    legend.position = "top",
+    legend.justification = "center"
+  )
+
+# bad fit
+p2 <- inc %>% 
+  filter(id_outbreak == ids_poor_fit[2]) %>% 
+  ggplot(aes(x = week)) +
+  geom_point(aes(y = inc_data, color = "Data"),
+             size = 2) +
+  geom_line(aes(y = inc_model, color = "Model"),
+            linewidth = 1) +
+  scale_color_manual(
+    name = NULL,
+    values = c(
+      "Data" = "black",
+      "Model" = "firebrick"
+    )
+  ) +
+  labs(
+    x = "Epidemic week",
+    y = ""
+  ) +
+  theme_tight()+
+  theme_light(base_size = 12) +
+  guides(color="none")
+  
+
+p12 <- (p1 | p2) +
+  plot_layout(axis_titles = "collect_x") &
+  theme(
+    legend.position = "top", # put legends at top
+    legend.justification = "center", # center horizontally
+    legend.box.just = "center",
+    legend.box = "horizontal", # arrange horizontally
+    legend.text          = element_text(size = 13),
+    legend.title         = element_text(size = 13),
+    legend.spacing.y = unit(1, "pt"),
+    legend.margin = margin(t = 0, r = 0, b = 3, l = 0)
+  )
+
+if (save_plot) {
+  fac <- 1.35
+  ggsave(paste0("plots/figS6_ts_data_dynamic_model_", tstamp(), ".pdf"),
+         p12,
+         device = cairo_pdf, width = fgw2*fac,
+         height = fgw1*fac*fac, units = "mm")
+}
+```
+
+## Figure S7: Overall vaccine effectiveness between dynamic and static models
+
+```{r}
+# static model
+# OVE are based on the definition
+# DVE and IVE are given
+# TVE = 1 - (1-DVE)(1-IVE)
+# OVE = 1 - (vc*(1-DVE)(1-IVE) + (1-vc)*(1-IVE))
+setDT(outbreak_data)
+pop_by_age_wpp <- as.data.frame(fread("outputs/paper/wpp_pop_by_age_20241022.csv"))
+age_dist <- pop_by_age_wpp
+# extract outbreak data, can be done by including only the first rwo
+od <- outbreak_data[week == 1]
+od$prop_u5 <- NA
+for (i in 1:nrow(od)) {
+  od$prop_u5[i] <- 
+    age_dist[(age_dist$`ISO3 Alpha-code` == od$country[i] &
+                as.character(age_dist$Year) == as.character(od$year[i])), "prop_u5"]
+}
+
+params <- as.data.frame(fread("outputs/paper/params_20251020.csv"))
+vacc_par <- params[,c("vacc_effect_direct_u5", "vacc_effect_direct_5p", "vacc_effect_indirect_id")]
+increment <- 0.02 # increment used in posterior predictive values
+
+lst <- vector('list', nrow(od))
+vacc_eff_static <- data.frame()
+vcs <- c(0.6, 0.75, 0.9)
+nsample <- 200
+for (vc in vcs) {
+  for (i in 1:nrow(od)) {
+    d <- od[i, ]
+    d <- rbindlist(lapply(1:100, function(x) rbind(d,d)))
+    d$runid <- NA
+    d$vacc_cov <- vc
+    d$ve_u5 <- NA
+    d$ve_5p <- NA
+    d$dve <- NA
+    d$ive <- NA
+    d$tve <- NA
+    d$ove <- NA
+    
+    for (j in 1:nsample) {
+      d$runid[j] <- j
+      d$ve_u5[j] <- vacc_par$vacc_effect_direct_u5[j]
+      d$ve_5p[j] <- vacc_par$vacc_effect_direct_5p[j]
+      d$dve[j] <- d$prop_u5[j]*d$ve_u5[j] + (1-d$prop_u5[j])*d$ve_5p[j]
+      # d$ive[j] <- vacc_par$ive[j]
+      d$ive[j] <- as.numeric(ive_data[vacc_par$vacc_effect_indirect_id[j], (round(vc/increment)+1)])
+      d$tve[j] <- 1 - (1-d$dve[j])*(1-d$ive[j])
+      d$ove[j] <- 1 - (vc*(1-d$dve[j])*(1-d$ive[j]) + (1-vc)*(1-d$ive[j]))
+    }
+    lst[[i]] <- d
+  }
+  vacc_eff_static <- rbindlist(list(vacc_eff_static, rbindlist(lst)))
+}
+
+
+# dynamic model
+# Vaccine impact simulation results for the dynamic models
+d <- fread("outputs/paper/vacc_fit_params_by_vacc_state_20241206T08.csv")
+
+vcs <- c(0.6, 0.75, 0.9)
+
+lst <- vector('list', length(vcs))
+for (i in 1:length(vcs)) {
+  vc <- vcs[i]
+  df <- d[, c("runid","data_id","id_outbreak")]
+  v <- round(100*vc, digits=0)
+  df$vacc_cov <- vc
+  df$dve <- 1 - (d[[paste0("CI_VC", v, "_vacc")]]/vc)/(d[[paste0("CI_VC", v, "_novacc")]]/(1-vc))
+  df$ive <- 1 - (d[[paste0("CI_VC", v, "_novacc")]]/(1-vc))/d[[paste0("CI_novacc")]]
+  df$tve <- 1 - (d[[paste0("CI_VC", v, "_vacc")]]/vc)/d[[paste0("CI_novacc")]]
+  df$ove <- 1 - (d[[paste0("CI_VC", v, "_vacc")]] + d[[paste0("CI_VC", v, "_novacc")]])/d[[paste0("CI_novacc")]]
+  
+  lst[[i]] <- df
+}
+vacc_eff_dynamic <- rbindlist(lst)
+
+vacc_eff_static_dynamic <- 
+  left_join(vacc_eff_static, vacc_eff_dynamic, 
+            by=c("id_outbreak", "vacc_cov", "runid"))
+
+vacc_eff_static_dynamic <- vacc_eff_static_dynamic %>% 
+  mutate(diff_ove = ove.y - ove.x) 
+
+vacc_eff_static_dynamic %>% 
+  filter(id_outbreak %in% ids_robust, vacc_cov == 0.9) -> vesd_temp
+
+summary(vesd_temp$diff_ove, na.rm=T) 
+quantile(vesd_temp$diff_ove, probs=c(0.025, 0.25, 0.5, 0.75, 0.975), na.rm=T)
+hist(vesd_temp$diff_ove)
+
+
+#  fit
+plt <- vacc_eff_static_dynamic %>% 
+  filter(id_outbreak %in% ids_robust, vacc_cov == 0.9) %>% 
+  ggplot(aes(x = diff_ove)) +
+  geom_histogram() +
+  labs(
+    x = "Difference",
+    y = "Count"
+  ) +
+  theme_tight()+
+  theme_light(base_size = 12)
+  
+
+if (save_plot) {
+  fac <- 1.35
+  ggsave(paste0("plots/figS7_diff_static_dynamic_", tstamp(), ".pdf"),
+         plt,
+         device = cairo_pdf, width = fgw1*fac*fac,
+         height = fgw1*fac*fac, units = "mm")
+}
+```
 
 # Result Tables
 
