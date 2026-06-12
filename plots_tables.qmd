@@ -203,7 +203,7 @@ top_10_size_ids <- outbk_data_summary %>%
 
 ```{r load-results}
 # Outbreak onset-triggered vaccination results
-cea_files <- c("outputs/paper/cea_onset_trigger_20251031.rds")
+cea_files <- c("outputs/paper/cea_onset_trigger_20260612.rds")
 cea <- map_dfr(cea_files, read_rds)
 cea_ori <- cea %>% filter(ori_occurred == TRUE)
 
@@ -213,7 +213,7 @@ cea_ori_pca <- read_rds("outputs/paper/cea_pca_summary_20251031.rds")
 cea_prioritization <-
   read_rds("outputs/paper/summary_impact_0.75_prioritization_20251031.rds")
 
-cea_weekly <- read_rds("outputs/paper/cea_delay_onset_trigger_20251031.rds")
+cea_weekly <- read_rds("outputs/paper/cea_delay_onset_trigger_20260612.rds")
 cea_weekly_delay_2 <- 
   cea_weekly %>% filter(no_ori_delay_outbreak_end == 2)
 
@@ -221,7 +221,7 @@ cea_weekly_delay_2_ori <- cea_weekly %>%
   filter(no_ori_delay_outbreak_end == 2, ori_occurred == TRUE)
 
 cea_alt_data <- 
-  read_rds("outputs/paper/cea_alt_data_onset_trigger_20251031.rds")
+  read_rds("outputs/paper/cea_alt_data_onset_trigger_20260612.rds")
 
 # weekly decline
 fit_decay <- read_rds("outputs/paper/fit_exp_decay_20251031.rds")
@@ -229,7 +229,7 @@ fit_decay_ct <-
   read_rds("outputs/paper/fit_exp_decay_case_trigger_20251031.rds")
 fit_lm <- read_rds("outputs/paper/fit_lm_20251031.rds")
 # Case-triggered vaccination results
-cea_ct <- read_rds("outputs/paper/cea_case_trigger_20251031.rds")
+cea_ct <- read_rds("outputs/paper/cea_case_trigger_20260612.rds")
 cea_ct_ori <- cea_ct %>% filter(ori_occurred == TRUE)
 # outbreak subsets for given number of OCVs
 subset_files <- c(
@@ -1266,6 +1266,79 @@ if (save_plot) {
 ## Figure S1. Indirect Vaccine Effectiveness 
 
 ## Figure S2. All outbreaks (eligible and ineligible)
+
+```{r figS2bc, eval=TRUE}
+# ---- Figure S2 (B,C): all outbreaks, excluded ones colored by reason ----
+
+s2_levels <- c("Included", "Too small or large", "Nested",
+               "No OCV data", "Affected by OCV campaign")
+
+# Okabe-Ito (colorblind-safe) for reasons; neutral gray for the included baseline
+s2_pal <- c(
+  "Included"                 = "gray75",
+  "Too small or large"       = "#E69F00",
+  "Nested"                   = "#0072B2",
+  "No OCV data"              = "#009E73",
+  "Affected by OCV campaign" = "#D55E00"
+)
+
+# Included: ds restricted to the analyzed set (consistent w/ excluded data)
+s2_included <- ds %>%
+  dplyr::filter(id_outbreak %in% outbreaks_filtered$id_outbreak) %>%
+  dplyr::transmute(id_outbreak, total_s_ch, duration_weeks, ar_per_10e3,
+                   category = "Included")
+
+# Excluded: recode filter_reason to display labels
+s2_excluded <- outbreaks_excluded %>%
+  dplyr::transmute(id_outbreak, total_s_ch, duration_weeks, ar_per_10e3,
+    category = dplyr::recode(filter_reason,
+      "Too small or too large" = "Too small or large",
+      "Nested outbreak"        = "Nested",
+      "Outbreak after 2020"    = "No OCV data",
+      "OCV-affected outbreak"  = "Affected by OCV campaign"))
+
+s2_df <- dplyr::bind_rows(s2_included, s2_excluded) %>%
+  dplyr::mutate(category = factor(category, levels = s2_levels))
+
+# table(s2_df$category)  # expect 1192 Included + 472 across 4 reasons = 1664
+
+s2_layers <- function(yvar, ylab, mar) {
+  list(
+    geom_point(data = dplyr::filter(s2_df, category == "Included"),
+               aes(x = total_s_ch, y = .data[[yvar]], color = category),
+               alpha = 0.5, size = 1.2),
+    geom_point(data = dplyr::filter(s2_df, category != "Included"),
+               aes(x = total_s_ch, y = .data[[yvar]], color = category),
+               alpha = 0.7, size = 1.2),
+    scale_y_log10(labels = comma_format()),
+    scale_x_log10(labels = comma_format()),
+    scale_color_manual("", values = s2_pal, limits = s2_levels, drop = FALSE),
+    labs(title = "", x = "Total suspected cases", y = ylab),
+    theme_light(),
+    theme(legend.position = "top", plot.margin = mar),
+    guides(color = guide_legend(nrow = 2, byrow = TRUE,
+                                override.aes = list(alpha = 1, size = 2)))
+  )
+}
+
+plt_S2b <- ggplot() + s2_layers("duration_weeks", "Outbreak duration (weeks)",
+                                margin(0,1,0,0,"pt"))
+plt_S2c <- ggplot() + s2_layers("ar_per_10e3", "Attack rate (per 10,000)",
+                                margin(0,0,0,1,"pt"))
+
+plt_S2bc <- plt_S2b + plt_S2c +
+  plot_layout(widths = c(1, 1), guides = "collect") &
+  theme(legend.position = "top")
+
+plt_S2bc
+
+if (save_plot) {
+  fac <- 1.2
+  ggsave(paste0("plots/figS2bc_outbreak_size_dur_ar_", tstamp(), ".pdf"),
+         plt_S2bc, device = cairo_pdf,
+         width = fgw2 * fac, height = fgw1 * fac, units = "mm")
+}
+```
 
 ```{r figS1, eval=FALSE}
 # Create time series plot with different colors by outbreak type
@@ -3914,13 +3987,208 @@ cea_ori %>%
          vacc_week %in% c(1)) %>%
   summarize_quantiles(cost_per_daly_averted)
 
-# CPDALYA in 
-cea_ori %>% 
-  filter(id_outbreak %in% top_q_ar_ids, 
-         vacc_cov %in% c(0.75), 
+# CPDALYA in
+cea_ori %>%
+  filter(id_outbreak %in% top_q_ar_ids,
+         vacc_cov %in% c(0.75),
          vacc_week %in% c(1)) %>%
   group_by(vacc_week) %>%
-  summarize_quantiles(cost_per_daly_averted)  
-  
+  summarize_quantiles(cost_per_daly_averted)
+
 
 ```
+
+## Table S4 / Figure S8. Post-hoc ρ/κ observed-to-infection sensitivity band
+
+The model runs in observed suspected-case units. The gap to true *symptomatic*
+infections is a single deterministic scalar `m = ρ/κ`, where ρ is the positive
+predictive value (PPV) of the suspected-case definition and κ is the
+care-seeking proportion. As established in the methods, `m` enters no dynamic,
+cost-per-unit, effectiveness, or targeting calculation, so this is a pure
+post-hoc rescale — NOT a new simulation. This block reads the stored CEA output
+and reports an `m` sensitivity band; it does not alter the model run.
+
+```{r supp-rho-kappa-band}
+#| warning: false
+#| message: false
+
+set.seed(20240612)
+
+# ---------------------------------------------------------------------------
+# 1. ρ and κ as Beta distributions (mean + approximate 95% interval).
+#    Fitted by moment matching: SD implied by the 95% interval width, then
+#    Beta(α, β) from mean and variance. Sources:
+#      ρ  PPV of suspected-case definition: 0.52 (95% CrI 0.24-0.80), Wiens 2023
+#      κ  care-seeking proportion (Wiens 2025), two scenarios:
+#         "cholera-relevant"  0.586 (95% CI 0.399-0.752)  -> m < 1
+#         "general-diarrhea"  0.328 (95% CI 0.281-0.379)  -> m > 1
+# ---------------------------------------------------------------------------
+fit_beta_mom <- function(mean, lo, hi, z = qnorm(0.975)) {
+  v <- ((hi - lo) / (2 * z))^2          # variance implied by the 95% interval
+  if (v >= mean * (1 - mean))
+    stop("Interval too wide for a Beta with this mean.")
+  k <- mean * (1 - mean) / v - 1        # Beta "concentration"
+  c(alpha = mean * k, beta = (1 - mean) * k)
+}
+
+rho_spec   <- list(mean = 0.52,  lo = 0.24,  hi = 0.80)            # Wiens 2023
+kappa_spec <- list(
+  `cholera-relevant` = list(mean = 0.586, lo = 0.399, hi = 0.752), # Wiens 2025
+  `general-diarrhea` = list(mean = 0.328, lo = 0.281, hi = 0.379)  # Wiens 2025
+)
+
+rho_ab   <- fit_beta_mom(rho_spec$mean, rho_spec$lo, rho_spec$hi)
+kappa_ab <- lapply(kappa_spec, function(s) fit_beta_mom(s$mean, s$lo, s$hi))
+
+# Print fitted parameters and the Beta-implied 95% interval to check the fit
+beta_check <- function(lbl, ab, spec) {
+  qi <- qbeta(c(0.025, 0.975), ab["alpha"], ab["beta"])
+  data.frame(
+    quantity   = lbl,
+    alpha      = round(ab["alpha"], 3),
+    beta       = round(ab["beta"], 3),
+    target_mean = spec$mean,
+    fitted_mean = round(ab["alpha"] / (ab["alpha"] + ab["beta"]), 3),
+    target_95   = sprintf("%.3f-%.3f", spec$lo, spec$hi),
+    fitted_95   = sprintf("%.3f-%.3f", qi[1], qi[2]),
+    row.names = NULL)
+}
+beta_fits <- rbind(
+  beta_check("rho (PPV)", rho_ab, rho_spec),
+  beta_check("kappa (cholera-relevant)", kappa_ab[["cholera-relevant"]],
+             kappa_spec[["cholera-relevant"]]),
+  beta_check("kappa (general-diarrhea)", kappa_ab[["general-diarrhea"]],
+             kappa_spec[["general-diarrhea"]]))
+print(beta_fits)
+
+# ---------------------------------------------------------------------------
+# 2. Draw N samples; m = ρ/κ per draw (ρ and κ independent). Summarize m.
+# ---------------------------------------------------------------------------
+N <- 1e4
+band <- function(x) quantile(x, c(0.5, 0.025, 0.975), names = FALSE, na.rm = TRUE)
+
+rho_draws <- rbeta(N, rho_ab["alpha"], rho_ab["beta"])
+m_draws   <- lapply(kappa_ab, function(ab) rho_draws / rbeta(N, ab["alpha"], ab["beta"]))
+
+m_summary <- do.call(rbind, lapply(names(m_draws), function(s) {
+  q <- band(m_draws[[s]])
+  data.frame(scenario = s,
+             kappa_beta = sprintf("Beta(%.1f, %.1f)",
+                                  kappa_ab[[s]]["alpha"], kappa_ab[[s]]["beta"]),
+             m_median = round(q[1], 3),
+             m_lo = round(q[2], 3), m_hi = round(q[3], 3),
+             row.names = NULL)
+}))
+print(m_summary)
+
+# ---------------------------------------------------------------------------
+# 3. Reference (static, m = 1) absolute outputs from the stored onset CEA
+#    output, primary scenario: onset-triggered, vacc_cov = 0.75, vacc_week = 1.
+#    Self-contained: reuse cea_ori if present, else read the stored file.
+# ---------------------------------------------------------------------------
+if (exists("cea_ori")) {
+  cea_src <- data.table::as.data.table(cea_ori)
+} else {
+  cea_src <- data.table::as.data.table(
+    readRDS("outputs/paper/cea_onset_trigger_20260612.rds"))
+  cea_src <- cea_src[ori_occurred == TRUE]
+}
+ref <- cea_src[ori_occurred == TRUE & vacc_cov == 0.75 & vacc_week == 1]
+
+ref_inf   <- median(ref$s_ch_averted_tot,        na.rm = TRUE)  # infections averted
+ref_per1k <- median(ref$case_averted_per_1000_OCV, na.rm = TRUE)
+ref_cost  <- median(ref$cost_per_case_averted,   na.rm = TRUE)
+
+# m multiplies the absolute infection COUNTS (count = m x observed). Cost per
+# symptomatic infection averted relabels only the denominator to infections,
+# so it scales as 1/m (numerator net_cost stays anchored to treated cases).
+#
+# INVARIANT TO m BY CONSTRUCTION (left untouched, not rescaled here):
+#   pct_reduc_case (ratio of cases), the delay-impact exponential decay
+#   (fit on pct_reduc_case), and all attack-rate / outbreak-size rankings
+#   (quantile cutoffs are preserved under any constant monotonic m).
+adj_count <- function(ref, m) band(ref * m)   # infections, per-1000 doses
+adj_cost  <- function(ref, m) band(ref / m)   # cost per infection averted
+
+fmt <- function(v, digits = 0)
+  sprintf("%s [%s–%s]",
+          formatC(v[1], format = "f", digits = digits, big.mark = ","),
+          formatC(v[2], format = "f", digits = digits, big.mark = ","),
+          formatC(v[3], format = "f", digits = digits, big.mark = ","))
+
+row_for <- function(label, ref_val, adj_fun, digits) {
+  out <- data.frame(Output = label,
+                    `Reference (m = 1)` =
+                      formatC(ref_val, format = "f", digits = digits,
+                              big.mark = ","),
+                    check.names = FALSE)
+  for (s in names(m_draws))
+    out[[s]] <- fmt(adj_fun(ref_val, m_draws[[s]]), digits)
+  out
+}
+
+tableS4 <- rbind(
+  row_for("Symptomatic infections averted (per ORI)", ref_inf,   adj_count, 0),
+  row_for("Infections averted per 1,000 doses",       ref_per1k, adj_count, 2),
+  row_for("Cost per symptomatic infection averted (US$)", ref_cost, adj_cost, 0))
+
+knitr::kable(
+  tableS4,
+  caption = paste0(
+    "Table S4. Post-hoc ρ/κ observed-to-infection rescale of the ",
+    "absolute outputs (onset-triggered, vacc_cov 0.75, vaccination in week 1). ",
+    "Reference is the static m = 1 model median; scenario columns give the ",
+    "m-adjusted median [95% band] from ρ/κ uncertainty only."))
+
+# ---------------------------------------------------------------------------
+# 4. Figure S8: forest of fold-change vs the m = 1 reference (log scale).
+#    Counts scale by m; cost per infection scales by 1/m. Reference line at 1.
+# ---------------------------------------------------------------------------
+fold_rows <- function(label, kind) {
+  do.call(rbind, lapply(names(m_draws), function(s) {
+    fold <- if (kind == "cost") 1 / m_draws[[s]] else m_draws[[s]]
+    q <- band(fold)
+    data.frame(Output = label, scenario = s,
+               mid = q[1], lo = q[2], hi = q[3], row.names = NULL)
+  }))
+}
+fold_df <- rbind(
+  fold_rows("Symptomatic infections averted", "count"),
+  fold_rows("Infections averted / 1,000 doses", "count"),
+  fold_rows("Cost per symptomatic infection averted", "cost"))
+fold_df$Output <- factor(fold_df$Output, levels = rev(unique(fold_df$Output)))
+
+p_forest <- ggplot(fold_df,
+                   aes(x = mid, y = Output, colour = scenario)) +
+  geom_vline(xintercept = 1, linetype = 2, colour = "grey50") +
+  geom_pointrange(aes(xmin = lo, xmax = hi),
+                  position = position_dodge(width = 0.5)) +
+  scale_x_log10() +
+  scale_colour_manual(values = c(`cholera-relevant` = "#1b9e77",
+                                 `general-diarrhea` = "#d95f02")) +
+  labs(x = "Fold-change vs. observed (m = 1) reference",
+       y = NULL, colour = "Care-seeking κ") +
+  theme_tight() +
+  theme(legend.position = "bottom")
+print(p_forest)
+
+if (save_plot) {
+  ggsave(paste0("plots/figS8_rho_kappa_band_", tstamp(), ".pdf"),
+         p_forest, width = 7, height = 3.2, device = cairo_pdf)  # cairo: renders κ
+}
+```
+
+Figure S8 / Table S4 caption. The factor `m = ρ/κ` converts observed suspected
+cases to true symptomatic infections; ρ is the PPV of the suspected-case
+definition (Wiens 2023) and κ the care-seeking proportion (Wiens 2025). This is
+a deterministic post-hoc rescale of the stored model outputs, **not** a new
+simulation run, and the reported band reflects ρ/κ uncertainty alone. The two
+κ scenarios bracket the direction of the correction: a cholera-relevant
+care-seeking proportion gives m < 1 (median ≈ 0.89), modestly *reducing* the
+absolute infection counts and *raising* cost per infection averted, whereas a
+general-diarrhea care-seeking proportion gives m > 1 (median ≈ 1.59),
+*inflating* the counts and *lowering* cost per infection averted. Because m is a
+single constant multiplier, it leaves every relative and ranking result
+unchanged — the percentage of cases averted, the delay–impact decay, and the
+attack-rate/outbreak-size prioritization are invariant to m by construction and
+are therefore not rescaled here.

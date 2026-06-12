@@ -631,7 +631,9 @@ add_cea_results <- function(d, parms=NULL) {
 
       # Vaccine costs
       vacc_dose = ori_occurred * pop * vacc_cov * dose_regimen,
-      vacc_cost = (vacc_cost_per_dose + vacc_delivery_cost) * vacc_dose,
+      # DEPRECATED (reviewer comment 5): procurement + delivery only (no shipping)
+      # vacc_cost = (vacc_cost_per_dose + vacc_delivery_cost) * vacc_dose,
+      vacc_cost = (vacc_cost_per_dose + vacc_shipping_cost + vacc_delivery_cost) * vacc_dose,
       net_cost = vacc_cost - coi_averted - cod_averted - productivity_lost_averted,
 
       # Cost-effectiveness ratios
@@ -1713,14 +1715,17 @@ clean_country_names <- function(country) {
 #' @param nruns Number of runs/samples to generate (default: 200)
 #' @param parameter_data Data frame containing parameter information
 #' @return Data frame of sampled parameters
-draw_parameter_samples <- function(nruns = 200, parameter_data = NULL) {
+draw_parameter_samples <- function(nruns = 200, parameter_data = NULL,
+                                   delivery_cost_min = 2.587988,
+                                   delivery_cost_max = 4.589165) {
   # Define parameter names
   param_names <- c("run_id",
                    "dur_campaign",
                    "delay_vacc_effect",
                    "vacc_effect_direct_u5",
                    "vacc_effect_direct_5p",
-                   "vacc_effect_indirect_id")
+                   "vacc_effect_indirect_id",
+                   "vacc_delivery_cost")
 
   # Generate Sobol sequence
   sobol_seq <-
@@ -1785,6 +1790,20 @@ draw_parameter_samples <- function(nruns = 200, parameter_data = NULL) {
   ive_data <- readRDS("outputs/paper/ive_yhat_yrep_20250919.rds")
   n_ive_sample <- nrow(ive_data$yhat)
 
+  # Sample OCV delivery cost (per dose, 2023 US$) as Uniform(min, max). The
+  # bounds are the minimum and maximum of the three sub-Saharan-Africa Shanchol
+  # campaigns in Mogasale et al. 2016 (PLoS NTD), Table 2 "Total OCV Delivery
+  # (Unit) Cost" (Method 2, per fully-vaccinated two-dose person), halved to a
+  # per-dose cost and inflated 2014 -> 2023 with the SSA CPI series (same
+  # derivation as the cost-params chunk in vacc_impact.qmd):
+  #   per-dose 2023 = c(Guinea 3.4908, S.Sudan refugee 4.5892, S.Sudan IDP 2.5880)
+  #   default min = 2.587988, max = 4.589165
+  # Drawn from the otherwise-unused 'vo' Sobol dimension so the draw is
+  # low-discrepancy and reproducible per run_id.
+  vacc_delivery_cost_sample <- qunif(sobol_seq$vo,
+                                     min = delivery_cost_min,
+                                     max = delivery_cost_max)
+
   # Combine all parameters
   p_trans <- list(
     run_id = 1:nruns,
@@ -1792,7 +1811,8 @@ draw_parameter_samples <- function(nruns = 200, parameter_data = NULL) {
     ve_delay = ve_delay_sample,
     dve_U5 = dve_sample[,1],
     dve_5plus = dve_sample[,2],
-    ive_id = round(sobol_seq$ive_id * n_ive_sample)
+    ive_id = round(sobol_seq$ive_id * n_ive_sample),
+    vacc_delivery_cost = vacc_delivery_cost_sample
   )
 
   params_transformed <- as.data.frame(do.call('cbind', p_trans))

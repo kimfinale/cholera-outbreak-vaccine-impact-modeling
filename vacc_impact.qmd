@@ -98,7 +98,7 @@ save_table <- FALSE           # Whether to save generated tables
 #   data.table::fwrite(params, paste0("outputs/paper/params_", tstamp(), ".csv"))
 # }
 
-params <- fread("outputs/paper/params_20251020.csv")
+params <- fread("outputs/paper/params_20260612.csv")
 ```
 
 ## Vaccine coverage data
@@ -292,7 +292,10 @@ wt_severe <- parm[Parameter == "Disability_Weight_Severe", Value]
 
 # Vaccination costs
 vacc_cost_per_dose <- parm[Parameter == "Vaccine_Cost", Value]
-vacc_delivery_cost <- parm[Parameter == "Vaccine_Delivery_Cost", Value]
+# DEPRECATED (reviewer comment 5): vacc_delivery_cost is no longer read from
+# parameters.csv (Sarker 2022). It is now derived from Mogasale 2016 (SSA) in the
+# delivery-cost block further below. Old line kept (commented) for diffing:
+# vacc_delivery_cost <- parm[Parameter == "Vaccine_Delivery_Cost", Value]
 vacc_shipping_cost <- parm[Parameter == "Vaccine_Shipping_Cost", Value]
 
 # Direct medical costs
@@ -332,11 +335,75 @@ patient_cost_outpt <- patient_cost_outpt * inflation_factor_med
 public_cost_hosp <- public_cost_hosp * inflation_factor_med
 public_cost_outpt <- public_cost_outpt * inflation_factor_med
 
-# Adjust vaccine delivery cost (2016 to 2023)
-cpi_vac <- cpi_percent %>% filter(year >= 2017 & year <= 2023)
-xi_vac <- (cpi_vac$value/100 + 1)
-inflation_factor_vac <- prod(xi_vac)
-vacc_delivery_cost <- vacc_delivery_cost * inflation_factor_vac
+# ============================================================================
+# DEPRECATED: Sarker 2022 delivery cost (replaced per reviewer comment 5)
+# Sarker et al. 2022 (Vaccine: X), Bangladesh: US$0.91/dose (2016 US$), inflated
+# 2016 -> 2023 with the SSA CPI series (product of 1+rate/100 over 2017-2023,
+# giving ~$2.32/dose in 2023). Kept commented for diffing against the new
+# Mogasale 2016 estimate below.
+#   vacc_delivery_cost <- parm[Parameter == "Vaccine_Delivery_Cost", Value]  # $0.91 (2016 US$)
+#   cpi_vac <- cpi_percent %>% filter(year >= 2017 & year <= 2023)
+#   xi_vac <- (cpi_vac$value/100 + 1)
+#   inflation_factor_vac <- prod(xi_vac)
+#   vacc_delivery_cost <- vacc_delivery_cost * inflation_factor_vac          # ~$2.32 (2023 US$)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# OCV delivery cost from Mogasale et al. 2016 (PLoS NTD), Table 2,
+# "Total OCV Delivery (Unit) Cost", Method 2 = 2014 US$ per fully vaccinated
+# (two-dose) person, for the three sub-Saharan-Africa Shanchol campaigns.
+# ----------------------------------------------------------------------------
+# (1) Per-person (two-dose) delivery cost, 2014 US$
+delivery_cost_per_person_2014 <- c(
+  "Guinea 2012 (reactive, rural)"   = 2.32,
+  "South Sudan 2013 (refugee camp)" = 3.05,
+  "South Sudan 2014 (IDP)"          = 1.72
+)
+
+# (2) Approx per-dose delivery cost = half the per-person (two-dose) cost.
+#     Our ORI is single-dose; Sarker 2022 found fixed costs were ~2% of total,
+#     so per-dose delivery ~= half per-person delivery. Keep both vectors.
+delivery_cost_per_dose_2014 <- delivery_cost_per_person_2014 / 2
+
+# (3) Inflate each per-dose value 2014 -> 2023 using the SSA CPI series already
+#     loaded above (cpi_percent), with the SAME multiplicative method used for
+#     medical and (deprecated) vaccine costs. Base year 2014 -> apply rates for
+#     2015..2023 (2015 = 7.0, 2016 = 10.3 come from the IMF SSA file, not hard-coded).
+cpi_deliv <- cpi_percent %>% filter(year >= 2015 & year <= 2023)
+inflation_factor_deliv <- prod(cpi_deliv$value/100 + 1)
+delivery_cost_per_dose_2023 <- delivery_cost_per_dose_2014 * inflation_factor_deliv
+
+# (4) Delivery cost is now treated as a per-run random input: it is drawn
+#     Uniform(min, max) over the three inflated per-dose values inside
+#     draw_parameter_samples() (see params file's vacc_delivery_cost column),
+#     and joined into the CEA data by run id below so add_cea_results() uses a
+#     per-run cost. The scalar median here is kept as a fallback / central
+#     estimate for reporting and for any run lacking the per-run column.
+#     NOTE: Guinea 2012 is the ONLY *reactive* campaign of the three -- if a
+#     reactive-only base case is wanted later, use the Guinea value alone.
+vacc_delivery_cost     <- median(delivery_cost_per_dose_2023)
+vacc_delivery_cost_min <- min(delivery_cost_per_dose_2023)
+vacc_delivery_cost_max <- max(delivery_cost_per_dose_2023)
+
+# (5) Re-derive the total per-dose vaccine cost that feeds add_cea_results().
+#     Model cost term (R/utils.R ~L634), shipping now INCLUDED per reviewer comment 5:
+#       (vacc_cost_per_dose + vacc_shipping_cost + vacc_delivery_cost) * vacc_dose
+vacc_total_cost_per_dose <- vacc_cost_per_dose + vacc_shipping_cost + vacc_delivery_cost
+
+# (6) Summary of the delivery-cost derivation
+delivery_cost_summary <- data.frame(
+  campaign        = names(delivery_cost_per_person_2014),
+  per_person_2014 = as.numeric(delivery_cost_per_person_2014),
+  per_dose_2014   = as.numeric(delivery_cost_per_dose_2014),
+  per_dose_2023   = round(as.numeric(delivery_cost_per_dose_2023), 4),
+  row.names = NULL
+)
+print(delivery_cost_summary)
+cat(sprintf("inflation_factor_deliv (2014->2023, SSA CPI) = %.4f\n", inflation_factor_deliv))
+cat(sprintf("Base-case delivery cost (median) = $%.4f/dose (2023 US$); range $%.4f - $%.4f\n",
+            vacc_delivery_cost, vacc_delivery_cost_min, vacc_delivery_cost_max))
+cat(sprintf("Total per-dose cost (procurement $%.2f + shipping $%.2f + delivery $%.4f) = $%.4f\n",
+            vacc_cost_per_dose, vacc_shipping_cost, vacc_delivery_cost, vacc_total_cost_per_dose))
 ```
 
 # Vaccine impact simulation
@@ -682,6 +749,11 @@ print(files)
 d <- rbindlist(lapply(files, read_rds))
 
 d_cea_var <- add_cea_variables(d, mean_age_inf = mean_age_inf)
+# Per-run OCV delivery cost (2023 US$), drawn Uniform(min,max) in
+# draw_parameter_samples(); join by run id so add_cea_results() uses a per-run
+# delivery cost (column) instead of the scalar median fallback.
+d_cea_var <- merge(d_cea_var, params[, .(runid = run_id, vacc_delivery_cost)],
+                   by = "runid", all.x = TRUE)
 d_cea_res <- add_cea_results(d_cea_var, parms = as.data.frame(parm))
 # #  
 d_cea_res %>%
@@ -708,6 +780,11 @@ print(files)
 d <- rbindlist(lapply(files, read_rds))
 
 d_cea_var <- add_cea_variables(d, mean_age_inf = mean_age_inf)
+# Per-run OCV delivery cost (2023 US$), drawn Uniform(min,max) in
+# draw_parameter_samples(); join by run id so add_cea_results() uses a per-run
+# delivery cost (column) instead of the scalar median fallback.
+d_cea_var <- merge(d_cea_var, params[, .(runid = run_id, vacc_delivery_cost)],
+                   by = "runid", all.x = TRUE)
 d_cea_res <- add_cea_results(d_cea_var, parms = as.data.frame(parm))
 
 d_cea_res %>%
@@ -739,6 +816,10 @@ d2_alt <- d2 %>% filter(id_outbreak %in% outbreaks_alt$id_outbreak)
 d_alt <- rbindlist(list(d1_alt, d2_alt))
 
 d_alt_cea_var <- add_cea_variables(d_alt, mean_age_inf = mean_age_inf)
+# Per-run OCV delivery cost (2023 US$): join by run id (see other CEA chunks).
+d_alt_cea_var <- merge(d_alt_cea_var,
+                       params[, .(runid = run_id, vacc_delivery_cost)],
+                       by = "runid", all.x = TRUE)
 d_alt_cea_res <- add_cea_results(d_alt_cea_var, parms = as.data.frame(parm))
 
 d_alt_cea_res %>%
@@ -764,6 +845,11 @@ print(files)
 d <- rbindlist(lapply(files, read_rds))
 
 d_cea_var <- add_cea_variables(d, mean_age_inf = mean_age_inf)
+# Per-run OCV delivery cost (2023 US$), drawn Uniform(min,max) in
+# draw_parameter_samples(); join by run id so add_cea_results() uses a per-run
+# delivery cost (column) instead of the scalar median fallback.
+d_cea_var <- merge(d_cea_var, params[, .(runid = run_id, vacc_delivery_cost)],
+                   by = "runid", all.x = TRUE)
 d_cea_res <- add_cea_results(d_cea_var, parms = as.data.frame(parm))
 
 d_cea_res %>%
