@@ -893,7 +893,7 @@ build_plot_summary <- function(data, value_col,
 
 # In case cea files were not loaded
 cea_files <- c(
-  "outputs/paper/cea_onset_trigger_20251031.rds"
+  "outputs/paper/cea_onset_trigger_20260612.rds"
 )
 
 # Example: summarize % cases averted by week & coverage
@@ -1020,7 +1020,7 @@ Outbreaks are randomly sampled for a given OCV budget. Outbreaks are eligible if
 Random sampling of outbreaks from all or subsets of outbreaks
 ```{r}
 # Default outbreak onset-triggered vaccination results (delay = 2, VC=0.75)
-cea_files <- c("outputs/paper/cea_onset_trigger_20251031.rds")
+cea_files <- c("outputs/paper/cea_onset_trigger_20260612.rds")
 cea <- map_dfr(cea_files, read_rds) %>% filter(vacc_cov == 0.75)
 
 outbk_dat <- outbreaks_filtered |>
@@ -1175,7 +1175,7 @@ ocv_doses  <- c(1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6)
 ocv_doses  <- c(1e5)
 
 cea_files <- 
-  c("outputs/paper/cea_onset_trigger_20251031.rds")
+  c("outputs/paper/cea_onset_trigger_20260612.rds")
 
 cea_75 <- 
   map_dfr(cea_files, read_rds) %>% 
@@ -1269,7 +1269,7 @@ plan(multisession)  # Windows-safe; on Linux/macOS you may use plan(multicore)
 
 priorities <- c("AR", "dur", "size")
 ocv_doses  <- c(1e5, 2e5, 5e5, 1e6, 2e6, 5e6, 10e6, 20e6, 50e6, 100e6, 200e6)
-cea_files  <- c("outputs/paper/cea_onset_trigger_20251031.rds")
+cea_files  <- c("outputs/paper/cea_onset_trigger_20260612.rds")
 
 cea_75 <- map_dfr(cea_files, readr::read_rds) %>% filter(vacc_cov == 0.75)
 
