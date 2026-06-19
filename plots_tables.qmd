@@ -233,8 +233,8 @@ cea_ct <- read_rds("outputs/paper/cea_case_trigger_20260612.rds")
 cea_ct_ori <- cea_ct %>% filter(ori_occurred == TRUE)
 # outbreak subsets for given number of OCVs
 subset_files <- c(
-  "outputs/paper/cea_summary_subsets_vw_1_20251031.rds",
-  "outputs/paper/cea_summary_subsets_vw_9_20251031.rds"
+  "outputs/paper/cea_summary_subsets_vw_1_20260619.rds",
+  "outputs/paper/cea_summary_subsets_vw_9_20260619.rds"
 )
 cea_subsets <- map_dfr(subset_files, read_rds)
 ```
@@ -4142,39 +4142,65 @@ knitr::kable(
 
 # ---------------------------------------------------------------------------
 # 4. Figure S8: forest of fold-change vs the m = 1 reference (log scale).
-#    Counts scale by m; cost per infection scales by 1/m. Reference line at 1.
+#    Counts scale by m; cost per infection scales by 1/m. The two impact
+#    metrics share the SAME fold-change (both = m) and are shown as one row.
 # ---------------------------------------------------------------------------
-fold_rows <- function(label, kind) {
-  do.call(rbind, lapply(names(m_draws), function(s) {
-    fold <- if (kind == "cost") 1 / m_draws[[s]] else m_draws[[s]]
-    q <- band(fold)
-    data.frame(Output = label, scenario = s,
-               mid = q[1], lo = q[2], hi = q[3], row.names = NULL)
-  }))
-}
-fold_df <- rbind(
-  fold_rows("Symptomatic infections averted", "count"),
-  fold_rows("Infections averted / 1,000 doses", "count"),
-  fold_rows("Cost per symptomatic infection averted", "cost"))
-fold_df$Output <- factor(fold_df$Output, levels = rev(unique(fold_df$Output)))
+lab_impact <- "Symptomatic infections averted\n(and per 1,000 doses)"
+lab_cost   <- "Cost per symptomatic\ninfection averted"
 
-p_forest <- ggplot(fold_df,
-                   aes(x = mid, y = Output, colour = scenario)) +
-  geom_vline(xintercept = 1, linetype = 2, colour = "grey50") +
+# Impact fold-change = m; the two impact metrics are identical -> one row.
+fold_impact <- do.call(rbind, lapply(names(m_draws), function(s) {
+  q <- band(m_draws[[s]])
+  data.frame(Output = lab_impact, scenario = s,
+             mid = q[1], lo = q[2], hi = q[3], row.names = NULL)
+}))
+# Cost per infection averted scales as 1/m: the EXACT reciprocal of the impact
+# fold-change (invert the median; swap-and-invert the CI bounds).
+fold_cost <- data.frame(Output = lab_cost, scenario = fold_impact$scenario,
+                        mid = 1 / fold_impact$mid,
+                        lo  = 1 / fold_impact$hi,
+                        hi  = 1 / fold_impact$lo, row.names = NULL)
+fold_df <- rbind(fold_impact, fold_cost)
+# cost as the bottom row, impact above it (first factor level = bottom)
+fold_df$Output <- factor(fold_df$Output, levels = c(lab_cost, lab_impact))
+
+# (6) Sanity check: cost fold-change is exactly the reciprocal of the impact one
+stopifnot(all(abs(fold_cost$mid - 1 / fold_impact$mid) < 1e-12))
+cat(sprintf("reciprocal check: impact %.2f / %.2f  ->  cost %.2f / %.2f\n",
+            fold_impact$mid[1], fold_impact$mid[2],
+            fold_cost$mid[1], fold_cost$mid[2]))
+
+# Colourblind-safe Okabe-Ito palette
+okabe_ito <- c(`cholera-relevant` = "#009E73", `general-diarrhea` = "#E69F00")
+
+p_forest <- ggplot(fold_df, aes(x = mid, y = Output, colour = scenario)) +
+  geom_vline(xintercept = 1, linetype = "dashed", colour = "grey50") +
   geom_pointrange(aes(xmin = lo, xmax = hi),
                   position = position_dodge(width = 0.5)) +
-  scale_x_log10() +
-  scale_colour_manual(values = c(`cholera-relevant` = "#1b9e77",
-                                 `general-diarrhea` = "#d95f02")) +
-  labs(x = "Fold-change vs. observed (m = 1) reference",
-       y = NULL, colour = "Care-seeking κ") +
-  theme_tight() +
-  theme(legend.position = "bottom")
+  geom_text(aes(label = sprintf("%.2f", mid)),
+            position = position_dodge(width = 0.5),
+            vjust = -0.9, size = 3, show.legend = FALSE) +
+  scale_x_log10(breaks = c(0.3, 0.5, 1, 2, 3),
+                limits = c(0.3, 3),
+                expand = expansion(mult = c(0.03, 0.03))) +
+  scale_y_discrete(expand = expansion(add = c(0.6, 0.6))) +
+  scale_colour_manual(values = okabe_ito,
+                      name = "Care-seeking (κ) scenario") +
+  guides(colour = guide_legend(title.position = "top", title.hjust = 0)) +
+  labs(x = "Fold-change vs. observed (m = 1) reference", y = NULL) +
+  theme_light() +                       # project-standard theme (white panel,
+  theme_tight() +                       # no grey background) + tight legend
+  theme(legend.position = "top",        # smaller text so it fits 120 mm wide
+        text = element_text(size = 9),
+        legend.text = element_text(size = 8))
 print(p_forest)
 
 if (save_plot) {
-  ggsave(paste0("plots/figS8_rho_kappa_band_", tstamp(), ".pdf"),
-         p_forest, width = 7, height = 3.2, device = cairo_pdf)  # cairo: renders κ
+  base <- paste0("plots/figS8_rho_kappa_band_", tstamp())
+  ggsave(paste0(base, ".pdf"), p_forest, width = 120, height = 74,
+         units = "mm", device = cairo_pdf)            # vector, renders κ
+  ggsave(paste0(base, ".png"), p_forest, width = 120, height = 74,
+         units = "mm", dpi = 300, type = "cairo")      # 300-dpi raster, κ-safe
 }
 ```
 
